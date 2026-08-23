@@ -683,7 +683,7 @@ class ApiClient {
     return await res.json();
   }
 
-  async testProxmoxConnection(payload: { host_ip: string; port: number; token_id: string; token_secret: string }) {
+  async testProxmoxConnection(payload: { host_ip: string; port: number; token_id: string; token_secret: string; ssl_fingerprint?: string }) {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/test`, {
       method: 'POST',
       headers: this.getHeaders(),

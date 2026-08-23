@@ -1,6 +1,7 @@
 import os from 'os';
 import https from 'https';
 import { dbService } from '../db/database.js';
+import { proxmoxFetch } from './proxmoxHttp.js';
 
 
 
@@ -13,10 +14,11 @@ export interface ProxmoxApiConfig {
 
 
 // Fetch the real Proxmox VE version from the host.
-async function fetchVersion(cleanHost: string, port: any, tokenId: string, secret: string): Promise<string> {
+async function fetchVersion(cleanHost: string, port: any, tokenId: string, secret: string, sslFingerprint?: string | null): Promise<string> {
   try {
-    const res = await fetch(`https://${cleanHost}:${port}/api2/json/version`, {
+    const res = await proxmoxFetch(`https://${cleanHost}:${port}/api2/json/version`, {
       headers: { 'Authorization': `PVEAPIToken=${tokenId}=${secret}` },
+      sslFingerprint,
     });
     if (res.ok) {
       const json = await res.json();
@@ -115,11 +117,12 @@ export class ProxmoxApiService {
       try {
         const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
         const url = `https://${cleanHost}:${conn.port}/api2/json/nodes`;
-        const res = await fetch(url, {
+const res = await proxmoxFetch(url, {
           method: 'GET',
           headers: {
             'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}`
-          }
+          },
+          sslFingerprint: conn.ssl_fingerprint,
         });
 
         if (!res.ok) {
@@ -147,8 +150,9 @@ export class ProxmoxApiService {
           let rootTotal = 0;
           let cpuCores = 0;
           try {
-            const statusRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/status`, {
-              headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const statusRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/status`, {
+              headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+              sslFingerprint: conn.ssl_fingerprint,
             });
             if (statusRes.ok) {
               const statusJson = await statusRes.json();
@@ -173,8 +177,9 @@ export class ProxmoxApiService {
           let storageStores: { name: string; type: string; usedGb: number; totalGb: number }[] = [];
           let storesSeen = 0;
           try {
-            const stRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/storage`, {
-              headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/storage`, {
+              headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+              sslFingerprint: conn.ssl_fingerprint,
             });
             if (stRes.ok) {
               const stJson = await stRes.json();
@@ -217,7 +222,7 @@ export class ProxmoxApiService {
             rootUsedGb: Math.round(rootUsed / 1073741824),
             rootTotalGb: Math.round(rootTotal / 1073741824),
             uptimeSeconds: node.uptime || 0,
-            platformVersion: await fetchVersion(cleanHost, conn.port, conn.token_id, conn.token_secret),
+            platformVersion: await fetchVersion(cleanHost, conn.port, conn.token_id, conn.token_secret, conn.ssl_fingerprint),
             zfsHealth: storageStores.length > 0 ? `${storageStores.length} pool(s) active, ${storageTotalGb} GB total` : 'Status unavailable',
             storagePools: storageTotalGb > 0 ? storageStores : [],
             simulated: false,
@@ -280,8 +285,9 @@ export class ProxmoxApiService {
     for (const conn of conns) {
       try {
         const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-        const res = await fetch(`https://${cleanHost}:${conn.port}/api2/json/cluster/resources?type=vm`, {
-          headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/cluster/resources?type=vm`, {
+          headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+          sslFingerprint: conn.ssl_fingerprint,
         });
         if (res.ok) {
           const json = await res.json();
@@ -295,23 +301,26 @@ export class ProxmoxApiService {
       if (allPveVMs.length === 0) {
         try {
           const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-          const nodesRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes`, {
-            headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const nodesRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes`, {
+            headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+            sslFingerprint: conn.ssl_fingerprint,
           });
           if (nodesRes.ok) {
             const nodesJson = await nodesRes.json();
             for (const node of (nodesJson.data || [])) {
               // Fetch QEMU
-              const qemuRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/qemu`, {
-                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/qemu`, {
+                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                sslFingerprint: conn.ssl_fingerprint,
               });
               if (qemuRes.ok) {
                 const qemuJson = await qemuRes.json();
                 allPveVMs = allPveVMs.concat((qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node })));
               }
               // Fetch LXC
-              const lxcRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/lxc`, {
-                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/lxc`, {
+                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                sslFingerprint: conn.ssl_fingerprint,
               });
               if (lxcRes.ok) {
                 const lxcJson = await lxcRes.json();
@@ -336,8 +345,9 @@ export class ProxmoxApiService {
     const osByVmid: Record<number, string> = {};
     for (const p of vmIdsNeedingOs) {
       try {
-        const cfgRes = await fetch(`https://${pveHost}:${conns[0].port || 8006}/api2/json/nodes/${p.node}/${p.type}/${p.vmid}/config`, {
+const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/api2/json/nodes/${p.node}/${p.type}/${p.vmid}/config`, {
           headers: { 'Authorization': `PVEAPIToken=${pveToken}` },
+          sslFingerprint: conns[0].ssl_fingerprint,
         });
         if (cfgRes.ok) {
           const cfgJson = await cfgRes.json();
@@ -419,9 +429,10 @@ export class ProxmoxApiService {
     
     const enrichedVMs = await Promise.all(vms.map(async (vm) => {
       try {
-        const res = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/status/current`, {
+const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/status/current`, {
           method: 'GET',
-          headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+          headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+          sslFingerprint: conn.ssl_fingerprint,
         });
         
         if (res.ok) {
@@ -435,8 +446,9 @@ export class ProxmoxApiService {
             try {
               // 1. Try Guest Agent (QEMU only)
               if (vm.type === 'qemu' && json.data.status === 'running') {
-                const agentRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/qemu/${vm.vmid}/agent/network-get-interfaces`, {
-                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const agentRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/qemu/${vm.vmid}/agent/network-get-interfaces`, {
+                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                  sslFingerprint: conn.ssl_fingerprint,
                 });
                 if (agentRes.ok) {
                   const agentJson = await agentRes.json();
@@ -456,8 +468,9 @@ export class ProxmoxApiService {
 
               // 2. Fallback to Cloud-Init or LXC Network Config
               if (liveIp === vm.ipAddress || !liveIp) {
-                const confRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/config`, {
-                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/config`, {
+                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                  sslFingerprint: conn.ssl_fingerprint,
                 });
                 if (confRes.ok) {
                   const confJson = await confRes.json();
@@ -597,9 +610,10 @@ export class ProxmoxApiService {
           if (vm.status === 'stopped' || vm.isSuspended) continue;
           
           try {
-            const res = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/status/current`, {
+const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vm.vmid}/status/current`, {
               method: 'GET',
-              headers: tokenHeader
+              headers: tokenHeader,
+              sslFingerprint: conn.ssl_fingerprint,
             });
             if (res.ok) {
               const json = await res.json();

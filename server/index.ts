@@ -12,47 +12,34 @@ import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { checkDbHealth } from './services/databaseHealth.js';
+import { createProxmoxWebSocketTlsOptions, proxmoxFetch } from './services/proxmoxHttp.js';
 import { resolveSessionUser } from './middleware.js';
-import https from 'https';
 
 let ticketCache: { cookie: string, csrf: string, expiresAt: number } | null = null;
 
-async function getProxmoxTicket(host: string, port: number, username: string, password: string): Promise<any> {
+async function getProxmoxTicket(host: string, port: number, username: string, password: string, sslFingerprint?: string | null): Promise<any> {
   if (ticketCache && Date.now() < ticketCache.expiresAt) return ticketCache;
-  
-  return new Promise((resolve) => {
-    const postData = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    const req = https.request({
-      hostname: host,
-      port: port,
-      path: '/api2/json/access/ticket',
+
+  const postData = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+  try {
+    const response = await proxmoxFetch(`https://${host}:${port}/api2/json/access/ticket`, {
       method: 'POST',
-      rejectUnauthorized: true,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': postData.length
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', d => data += d);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.data) {
-            ticketCache = {
-              cookie: `PVEAuthCookie=${json.data.ticket}`,
-              csrf: json.data.CSRFPreventionToken,
-              expiresAt: Date.now() + 1000 * 60 * 60 // 1 hour cache
-            };
-            resolve(ticketCache);
-          } else resolve(null);
-        } catch (e) { resolve(null); }
-      });
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: postData,
+      sslFingerprint,
     });
-    req.on('error', () => resolve(null));
-    req.write(postData);
-    req.end();
-  });
+    if (!response.ok) return null;
+    const json = await response.json() as { data?: { ticket?: string; CSRFPreventionToken?: string } };
+    if (!json.data?.ticket) return null;
+    ticketCache = {
+      cookie: `PVEAuthCookie=${json.data.ticket}`,
+      csrf: json.data.CSRFPreventionToken || '',
+      expiresAt: Date.now() + 1000 * 60 * 60,
+    };
+    return ticketCache;
+  } catch (_error) {
+    return null;
+  }
 }
 
 const app = express();
@@ -107,7 +94,7 @@ const proxmoxProxy = createProxyMiddleware({
         const port = c.port || 8006;
         
         if (c.username && c.password) {
-          const ticket = await getProxmoxTicket(cleanHost, port, c.username, c.password);
+          const ticket = await getProxmoxTicket(cleanHost, port, c.username, c.password, c.ssl_fingerprint);
           if (ticket) {
             req.pveCookie = ticket.cookie;
             req.pveCsrf = ticket.csrf;
@@ -212,9 +199,10 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         try {
           const cleanH = cachedConn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
           const pP = cachedConn.port || 8006;
-          const resInfo = await fetch(`https://${cleanH}:${pP}/api2/json/cluster/resources?type=vm`, {
+          const resInfo = await proxmoxFetch(`https://${cleanH}:${pP}/api2/json/cluster/resources?type=vm`, {
             method: 'GET',
-            headers: { 'Authorization': req.proxmoxAuth }
+            headers: { 'Authorization': req.proxmoxAuth },
+            sslFingerprint: cachedConn.ssl_fingerprint,
           });
           if (resInfo.ok) {
             const jsonInfo = await resInfo.json();
@@ -243,7 +231,7 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         let upstream: WebSocket | null = null;
         try {
           upstream = new WebSocket(`wss://${cleanHost}:${pvePort}${upstreamPath}`, {
-            rejectUnauthorized: true,
+            ...createProxmoxWebSocketTlsOptions(cachedConn.ssl_fingerprint),
             headers: { Authorization: req.proxmoxAuth }
           });
         } catch (e) {

@@ -1,4 +1,5 @@
 import { dbService } from '../db/database.js';
+import { proxmoxFetch } from './proxmoxHttp.js';
 
 const SYNC_INTERVAL_MS = 15_000;
 const DEFAULT_OWNER_EMAIL = 'unassigned@votioncloud.org';
@@ -9,6 +10,7 @@ type ProxmoxConnection = {
   port: number;
   token_id: string;
   token_secret: string;
+  ssl_fingerprint?: string | null;
 };
 
 export type ProxmoxVmResource = {
@@ -80,10 +82,11 @@ export class ProxmoxSyncWorker {
       throw new Error('Connection is missing host or API token configuration');
     }
 
-    const response = await fetch(`https://${host}:${port}/api2/json/cluster/resources?type=vm`, {
+    const response = await proxmoxFetch(`https://${host}:${port}/api2/json/cluster/resources?type=vm`, {
       headers: {
         Authorization: `PVEAPIToken=${connection.token_id}=${connection.token_secret}`,
       },
+      sslFingerprint: connection.ssl_fingerprint,
     });
     if (!response.ok) {
       throw new Error(`cluster/resources returned HTTP ${response.status}`);

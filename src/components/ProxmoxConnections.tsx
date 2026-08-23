@@ -128,6 +128,7 @@ export const ProxmoxConnections: React.FC = () => {
         port: newPort,
         token_id: newTokenId,
         token_secret: newTokenSecret,
+        ssl_fingerprint: newSslFingerprint,
       });
       if (!testResult?.success || !testResult?.reachable) {
         showToast(`⚠️ ${testResult?.error || testResult?.reason || 'Connection test failed — check host, port, and API token'}`);
@@ -345,7 +346,8 @@ export const ProxmoxConnections: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint (Optional)</label>
+                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint</label>
+                <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
                 <input 
                   type="text" 
                   value={newSslFingerprint}
@@ -442,7 +444,8 @@ export const ProxmoxConnections: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint (Optional)</label>
+                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint</label>
+                <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
                 <input
                   type="text"
                   value={editSslFingerprint}

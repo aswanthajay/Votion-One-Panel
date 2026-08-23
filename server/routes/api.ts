@@ -12,6 +12,7 @@ import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
+import { proxmoxFetch } from '../services/proxmoxHttp.js';
 import { createSessionToken, requireAdmin, requireAuth } from '../middleware.js';
 
 export const apiRouter = Router();
@@ -618,15 +619,16 @@ apiRouter.post('/admin/proxmox/test', async (req, res) => {
   let cleanHost = '';
   let port = 8006;
   try {
-    const { host_ip, port: bodyPort, token_id, token_secret } = req.body;
+    const { host_ip, port: bodyPort, token_id, token_secret, ssl_fingerprint } = req.body;
     if (!host_ip || !bodyPort || !token_id || !token_secret) {
       return res.status(400).json({ success: false, error: 'Host, port, token ID and token secret are required' });
     }
     cleanHost = String(host_ip).replace(/^https?:\/\//, '').replace(/\/$/, '');
     port = Number(bodyPort) || 8006;
     // Try the real Proxmox cluster API endpoint (no Sys.Audit privilege needed for cluster resources)
-    const pveRes = await fetch(`https://${cleanHost}:${port}/api2/json/cluster/status`, {
+    const pveRes = await proxmoxFetch(`https://${cleanHost}:${port}/api2/json/cluster/status`, {
       headers: { 'Authorization': `PVEAPIToken=${token_id}=${token_secret}` },
+      sslFingerprint: ssl_fingerprint,
     });
     if (pveRes.ok) {
       const json = await pveRes.json();
@@ -654,13 +656,18 @@ apiRouter.post('/admin/proxmox/test', async (req, res) => {
     });
   } catch (err: any) {
     const msg = String(err.message || '');
-    const isNetwork = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|CERT_HAS_EXPIRED|UNABLE_TO_VERIFY/i.test(msg);
+    const code = String(err.code || err.cause?.code || '');
+    const detail = `${msg} ${code}`;
+    const isTls = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|TLS|FINGERPRINT/i.test(detail);
+    const isNetwork = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EAI_AGAIN/i.test(detail);
     res.json({
       success: false,
       reachable: false,
-      error: isNetwork
-        ? `Host ${cleanHost}:${port} could not be reached from this server over the network (${msg}). Verify the host IP is reachable from this machine, the port is correct (default 8006), and no firewall is blocking the connection.`
-        : (err.message || 'Connection test failed'),
+      error: isTls
+        ? `Host ${cleanHost}:${port} is reachable, but its TLS certificate could not be verified. Enter the Proxmox SHA-256 SSL fingerprint, then test again.`
+        : isNetwork
+          ? `Host ${cleanHost}:${port} could not be reached from this server over the network. Verify the host IP, port 8006, and firewall rules.`
+          : (err.message || 'Connection test failed'),
     });
   }
 });

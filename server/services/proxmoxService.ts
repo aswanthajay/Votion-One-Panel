@@ -1,5 +1,6 @@
 import os from 'os';
 import { dbService } from '../db/database.js';
+import { proxmoxFetch } from './proxmoxHttp.js';
 
 export interface ProxmoxConfig {
   hostIp: string;
@@ -69,11 +70,12 @@ export class ProxmoxService {
     const operation = action === 'shutdown' ? 'stop' : action;
     const host = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
     const port = Number(connection.port) || 8006;
-    const response = await fetch(`https://${host}:${port}/api2/json/nodes/${encodeURIComponent(targetNode)}/${vmType}/${vmid}/status/${operation}`, {
+    const response = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${encodeURIComponent(targetNode)}/${vmType}/${vmid}/status/${operation}`, {
       method: 'POST',
       headers: {
         Authorization: `PVEAPIToken=${connection.token_id}=${connection.token_secret}`,
       },
+      sslFingerprint: connection.ssl_fingerprint,
     });
 
     const payload = await response.json().catch(() => ({})) as { data?: string; errors?: unknown; message?: string };
