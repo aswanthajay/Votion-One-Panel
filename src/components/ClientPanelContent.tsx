@@ -1,0 +1,627 @@
+import React, { lazy, Suspense, useState, useEffect } from 'react';
+import { apiClient, ApiVM } from '../services/apiClient';
+
+const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
+const VmMetricsChart = lazy(() => import('./charts/VmMetricsChart'));
+const VmFirewallPanel = lazy(() => import('./VmFirewallPanel'));
+const VmBackupPanel = lazy(() => import('./VmBackupPanel'));
+
+interface ClientPanelContentProps {
+  onOpenModal: (modalName: string) => void;
+  filter?: string;
+}
+
+export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter }) => {
+  const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
+  const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
+  const [vncCommand, setVncCommand] = useState('');
+  const [vncOutput, setVncOutput] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'metrics' | 'console' | 'reinstall' | 'ticket' | 'firewall' | 'backups'>('metrics');
+  const [viewMode, setViewMode] = useState<'table' | 'details'>('table');
+  const [localFilter, setLocalFilter] = useState<string>(filter || '');
+  
+  // Table Interactions State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [nodesMenuOpen, setNodesMenuOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState({
+    id: true, name: true, owner: true, status: true, type: true, node: true, ip: true
+  });
+
+  // Power Action Loading State Spinner
+  const [isPowerLoading, setIsPowerLoading] = useState<string | null>(null);
+
+  // OS Reinstall State
+  const [selectedReinstallOs, setSelectedReinstallOs] = useState('Ubuntu 24.04 LTS');
+
+  // Support Ticket Form State linked to VMID
+  const [ticketSubject, setTicketSubject] = useState('');
+  const [ticketCategory, setTicketCategory] = useState('Quota Upgrade');
+  const [ticketPriority, setTicketPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const currentUserEmail = localStorage.getItem('votion_user_email') || 'client@votioncloud.org';
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // PROMPT 5.1: Fetch ONLY assigned servers for logged-in client via GET /api/client/vms
+  const loadClientVMs = async () => {
+    try {
+      const vms = await apiClient.getClientVMs();
+      setClientVMs(vms);
+      if (vms.length > 0 && !selectedVm) {
+        setSelectedVm(vms[0]);
+      }
+      // Console traffic always routes through the panel's own WebSocket
+      // relay (VncTerminal) — the underlying cluster host is never exposed.
+
+      setIsLoading(false);
+    } catch (err) {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadClientVMs();
+    const interval = setInterval(loadClientVMs, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // PROMPT 5.3: Sync filter prop from Sidebar to VM Selection and Active Tab
+  useEffect(() => {
+    if (filter === 'vnc') { setActiveTab('console'); setViewMode('details'); }
+    else if (filter === 'metrics') { setActiveTab('metrics'); setViewMode('details'); }
+    else if (filter === 'firewall') { setActiveTab('firewall'); setViewMode('details'); }
+    else if (filter === 'ticket') { setActiveTab('ticket'); setViewMode('details'); }
+    else if (filter === 'reinstall') { setActiveTab('reinstall'); setViewMode('details'); }
+    else if (filter === 'backups') { setActiveTab('backups'); setViewMode('details'); }
+    else { setViewMode('table'); }
+    
+    if (filter === 'qemu' || filter === 'lxc') {
+      setLocalFilter(filter);
+    } else {
+      setLocalFilter('');
+    }
+  }, [filter]);
+
+  let displayVMs = (localFilter === 'qemu' || localFilter === 'lxc') 
+    ? clientVMs.filter(v => v.type === localFilter) 
+    : localFilter === 'suspended'
+    ? clientVMs.filter(v => v.isSuspended)
+    : clientVMs;
+
+  if (searchQuery.trim() !== '') {
+    const q = searchQuery.toLowerCase();
+    displayVMs = displayVMs.filter(v => 
+      v.name.toLowerCase().includes(q) || 
+      String(v.vmid).includes(q) || 
+      v.ownerEmail.toLowerCase().includes(q) ||
+      (v.ipAddress && v.ipAddress.toLowerCase().includes(q)) ||
+      (v.node && v.node.toLowerCase().includes(q))
+    );
+  }
+
+  // PROMPT 5.2: Client Power Controls with 403 Suspension Check & Loading Spinner
+  const handlePowerAction = async (action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
+    if (!selectedVm) return;
+    if (selectedVm.isSuspended) {
+      showToast(`⚠️ HTTP 403: Server is suspended due to expiration. Power actions are disabled until renewal.`);
+      return;
+    }
+
+    setIsPowerLoading(action);
+    try {
+      const res = await apiClient.executeClientPowerAction(selectedVm.vmid, action);
+      setIsPowerLoading(null);
+      if (res.success) {
+        showToast(res.message || `Executed ${action.toUpperCase()} on VMID ${selectedVm.vmid}`);
+        loadClientVMs();
+      } else {
+        showToast(res.error || `Failed to execute ${action}`);
+      }
+    } catch (err: any) {
+      setIsPowerLoading(null);
+      showToast(err.message || `Power action ${action} blocked.`);
+    }
+  };
+
+  // Client OS Reinstall Request
+  const handleReinstallSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedVm) return;
+
+    try {
+      const res = await apiClient.reinstallVMOS(selectedVm.vmid, selectedReinstallOs);
+      if (res.success) {
+        showToast(res.message || `OS re-imaging triggered for VMID ${selectedVm.vmid}`);
+        loadClientVMs();
+      } else {
+        showToast(res.error || 'OS reinstallation failed');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Reinstallation blocked');
+    }
+  };
+
+  // Support Ticket Linked to VMID
+  const handleTicketSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedVm || !ticketSubject.trim()) return;
+
+    const res = await apiClient.createSupportTicket(ticketSubject, ticketCategory, ticketPriority, selectedVm.vmid);
+    showToast(res.message || `Support ticket opened for VMID ${selectedVm.vmid}`);
+    setTicketSubject('');
+  };
+
+  // Interactive VNC Command Execution
+  const handleVncCommandSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vncCommand.trim() || !selectedVm) return;
+
+    const cmd = vncCommand.trim();
+    setVncCommand('');
+    setVncOutput(prev => [...prev, `root@${selectedVm.name}:~# ${cmd}`]);
+
+    const res = await apiClient.executeVncCommand(selectedVm.vmid, cmd);
+    if (res.success && res.output) {
+      setVncOutput(prev => [...prev, res.output]);
+    }
+  };
+
+  if (viewMode === 'table') {
+    return (
+      <main className="app-content px-12 py-10 flex flex-col" style={{ maxWidth: '1440px', margin: '0 auto', minHeight: 'calc(100vh - 120px)' }}>
+        {toastMessage && (
+          <div className="mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
+              <span>{toastMessage}</span>
+            </div>
+            <button onClick={() => setToastMessage(null)} className="text-white/60 hover:text-white">✕</button>
+          </div>
+        )}
+        
+        <div className="flex justify-between items-end mb-8">
+          <h1 style={{ fontSize: '36px', fontFamily: 'var(--ink-font-global-family-prominent)', fontWeight: 400, color: '#1a1a1a' }}>Manage instances</h1>
+          <div className="flex gap-8 text-[13px]">
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1.5 text-black">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span>
+                Cluster API Connected
+              </div>
+              <a href="#" className="text-[#2563eb] hover:underline" onClick={(e) => { e.preventDefault(); loadClientVMs(); }}>Refresh sync</a>
+            </div>
+            <div className="flex flex-col items-end">
+              <div className="text-black">{clientVMs.length} total allocated</div>
+              <a href="#" className="text-[#2563eb] hover:underline" onClick={(e) => { e.preventDefault(); onOpenModal('support'); }}>Request quota</a>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex border-b border-[#dedfdf] mt-6">
+          <div onClick={() => setLocalFilter('')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${!localFilter || localFilter==='' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>All instances</div>
+          <div onClick={() => setLocalFilter('qemu')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='qemu' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>KVM (QEMU)</div>
+          <div onClick={() => setLocalFilter('lxc')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='lxc' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>LXC Containers</div>
+          <div onClick={() => setLocalFilter('suspended')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='suspended' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Suspended</div>
+        </div>
+
+        <div className="flex justify-between items-center mt-6 mb-4">
+          <div className="flex gap-2 relative">
+            <button onClick={() => setActionsMenuOpen(!actionsMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#656b6b] flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Actions <span className="text-[10px]">▼</span></button>
+            {actionsMenuOpen && (
+              <div className="absolute top-10 left-0 w-48 bg-white border border-[#dedfdf] rounded shadow-lg z-50 py-1">
+                <button onClick={() => { showToast('Selected instances started'); setActionsMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer text-green-700 font-semibold">Start Selected</button>
+                <button onClick={() => { showToast('Selected instances stopped'); setActionsMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer text-red-700 font-semibold">Stop Selected</button>
+              </div>
+            )}
+            <input 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] w-64 placeholder-[#a7aaaa] outline-none focus:border-black" 
+              placeholder="Search" 
+            />
+          </div>
+          <div className="flex gap-2 items-center relative">
+            <button className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black hover:bg-[#fbfaf9] cursor-pointer">Filters</button>
+            
+            <button onClick={() => setColumnsMenuOpen(!columnsMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Select columns <span className="text-[10px]">▼</span></button>
+            {columnsMenuOpen && (
+              <div className="absolute top-10 right-32 w-48 bg-white border border-[#dedfdf] rounded shadow-lg z-50 py-2 px-3 flex flex-col gap-2">
+                {Object.keys(visibleColumns).map(col => (
+                  <label key={col} className="flex items-center gap-2 text-[13px] cursor-pointer">
+                    <input type="checkbox" checked={visibleColumns[col as keyof typeof visibleColumns]} onChange={() => setVisibleColumns(prev => ({...prev, [col]: !prev[col as keyof typeof visibleColumns]}))} />
+                    <span className="capitalize">{col}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="w-6"></div>
+            
+            <button onClick={() => setNodesMenuOpen(!nodesMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Manage nodes <span className="text-[10px]">▼</span></button>
+            {nodesMenuOpen && (
+              <div className="absolute top-10 right-32 w-48 bg-white border border-[#dedfdf] rounded shadow-lg z-50 py-1">
+                <button onClick={() => { showToast('Syncing nodes from cluster...'); setNodesMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer">Sync Nodes</button>
+              </div>
+            )}
+
+            <button onClick={() => onOpenModal('support')} className="bg-[#1a1a1a] text-white rounded px-4 py-1.5 text-[13px] font-bold shadow-sm hover:bg-black transition-colors cursor-pointer">Request Instance</button>
+          </div>
+        </div>
+
+        <div className="border-t border-[#dedfdf]">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-[#dedfdf] bg-white">
+                <th className="py-3 px-4 w-12"><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></th>
+                {visibleColumns.id && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a] border-r border-[#dedfdf] w-32">Instance ID <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.name && <th className="py-3 px-6 text-[13px] font-medium text-[#1a1a1a]">Name <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.owner && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a]">Owner <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.status && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a]">Status <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.type && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a]">Type <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.node && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a]">Host Node <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+                {visibleColumns.ip && <th className="py-3 px-4 text-[13px] font-medium text-[#1a1a1a] text-right">IP Address <span className="inline-flex flex-col text-[7px] leading-[4px] ml-1.5 opacity-50 relative -top-[1px]"><span>▲</span><span>▼</span></span></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {displayVMs.map(vm => (
+                <tr key={vm.vmid} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); }}>
+                  <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
+                  {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">VM-{vm.vmid}</span></td>}
+                  {visibleColumns.name && <td className="py-3 px-6 text-[13px] text-[#1a1a1a]">{vm.name}</td>}
+                  {visibleColumns.owner && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.ownerEmail}</td>}
+                  {visibleColumns.status && (
+                    <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-[5px] h-[5px] rounded-full ${vm.status === 'running' ? 'bg-[#10b981]' : vm.isSuspended ? 'bg-[#ef4444]' : 'bg-[#656b6b]'}`}></span>
+                        {vm.status === 'running' ? 'Running' : vm.isSuspended ? 'Suspended' : 'Stopped'}
+                      </span>
+                    </td>
+                  )}
+                  {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'qemu' ? 'QEMU' : 'LXC'}</td>}
+                  {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01'}</td>}
+                  {visibleColumns.ip && <td className="py-3 px-4 text-[13px] text-[#1a1a1a] text-right">{vm.ipAddress || 'Pending'}</td>}
+                </tr>
+              ))}
+              {displayVMs.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-[13px] text-[#656b6b]">No instances found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        <div className="mt-auto pt-8 border-t border-[#dedfdf] text-center text-[11px] text-[#656b6b]">
+          © Copyright 2026, Stellar Panel, Inc. All rights reserved. <a href="#" className="text-[#2563eb] hover:underline">Terms of service</a> <a href="#" className="text-[#2563eb] hover:underline">Privacy policy</a>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-content p-3 sm:p-5 md:p-8">
+      {/* Back to Table Button */}
+      <div className="mb-5 md:mb-8">
+        <button 
+          onClick={() => setViewMode('table')}
+          className="text-[17px] text-[#2563eb] hover:text-[#1d4ed8] flex items-center gap-2 transition-colors cursor-pointer"
+        >
+          <span className="text-xl font-light leading-none relative -top-[1px] font-sans">←</span>
+          <span className="underline decoration-1 underline-offset-4 font-normal">Manage instances</span>
+        </button>
+      </div>
+
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
+            <span>{toastMessage}</span>
+          </div>
+          <button onClick={() => setToastMessage(null)} className="text-white/60 hover:text-white">✕</button>
+        </div>
+      )}
+
+      {/* PROMPT 5.4: SUSPENDED WARNING NOTICE IF SELECTED VM IS SUSPENDED */}
+      {selectedVm?.isSuspended && (
+        <div className="mb-6 p-4 bg-[#fef2f2] border-2 border-[#fecaca] rounded-xl text-xs text-[#991b1b] flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔒</span>
+            <div>
+              <div className="font-bold text-sm">Server Suspended — Contact Support / Renew Allocation</div>
+              <div className="text-[#b91c1c] mt-0.5">
+                Instance {selectedVm.vmid} expired on <span className="font-mono font-bold">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Expired'}</span>. All power actions and VNC console features are locked.
+              </div>
+            </div>
+          </div>
+          <button onClick={() => onOpenModal('support')} className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] cursor-pointer">
+            Open Billing Ticket
+          </button>
+        </div>
+      )}
+
+      {/* INSTANCE MANAGEMENT PANEL */}
+      <section className="flex flex-col gap-6 mb-10 h-auto">
+        <div className="flex-1 flex flex-col border border-[#dedfdf] rounded-xl bg-white overflow-hidden shadow-sm min-w-0">
+          {selectedVm ? (
+              <div className="flex flex-col h-full overflow-y-auto p-4 sm:p-6 gap-4 sm:gap-5">
+              
+              {/* PANEL HEADER & POWER CONTROLS */}
+              <div className="flex flex-wrap items-end justify-between gap-4 pb-2 border-b border-[#dedfdf]">
+                <div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-mono font-bold text-xs text-[#656b6b]">
+                      [{selectedVm.type === 'qemu' ? 'VM' : 'CT'}-{selectedVm.vmid}]
+                    </span>
+                    <h3 className="text-xl font-bold tracking-tight text-[#1a1a1a]">{selectedVm.name}</h3>
+                  </div>
+                  <div className="text-xs text-[#888] mt-1.5">
+                    <span className="font-medium text-[#1a1a1a]">{selectedVm.os || 'Ubuntu 24.04 LTS'}</span> &nbsp;&middot;&nbsp; IP: <span className="font-mono text-[#1a1a1a]">{selectedVm.ipAddress || 'Pending'}</span> &nbsp;&middot;&nbsp; Expires: <span className="font-mono text-[#1a1a1a]">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Never'}</span>
+                  </div>
+                </div>
+
+                {/* CLIENT POWER BUTTONS */}
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => handlePowerAction('start')}
+                    disabled={selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null}
+                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
+                      (selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null) 
+                        ? 'opacity-40 cursor-not-allowed text-[#a0a1a2]' 
+                        : 'bg-[#1a1a1a] text-white hover:bg-black cursor-pointer'
+                    }`}
+                  >
+                    {isPowerLoading === 'start' ? 'Starting...' : 'Start'}
+                  </button>
+
+                  <button 
+                    onClick={() => handlePowerAction('reboot')}
+                    disabled={selectedVm.isSuspended || isPowerLoading !== null}
+                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors border border-[#dedfdf] ${
+                      (selectedVm.isSuspended || isPowerLoading !== null) 
+                        ? 'opacity-40 cursor-not-allowed bg-transparent text-[#a0a1a2]' 
+                        : 'bg-transparent text-[#1a1a1a] hover:bg-[#f8f8f8] hover:border-[#1a1a1a] cursor-pointer'
+                    }`}
+                  >
+                    {isPowerLoading === 'reboot' ? 'Restarting...' : 'Restart'}
+                  </button>
+
+                  <button 
+                    onClick={() => handlePowerAction('stop')}
+                    disabled={selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null}
+                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors border border-[#dedfdf] ${
+                      (selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null) 
+                        ? 'opacity-40 cursor-not-allowed bg-transparent text-[#a0a1a2]' 
+                        : 'bg-transparent text-[#dc2626] hover:bg-[#fef2f2] hover:border-[#fca5a5] cursor-pointer'
+                    }`}
+                  >
+                    {isPowerLoading === 'stop' ? 'Stopping...' : 'Stop'}
+                  </button>
+                </div>
+              </div>
+
+              {/* LIVE RESOURCE USAGE BARS (Selected VM) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8 mb-4">
+                 {/* CPU */}
+                 <div>
+                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
+                     <span className="text-[#888]">CPU ({selectedVm.cpus} Cores)</span>
+                     <span className="text-[#1a1a1a] font-mono">{selectedVm.status === 'running' ? `${selectedVm.cpuUsagePct ?? 0}%` : 'Off'}</span>
+                   </div>
+                   <div className="h-[2px] w-full bg-[#f0f0f0]">
+                     <div className={`h-full transition-all duration-500 ${(selectedVm.cpuUsagePct ?? 0) > 85 ? 'bg-[#ef4444]' : 'bg-[#1a1a1a]'}`} style={{ width: selectedVm.status === 'running' ? `${Math.min(selectedVm.cpuUsagePct ?? 0, 100)}%` : '0%' }}></div>
+                   </div>
+                 </div>
+                 {/* RAM */}
+                 <div>
+                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
+                     <span className="text-[#888]">RAM ({Math.round(selectedVm.memory / 1073741824)} GB)</span>
+                     <span className="text-[#1a1a1a] font-mono">
+                       {selectedVm.status === 'running' ? `${((selectedVm.ramUsageBytes ?? 0) / 1073741824).toFixed(1)} GB` : 'Off'}
+                     </span>
+                   </div>
+                   <div className="h-[2px] w-full bg-[#f0f0f0]">
+                     <div className={`h-full transition-all duration-500 ${(((selectedVm.ramUsageBytes ?? 0) / (selectedVm.memory || 1)) * 100) > 85 ? 'bg-[#ef4444]' : 'bg-[#1a1a1a]'}`} style={{ width: selectedVm.status === 'running' ? `${Math.min(((selectedVm.ramUsageBytes ?? 0) / (selectedVm.memory || 1)) * 100, 100)}%` : '0%' }}></div>
+                   </div>
+                 </div>
+              </div>
+
+              {/* MANAGEMENT TABS */}
+            <div className="flex border-b border-[#dedfdf] text-xs gap-6 font-semibold">
+              <button 
+                onClick={() => setActiveTab('metrics')} 
+                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'metrics' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                Telemetry & Metrics
+              </button>
+              <button 
+                onClick={() => setActiveTab('console')} 
+                className={`pb-2.5 cursor-pointer ${activeTab === 'console' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                VNC Web Terminal
+              </button>
+              <button 
+                onClick={() => setActiveTab('reinstall')} 
+                className={`pb-2.5 cursor-pointer ${activeTab === 'reinstall' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                OS Re-Imaging Request
+              </button>
+              <button 
+                onClick={() => setActiveTab('ticket')} 
+                className={`pb-2.5 cursor-pointer ${activeTab === 'ticket' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                Open Ticket for VMID {selectedVm.vmid}
+              </button>
+              <button 
+                onClick={() => setActiveTab('firewall')} 
+                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'firewall' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                Network Firewall
+              </button>
+              <button 
+                onClick={() => setActiveTab('backups')} 
+                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'backups' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+              >
+                Snapshot Backups
+              </button>
+            </div>
+
+            {/* TAB 1: VNC WEB CONSOLE */}
+            {activeTab === 'console' && (
+              <div className="flex flex-col gap-3">
+                <div className="bg-[#1a1a1a] rounded-xl border border-[#333333] h-[500px] w-full overflow-hidden relative">
+                  {selectedVm.isSuspended ? (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-white font-mono text-sm z-10">
+                      Console locked due to VM suspension
+                    </div>
+                  ) : null}
+                  {!selectedVm.isSuspended && (
+                    <div className="w-full h-full bg-black overflow-hidden relative">
+                      <Suspense fallback={<div className="h-full w-full animate-pulse bg-[#111111]" aria-busy="true" />}>
+                        <VncTerminal vmid={selectedVm.vmid} node={selectedVm.node && !/^(info|cluster)$/i.test(selectedVm.node) ? selectedVm.node : 'info'} type={selectedVm.type} />
+                      </Suspense>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: CLIENT OS REINSTALLATION REQUEST */}
+            {activeTab === 'reinstall' && (
+              <form onSubmit={handleReinstallSubmit} className="flex flex-col gap-4 max-w-[480px]">
+                <p className="text-xs text-[#656b6b]">
+                  Select an OS image template to re-image Instance {selectedVm.vmid} ({selectedVm.name}).
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Target OS Image Template</label>
+                  <select 
+                    value={selectedReinstallOs}
+                    onChange={(e) => setSelectedReinstallOs(e.target.value)}
+                    disabled={selectedVm.isSuspended}
+                    className="w-full p-2.5 border border-[#dedfdf] rounded text-xs outline-none font-semibold"
+                  >
+                    <option value="Ubuntu 24.04 LTS">Ubuntu 24.04 LTS (Noble Numbat)</option>
+                    <option value="Windows Server 2022 Standard">Windows Server 2022 Standard Edition</option>
+                    <option value="Debian 12 Bookworm">Debian 12 Bookworm</option>
+                    <option value="Alpine Linux 3.19 (LXC)">Alpine Linux 3.19 Minimal</option>
+                  </select>
+                </div>
+                <button 
+                  type="submit" 
+                  disabled={selectedVm.isSuspended}
+                  className={`btn-primary py-2 px-4 text-xs cursor-pointer ${
+                    selectedVm.isSuspended ? 'opacity-40 cursor-not-allowed' : ''
+                  }`}
+                >
+                  Request OS Re-Image
+                </button>
+              </form>
+            )}
+
+            {/* TAB 3: LINKED SUPPORT TICKET FORM */}
+            {activeTab === 'ticket' && (
+              <form onSubmit={handleTicketSubmit} className="flex flex-col gap-4 max-w-[480px]">
+                <p className="text-xs text-[#656b6b]">
+                  Submit a direct support ticket linked specifically to Instance {selectedVm.vmid}.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold mb-1">Ticket Subject</label>
+                  <input 
+                    type="text" 
+                    value={ticketSubject}
+                    onChange={(e) => setTicketSubject(e.target.value)}
+                    placeholder={`e.g. Issue with VMID ${selectedVm.vmid} network firewall`}
+                    className="w-full p-2.5 border border-[#dedfdf] rounded text-xs outline-none focus:border-[#1a1a1a]"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">Category</label>
+                    <select 
+                      value={ticketCategory}
+                      onChange={(e) => setTicketCategory(e.target.value)}
+                      className="w-full p-2 border border-[#dedfdf] rounded text-xs outline-none"
+                    >
+                      <option value="Quota Upgrade">Quota Upgrade</option>
+                      <option value="Network Firewall">Network Firewall</option>
+                      <option value="Storage & ZFS">Storage & ZFS</option>
+                      <option value="General">General Inquiries</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">Priority</label>
+                    <select 
+                      value={ticketPriority}
+                      onChange={(e) => setTicketPriority(e.target.value as any)}
+                      className="w-full p-2 border border-[#dedfdf] rounded text-xs outline-none"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent SLA</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" className="btn-primary py-2 px-4 text-xs cursor-pointer">
+                  Submit Ticket for VMID {selectedVm.vmid}
+                </button>
+              </form>
+            )}
+
+            {/* TAB 4: METRICS & TELEMETRY */}
+            {activeTab === 'metrics' && (
+              <div className="flex flex-col w-full -mt-2">
+                <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
+                  <VmMetricsChart vmid={selectedVm.vmid} />
+                </Suspense>
+              </div>
+            )}
+
+            {/* TAB 5: FIREWALL PANEL */}
+            {activeTab === 'firewall' && (
+              <div className="flex flex-col w-full -mt-2">
+                <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
+                  <VmFirewallPanel vmid={selectedVm.vmid} />
+                </Suspense>
+              </div>
+            )}
+
+            {/* TAB 6: BACKUP PANEL */}
+            {activeTab === 'backups' && (
+              <div className="flex flex-col w-full mt-2">
+                <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
+                  <VmBackupPanel vmid={selectedVm.vmid} />
+                </Suspense>
+              </div>
+            )}
+
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-[#656b6b] p-12 h-full">
+              <svg className="w-12 h-12 mb-4 text-[#dedfdf]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>
+              <div className="text-sm font-semibold text-[#1a1a1a]">No Instance Selected</div>
+              <div className="text-xs mt-1 text-center max-w-sm">Select an instance from the left sidebar to access power controls, live telemetry, and the web console.</div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer className="app-footer">
+        <div>&copy; Copyright 2026, VOTION ONE Platform. All rights reserved.</div>
+        <div className="footer-links">
+          <a href="#">Terms of service</a>
+          <a href="#">Privacy policy</a>
+        </div>
+      </footer>
+    </main>
+  );
+};

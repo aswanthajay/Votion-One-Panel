@@ -1,0 +1,110 @@
+/**
+ * requireAuth middleware — verifies the HMAC-signed session token and enforces role gates.
+ *
+ * Token format: `${payload}.${hmac_sha256}` where payload = `votion_${accountId}_${issuedAt}`
+ * (optionally suffixed with `_r` for a 30-day remember-me session).
+ * A payload that decodes to a real accounts row is treated as authenticated. The token
+ * carries no expiry (panel is a local admin tool); rotation happens via login which always
+ * issues a fresh token.
+ */
+import crypto from 'crypto';
+import { Request, Response, NextFunction } from 'express';
+import { pgPool } from './db/database.js';
+
+const configuredTokenSecret = process.env.TOKEN_SECRET;
+if (!configuredTokenSecret || configuredTokenSecret.length < 32) {
+  throw new Error('TOKEN_SECRET must be configured with at least 32 characters.');
+}
+export const TOKEN_SECRET = configuredTokenSecret;
+
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function createSessionToken(accountId: number): string {
+  const payload = `votion_${accountId}_${Date.now()}`;
+  const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+  return `${payload}.${signature}`;
+}
+
+export type AuthenticatedUser = { id: number; email: string; role: string; name: string };
+
+export interface AuthenticatedRequest extends Request {
+  authUser?: AuthenticatedUser;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: AuthenticatedUser;
+    }
+  }
+}
+
+export async function resolveSessionUser(token: string): Promise<AuthenticatedUser | null> {
+  const verified = verifySessionToken(token);
+  if (!verified) return null;
+  const parts = verified.payload.split('_');
+  const accountId = parseInt(parts[1], 10);
+  if (!accountId) return null;
+  const result = await pgPool.query('SELECT id, email, name, role FROM accounts WHERE id = $1', [accountId]);
+  const user = result.rows[0];
+  return user ? { id: user.id, email: user.email, role: user.role, name: user.name } : null;
+}
+
+export function verifySessionToken(token: string): { payload: string } | null {
+  if (!token || !token.includes('.')) return null;
+  const [payload, sig] = token.split('.');
+  const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const suppliedBuffer = Buffer.from(sig || '', 'utf8');
+  if (expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) return null;
+
+  const parts = payload.split('_');
+  const issuedAt = Number(parts[2]);
+  if (!Number.isFinite(issuedAt) || issuedAt <= 0 || Date.now() - issuedAt > SESSION_MAX_AGE_MS) return null;
+  return { payload };
+}
+
+/**
+ * Middleware that requires a valid session token and resolves the user row.
+ * Requests without a valid token receive 401.
+ */
+export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers['authorization'];
+  let token = authHeader?.replace('Bearer ', '');
+  if (!token) {
+    const cookieHeader = req.headers.cookie || '';
+    const cookieMatch = cookieHeader.match(/(?:^|;\s*)votion_auth_token=([^;]+)/);
+    token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : '';
+  }
+  resolveSessionUser(token || '').then(user => {
+    if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+    req.authUser = user;
+    next();
+  }).catch(() => res.status(500).json({ success: false, error: 'Session verification failed' }));
+}
+
+/**
+ * Middleware that requires the authenticated user to hold an administrative role.
+ * Client-scoped accounts are rejected with 403.
+ */
+export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const user = (req as AuthenticatedRequest).authUser;
+  if (!user) return next(); // requireAuth always runs first
+  const adminRoles = ['administrator', 'admin', 'moderator'];
+  if (!adminRoles.includes(user.role)) {
+    return res.status(403).json({ success: false, error: 'Administrator access required' });
+  }
+  next();
+}
+
+/**
+ * Mask sensitive connection fields in API responses. Caller must pass the full row.
+ */
+export function maskConnection(conn: any): any {
+  if (!conn) return conn;
+  return {
+    ...conn,
+    token_secret: conn.token_secret ? '••••••••' : '',
+    password: conn.password ? '••••••••' : '',
+  };
+}

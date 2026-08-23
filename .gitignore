@@ -1,0 +1,45 @@
+# Dependencies and generated build output
+node_modules/
+dist/
+coverage/
+
+# Runtime and local configuration
+.env
+.env.*
+!.env.example
+*.log
+uploads/
+pgsql/
+
+# Local databases, backups, and exported artifacts
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+*.pdf
+*.zip
+pgdata/
+StellarPanel_Backup_2026-08-20_07-45/
+
+# Sandbox and visual inspection residue
+pm_context/
+scratch/
+shots/
+referance/
+
+# Local probe and audit helper scripts
+_*_probe.ps1
+_*_check.ps1
+_*_dump.ps1
+_*_test.ps1
+_*_context.txt
+_*_form.txt
+_*_logo.txt
+_*_svgs.txt
+_*_report.txt
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

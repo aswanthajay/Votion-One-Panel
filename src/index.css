@@ -1,0 +1,399 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   CARTA INK DESIGN SYSTEM TOKENS (1:1 Reference Match)
+   ========================================================================== */
+:root {
+  /* Exact Reference Font Families */
+  --ink-font-global-family-base: "Inter var", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --ink-font-global-family-prominent: "SangBleu Versailles", "Newsreader", "Playfair Display", Georgia, serif;
+  --ink-font-global-family-monospace: "Roboto Mono", ui-monospace, Menlo, Monaco, "JetBrains Mono", monospace;
+  --ink-font-global-family-cursive: "Dancing Script", dancingscript, cursive;
+  --ink-font-global-feature-base: "ss01", "cv05", "cv10", "calt";
+
+  /* Colors */
+  --color-bg-base: #fbfaf9;
+  --color-dark-ink: #1a1a1a;
+  --color-subtle-gray: #dedfdf;
+  --color-light-gray: #f1f1f1;
+  --color-text-subtle: #656b6b;
+  --color-tile-bg: #f9f8f6;
+  --color-accent-blue: #2563eb;
+  
+  /* Dimensions & Spacing */
+  --sidebar-width-expanded: 240px;
+  --sidebar-width-collapsed: 60px;
+  --header-height: 60px;
+}
+
+/* Base Typographic Rules */
+body {
+  font-family: var(--ink-font-global-family-base);
+  font-feature-settings: var(--ink-font-global-feature-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg-base);
+  color: var(--color-dark-ink);
+  margin: 0;
+  padding: 0;
+}
+
+/* Font Helper Utility Classes */
+.font-serif {
+  font-family: var(--ink-font-global-family-prominent) !important;
+}
+
+.font-sans {
+  font-family: var(--ink-font-global-family-base) !important;
+  font-feature-settings: var(--ink-font-global-feature-base) !important;
+}
+
+.font-mono {
+  font-family: var(--ink-font-global-family-monospace) !important;
+}
+
+.font-cursive {
+  font-family: var(--ink-font-global-family-cursive) !important;
+}
+
+/* App Core Container */
+.app-container {
+  display: flex;
+  min-h: 100vh;
+  width: 100vw;
+  background-color: var(--color-bg-base);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Page Layout Wrappers */
+.main-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transition: margin-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.main-wrapper.sidebar-expanded {
+  margin-left: var(--sidebar-width-expanded);
+}
+
+.main-wrapper.sidebar-collapsed {
+  margin-left: var(--sidebar-width-collapsed);
+}
+
+/* Header Layout */
+.app-header {
+  height: var(--header-height);
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--color-subtle-gray);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.app-content {
+  padding: 32px;
+  flex: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Typography Hierarchy */
+.page-heading {
+  font-size: 36px;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--color-dark-ink);
+  margin-bottom: 8px;
+  font-family: var(--ink-font-global-family-prominent);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-dark-ink);
+  margin-bottom: 16px;
+  font-family: var(--ink-font-global-family-base);
+}
+
+/* Button Component Tokens */
+.btn-primary {
+  background-color: var(--color-dark-ink);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--color-dark-ink);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-primary:hover {
+  background-color: #333333;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background-color: #ffffff;
+  color: var(--color-dark-ink);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--color-subtle-gray);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-light-gray);
+  border-color: #a7aaaa;
+  transform: translateY(-1px);
+}
+
+/* Tile Component Variants */
+.tile-white {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  border-radius: 8px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tile-white:hover {
+  border-color: #a7aaaa;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.tile-white-body {
+  flex: 1;
+  padding-right: 24px;
+}
+
+.tile-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-dark-ink);
+  margin-bottom: 4px;
+}
+
+.tile-desc {
+  font-size: 13px;
+  color: var(--color-text-subtle);
+  line-height: 1.5;
+}
+
+.tile-tinted {
+  background-color: var(--color-tile-bg);
+  border: 1px solid var(--color-subtle-gray);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 160px;
+}
+
+.tile-tinted-content {
+  margin-bottom: 16px;
+}
+
+.recommendations-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+@media (min-width: 768px) {
+  .recommendations-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.content-section {
+  margin-bottom: 32px;
+}
+
+/* 2-Column Grid Layout matching User Settings Reference */
+.user-settings-grid {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 40px;
+  margin-top: 24px;
+}
+
+@media (max-width: 768px) {
+  .user-settings-grid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+
+.user-settings-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-settings-subnav-link {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-subtle);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.user-settings-subnav-link:hover {
+  background-color: var(--color-light-gray);
+  color: var(--color-dark-ink);
+}
+
+.user-settings-subnav-link.active {
+  background-color: var(--color-light-gray);
+  color: var(--color-dark-ink);
+  font-weight: 700;
+}
+
+/* Carta Ink Block & Table Wrappers */
+.ink-block-wrapper {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.ink-block-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--color-subtle-gray);
+  background-color: #ffffff;
+}
+
+.ink-block-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-dark-ink);
+  margin: 0;
+}
+
+.ink-table-wrapper {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ink-table-row {
+  border-bottom: 1px solid var(--color-subtle-gray);
+}
+
+.ink-table-row:last-child {
+  border-bottom: none;
+}
+
+.ink-table-th {
+  padding: 16px 24px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-dark-ink);
+  width: 220px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.ink-table-td {
+  padding: 16px 24px;
+  font-size: 13px;
+  color: var(--color-dark-ink);
+  vertical-align: top;
+}
+
+.ink-table-td-action {
+  padding: 16px 24px;
+  vertical-align: top;
+  text-align: right;
+  width: 140px;
+}
+
+.ink-description-text {
+  font-size: 12px;
+  color: var(--color-text-subtle);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* 50/50 Split Authentication Page Elements */
+.login-logo-box-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 20px;
+  border: 2px solid var(--color-dark-ink) !important;
+  border-radius: 4px;
+  font-family: var(--ink-font-global-family-base);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  color: var(--color-dark-ink);
+  background-color: #ffffff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  margin-bottom: 24px;
+}
+
+.badge-online {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+  animation: nodePulseGlow 2s infinite ease-in-out;
+}
+
+/* Footer Styling */
+.app-footer {
+  margin-top: 60px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-subtle-gray);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-subtle);
+}
+
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+
+.footer-links a {
+  color: var(--color-text-subtle);
+  text-decoration: none;
+}
+
+.footer-links a:hover {
+  color: var(--color-dark-ink);
+  text-decoration: underline;
+}
+
+
