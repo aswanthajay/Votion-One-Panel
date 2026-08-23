@@ -632,7 +632,26 @@ class ApiClient {
   // ==========================================
   async getProxmoxConnections(): Promise<ApiProxmoxConnection[]> {
     const res = await fetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
-    return await res.json();
+    let payload: unknown;
+
+    try {
+      payload = await res.json();
+    } catch {
+      throw new Error(`Connection service returned HTTP ${res.status}`);
+    }
+
+    if (!res.ok) {
+      const error = payload && typeof payload === 'object' && 'error' in payload
+        ? String((payload as { error?: unknown }).error || '')
+        : '';
+      throw new Error(error || `Connection service returned HTTP ${res.status}`);
+    }
+
+    if (!Array.isArray(payload)) {
+      throw new Error('Connection service returned an invalid response');
+    }
+
+    return payload as ApiProxmoxConnection[];
   }
 
   async addProxmoxConnection(payload: any) {

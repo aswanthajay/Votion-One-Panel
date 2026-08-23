@@ -32,14 +32,27 @@ export const ProxmoxConnections: React.FC = () => {
   };
 
   const loadConnections = async () => {
-    try {
-      const data = await apiClient.getProxmoxConnections();
-      setConnections(data);
-    } catch (e) {
-      showToast('Failed to load cluster connections');
-    } finally {
-      setLoading(false);
+    setLoading(true);
+    let lastError: unknown;
+
+    for (const delayMs of [0, 500, 1500]) {
+      if (delayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+
+      try {
+        const data = await apiClient.getProxmoxConnections();
+        setConnections(data);
+        setLoading(false);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
     }
+
+    const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
+    showToast(`Failed to load cluster connections${detail}`);
+    setLoading(false);
   };
 
   useEffect(() => {
