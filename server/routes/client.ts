@@ -3,6 +3,7 @@ import os from 'os';
 import { dbService } from '../db/database.js';
 import { proxmoxApi } from '../services/proxmox.js';
 import { requireAuth } from '../middleware.js';
+import { proxmoxFetch } from '../services/proxmoxHttp.js';
 
 export const clientRouter = Router();
 clientRouter.use(requireAuth);
@@ -44,9 +45,10 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
     const conn = conns[0];
     const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
     
-    const pveRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/status/current`, {
+    const pveRes = await proxmoxFetch(`https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/status/current`, {
       method: 'GET',
-      headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` }
+      headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+      sslFingerprint: conn.ssl_fingerprint,
     });
     
     if (!pveRes.ok) throw new Error('Failed to fetch from Proxmox');

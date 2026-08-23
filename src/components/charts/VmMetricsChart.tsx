@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Title, AreaChart, DonutChart, ProgressBar, Grid, Metric, Text, Flex } from '@tremor/react';
-import { apiClient } from '../../services/apiClient';
+import { API_ORIGIN, apiClient } from '../../services/apiClient';
 
 interface VmMetricsChartProps {
   vmid: number;
@@ -23,6 +23,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const [aggregations, setAggregations] = useState<any>(null);
   const [currentLive, setCurrentLive] = useState<LiveTelemetry | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const lastMetricsRef = useRef<{ netin: number; netout: number; diskread: number; diskwrite: number; timestamp: number } | null>(null);
 
@@ -35,23 +36,17 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
 
   const fetchAggregations = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/v1/client/vms/${vmid}/metrics`, {
-        headers: { 'x-user-email': localStorage.getItem('votion_user_email') || 'client@votioncloud.org' }
-      });
-      const json = await res.json();
-      if (json.success) {
-        setAggregations(json.aggregations || null);
-        setDbHistory(json.history || json.data || []);
-      }
-    } catch (err) {}
+      const json = await apiClient.getVMMetrics(vmid);
+      setAggregations(json.aggregations || null);
+      setDbHistory(json.history || json.data || []);
+    } catch (err) {
+      // Live telemetry remains useful when historical samples are unavailable.
+    }
   };
 
   const fetchLiveTelemetry = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/v1/client/vms/${vmid}/telemetry`, {
-        headers: { 'x-user-email': localStorage.getItem('votion_user_email') || 'client@votioncloud.org' }
-      });
-      const json = await res.json();
+      const json = await apiClient.getVMTelemetry(vmid);
 
       if (json.success && json.telemetry) {
         const current = json.telemetry as LiveTelemetry;
@@ -80,9 +75,11 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
         };
 
         setCurrentLive(current);
+        setLoadError(null);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch live telemetry:', err);
+      setLoadError(err?.message || 'Live telemetry is currently unavailable.');
     } finally {
       setIsLoading(false);
     }
@@ -92,6 +89,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
     setDbHistory([]);
     setAggregations(null);
     setCurrentLive(null);
+    setLoadError(null);
     lastMetricsRef.current = null;
     setIsLoading(true);
 
@@ -114,7 +112,21 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
     );
   }
 
-  if (!currentLive) return null;
+  if (!currentLive) {
+    return (
+      <div className="mt-6 border-t border-[#e0e1e1] pt-10 pb-6 flex flex-col items-center justify-center text-center">
+        <div className="text-sm font-semibold text-[#1a1a1a]">Telemetry unavailable</div>
+        <div className="mt-1 max-w-md text-xs text-[#656b6b]">{loadError || 'No live telemetry was returned for this instance.'}</div>
+        <button
+          type="button"
+          onClick={() => { setIsLoading(true); setLoadError(null); fetchLiveTelemetry(); fetchAggregations(); }}
+          className="mt-4 border border-[#1a1a1a] px-3 py-1.5 text-[11px] font-semibold text-[#1a1a1a] hover:bg-[#f1f1f1] transition-colors"
+        >
+          Retry telemetry
+        </button>
+      </div>
+    );
+  }
 
   // Bucketed history rows use {timestamp, cpuPct, peakCpuPct, ramBytes, peakRamBytes, netInBytes, netOutBytes, diskReadBytes, diskWriteBytes}
   const chartData = (dbHistory || []).map((d) => {
@@ -174,7 +186,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
             <button
               onClick={() => {
                 // PDF report covers the whole fleet; this VM gets its own detail section (Section 4).
-                window.open(`http://localhost:5000/api/v1/telemetry/report?hours=24`, '_blank');
+                window.open(new URL(`${API_ORIGIN}/api/v1/telemetry/report?hours=24`, window.location.origin).toString(), '_blank');
               }}
               className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest border border-[#10b981] bg-[#10b981] text-white rounded hover:bg-[#059669] transition-colors cursor-pointer whitespace-nowrap"
               title="Generate a detailed PDF report — this VM is featured in its own section"

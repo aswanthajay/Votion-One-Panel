@@ -179,11 +179,26 @@ class ApiClient {
     return data.data || [];
   }
 
+  async getVMMetrics(vmid: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metrics`, {
+      headers: this.getHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Metrics request failed (HTTP ${res.status})`);
+    }
+    return data;
+  }
+
   async getVMTelemetry(vmid: number) {
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry`, {
       headers: this.getHeaders(),
     });
-    return await res.json();
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Telemetry request failed (HTTP ${res.status})`);
+    }
+    return data;
   }
 
   async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown') {
