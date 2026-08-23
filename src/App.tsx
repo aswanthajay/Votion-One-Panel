@@ -279,7 +279,7 @@ const AppRouter: React.FC = () => {
 };
 
 export const App: React.FC = () => (
-  <BrowserRouter>
+  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="*" element={<AppRouter />} />
