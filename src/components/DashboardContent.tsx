@@ -203,11 +203,11 @@ export const DashboardContent: React.FC = () => {
         <div
           role="status"
           aria-live="polite"
-          className="fixed top-[calc(var(--header-height)+1rem)] left-4 right-4 sm:left-auto sm:right-4 z-30 w-auto sm:min-w-[320px] sm:max-w-[420px] p-4 bg-white text-[#1a1a1a] text-sm font-semibold rounded-lg flex items-center justify-between gap-4 shadow-lg border border-[#dedfdf]"
+          className="relative z-10 mb-6 w-full sm:ml-auto sm:max-w-[420px] p-4 bg-white text-[#1a1a1a] text-sm font-semibold rounded-lg flex items-center justify-between gap-4 shadow-lg border border-[#dedfdf]"
         >
           <div className="flex items-center gap-3">
             <span className="w-2.5 h-2.5 rounded-full bg-[#16a34a] animate-pulse"></span>
-            <span>{toastMessage}</span>
+            <span className="min-w-0 break-words">{toastMessage}</span>
           </div>
           <button onClick={() => setToastMessage(null)} className="text-[#656b6b] hover:text-[#1a1a1a] transition-colors">✕</button>
         </div>
