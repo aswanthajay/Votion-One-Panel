@@ -140,7 +140,7 @@ authKeyRouter.get('/key-file/download', requireAuth, async (req, res) => {
     const payload: Record<string, unknown> = {
       version: KEY_FILE_VERSION,
       engine: 'Stellar Engine',
-      product: 'VOTION ONE Platform',
+      product: 'Votion One™ Platform',
       accountEmail: user.email,
       kid,
       secret,

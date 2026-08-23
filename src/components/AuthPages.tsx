@@ -594,7 +594,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
 
         {/* Footer links, Carta-style */}
         <div className="w-full max-w-[380px] mx-auto mt-12 flex items-center justify-between text-[11px] text-[#656b6b]">
-          <div>&copy; 2026 VOTION ONE Platform</div>
+          <div>&copy; 2026 Votion One™ Platform</div>
           <button type="button" className="hover:opacity-70 underline underline-offset-2">
             View latest updates
           </button>

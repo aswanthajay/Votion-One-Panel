@@ -22,7 +22,7 @@ export const AppSwitcher: React.FC = () => {
           </svg>
         </div>
         <div className="font-medium text-[#a7aaaa]">
-          <span className="font-bold text-[#fff]">VOTION ONE</span> Platform
+          <span className="font-bold text-[#fff]">Votion One™</span> Platform
         </div>
       </div>
 

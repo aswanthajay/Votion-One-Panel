@@ -163,7 +163,7 @@ proxmoxSync.start();
 
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);
-  console.log(`🚀 VOTION ONE Platform Backend Server running on port ${PORT}`);
+  console.log(`🚀 Votion One™ Platform Backend Server running on port ${PORT}`);
   console.log(`👉 API Endpoint: http://localhost:${PORT}/api/v1/health`);
   console.log(`🗄️ Database: PostgreSQL + TimescaleDB (TSDB) Telemetry Layer`);
   console.log(`🔐 Proxmox API Auth: PVEAPIToken=root@pam!votion_token`);

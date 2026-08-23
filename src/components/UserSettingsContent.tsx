@@ -386,7 +386,7 @@ export const UserSettingsContent: React.FC = () => {
                           </button>
                         </div>
                         <p className="ink-description-text">
-                          Provide this 6-digit support PIN when contacting VOTION ONE Support engineers to grant temporary access to your cluster nodes.
+                          Provide this 6-digit support PIN when contacting Votion One™ Support engineers to grant temporary access to your cluster nodes.
                         </p>
                       </td>
                       <td className="ink-table-td-action"></td>
@@ -863,7 +863,7 @@ export const UserSettingsContent: React.FC = () => {
                 <p>Support PIN Required: <span className="text-white">{supportPin || '------'}</span></p>
                 <p>Expires: <span className="text-white">{activeRemoteSession.expires_at ? new Date(activeRemoteSession.expires_at).toLocaleString() : '60 minutes'}</span></p>
                 <div className="p-3 bg-black border border-[#222222] rounded text-white text-[11px]">
-                  VOTION ONE Support is authorized to connect to this panel. Share your Support PIN with the engineer. The session closes automatically at expiry or when you disconnect.
+                  Votion One™ Support is authorized to connect to this panel. Share your Support PIN with the engineer. The session closes automatically at expiry or when you disconnect.
                 </div>
               </div>
             ) : (

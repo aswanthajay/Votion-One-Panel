@@ -87,7 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button 
           onClick={() => onNavigate('dashboard')}
           className="brand-logo cursor-pointer" 
-          title="VOTION ONE Platform"
+          title="Votion One™ Platform"
         >
           <div className="border-[3px] border-[#1a1a1a] bg-white px-3 py-0.5 text-base font-extrabold lowercase tracking-tight flex items-center justify-center">votion</div>
         </button>

@@ -800,7 +800,7 @@ export const DashboardContent: React.FC = () => {
 
       {/* FOOTER */}
       <footer className="app-footer">
-        <div>&copy; Copyright 2026, VOTION ONE Platform. All rights reserved.</div>
+        <div>&copy; Copyright 2026, Votion One™ Platform. All rights reserved.</div>
         <div className="footer-links">
           <a href="#">Terms of service</a>
           <a href="#">Privacy policy</a>
