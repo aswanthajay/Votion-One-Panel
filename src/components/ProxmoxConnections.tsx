@@ -193,7 +193,7 @@ export const ProxmoxConnections: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {connections.map((conn) => (
-          <div key={conn.id} className="bg-ink-card border border-[#dedfdf] rounded-xl p-5 shadow-sm flex flex-col relative group hover:border-[#1a1a1a] transition-colors">
+          <div key={conn.id} className="bg-white border border-[#dedfdf] rounded-xl p-5 shadow-sm flex flex-col relative group hover:border-[#1a1a1a] transition-colors">
             <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 onClick={() => openEditModal(conn)}
@@ -269,7 +269,7 @@ export const ProxmoxConnections: React.FC = () => {
       {/* Add Connection Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
-          <div className="w-full max-w-[460px] bg-ink-card border border-[#dedfdf] rounded-xl shadow-2xl p-6">
+          <div className="w-full max-w-[460px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-6">
             <h3 className="text-base font-bold text-[#1a1a1a] mb-1">Add Cluster Connection</h3>
             <p className="text-xs text-[#656b6b] mb-6">Enter API credentials to securely link a cluster.</p>
 
@@ -281,7 +281,7 @@ export const ProxmoxConnections: React.FC = () => {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="e.g. Primary US-East Cluster"
-                  className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]" 
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
                   required
                 />
               </div>
@@ -294,7 +294,7 @@ export const ProxmoxConnections: React.FC = () => {
                     value={newHostIp}
                     onChange={(e) => setNewHostIp(e.target.value)}
                     placeholder="10.0.10.1"
-                    className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono" 
+                    className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                     required
                   />
                 </div>
@@ -304,7 +304,7 @@ export const ProxmoxConnections: React.FC = () => {
                     type="number" 
                     value={newPort}
                     onChange={(e) => setNewPort(parseInt(e.target.value, 10))}
-                    className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono" 
+                    className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                     required
                   />
                 </div>
@@ -323,7 +323,7 @@ export const ProxmoxConnections: React.FC = () => {
                   value={newTokenId}
                   onChange={(e) => setNewTokenId(e.target.value)}
                   placeholder="root@pam!votion_token"
-                  className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono" 
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                   required
                 />
               </div>
@@ -335,7 +335,7 @@ export const ProxmoxConnections: React.FC = () => {
                   value={newTokenSecret}
                   onChange={(e) => setNewTokenSecret(e.target.value)}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                  className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono" 
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                   required
                 />
               </div>
@@ -347,7 +347,7 @@ export const ProxmoxConnections: React.FC = () => {
                   value={newSslFingerprint}
                   onChange={(e) => setNewSslFingerprint(e.target.value)}
                   placeholder="SHA256:7B:44:91..."
-                  className="w-full bg-ink-card border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono" 
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                 />
               </div>
               
