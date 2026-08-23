@@ -595,13 +595,12 @@ apiRouter.post('/user/change-email', async (req, res) => {
 });
 
 // 11. PROXMOX NODES
-apiRouter.get('/nodes', async (req, res) => {
+apiRouter.get('/nodes', async (_req, res) => {
   try {
-    const pveNodes = await proxmoxApi.getNodeMetrics();
-    res.json({ success: true, count: pveNodes.length, data: pveNodes });
-  } catch (err) {
     const nodes = await dbService.getNodes();
     res.json({ success: true, count: nodes.length, data: nodes });
+  } catch (err: any) {
+    res.status(503).json({ success: false, error: err?.message || 'Unable to read nodes from the local database' });
   }
 });
 
@@ -720,13 +719,10 @@ apiRouter.get('/vms', async (req, res) => {
   const parsedEmail = ownerEmail ? String(ownerEmail) : undefined;
 
   try {
-    const liveVMs = parsedEmail ? await proxmoxApi.getLiveVMs(parsedEmail) : await proxmoxApi.getAllProxmoxVMs();
-    let result = liveVMs;
-    if (parsedVmid) result = result.filter((v: any) => v.vmid === parsedVmid);
-    res.json({ success: true, count: result.length, data: result });
-  } catch (err) {
     const vms = await dbService.getVMs(parsedEmail, parsedVmid);
     res.json({ success: true, count: vms.length, data: vms });
+  } catch (err: any) {
+    res.status(503).json({ success: false, error: err?.message || 'Unable to read VMs from the local database' });
   }
 });
 
@@ -848,10 +844,10 @@ apiRouter.post('/vms/:vmid/action', async (req, res) => {
   const { action } = req.body;
 
   try {
-    const vm = await proxmoxService.executePowerAction('pve-01', targetVmid, action, userEmail);
+    const vm = await proxmoxService.executePowerAction('', targetVmid, action, userEmail);
     res.json({
       success: true,
-      message: `Proxmox PVE API: Task ${action.toUpperCase()} executed for VMID ${targetVmid}`,
+      message: `Proxmox PVE API: Task ${action.toUpperCase()} accepted for VMID ${targetVmid}; local status is now ${vm.status}`,
       vm,
     });
   } catch (err: any) {

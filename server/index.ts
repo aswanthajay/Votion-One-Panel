@@ -10,6 +10,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService } from './db/database.js';
 import { proxmoxApi } from './services/proxmox.js';
+import { proxmoxSync } from './services/proxmoxSync.js';
 import { resolveSessionUser } from './middleware.js';
 import https from 'https';
 
@@ -156,7 +157,7 @@ app.use('/proxmox-console', proxmoxProxy);
 
 // Start Automated Background Expiry Worker Cron Job
 expiryWorker.start();
-proxmoxApi.startTelemetryPoller();
+proxmoxSync.start();
 
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);

@@ -180,6 +180,19 @@ export async function initializeDatabaseSchema() {
         diskwrite_bytes BIGINT,
         UNIQUE (vmid, timestamp)
       );
+
+      CREATE TABLE IF NOT EXISTS vm_metrics (
+        id SERIAL PRIMARY KEY,
+        vmid INT NOT NULL,
+        timestamp TIMESTAMP DEFAULT NOW(),
+        cpu_pct NUMERIC,
+        ram_bytes BIGINT,
+        net_in_bytes BIGINT,
+        net_out_bytes BIGINT,
+        diskread_bytes BIGINT,
+        diskwrite_bytes BIGINT,
+        UNIQUE (vmid, timestamp)
+      );
       
       CREATE TABLE IF NOT EXISTS system_settings (
         setting_key VARCHAR(100) PRIMARY KEY,
@@ -338,9 +351,11 @@ const CONSTANTS = {
 export class DatabaseService {
   
   constructor() {
-    this.migrateVmTelemetryColumns().catch((err) => {
-      console.warn('[DB MIGRATION] vm_telemetry column migration failed:', err.message);
-    });
+    this.migrateVmMetricsTable()
+      .then(() => this.migrateVmTelemetryColumns())
+      .catch((err) => {
+        console.warn('[DB MIGRATION] vm_metrics migration failed:', err.message);
+      });
     this.migrateAlertTables().catch((err) => {
       console.warn('[DB MIGRATION] alert table migration failed:', err.message);
     });
@@ -361,7 +376,7 @@ export class DatabaseService {
     // Telemetry cleanup job (Runs every hour)
     setInterval(async () => {
       try {
-        await pgPool.query("DELETE FROM vm_telemetry WHERE timestamp < NOW() - INTERVAL '7 days'");
+        await pgPool.query("DELETE FROM vm_metrics WHERE timestamp < NOW() - INTERVAL '7 days'");
       } catch (err) {}
     }, 3600000);
   }
@@ -628,22 +643,115 @@ export class DatabaseService {
     console.log('[ALERTS] Alert tables ready.');
   }
 
+  async migrateVmMetricsTable() {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS vm_metrics (
+        id SERIAL PRIMARY KEY,
+        vmid INT NOT NULL,
+        timestamp TIMESTAMP DEFAULT NOW(),
+        cpu_pct NUMERIC,
+        ram_bytes BIGINT,
+        net_in_bytes BIGINT,
+        net_out_bytes BIGINT,
+        diskread_bytes BIGINT,
+        diskwrite_bytes BIGINT,
+        UNIQUE (vmid, timestamp)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_vm_metrics_vmid_ts ON vm_metrics (vmid, timestamp);
+    `);
+    try {
+      await pgPool.query(`
+        INSERT INTO vm_metrics (vmid, timestamp, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
+        SELECT vmid, timestamp, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes
+        FROM vm_telemetry
+        ON CONFLICT (vmid, timestamp) DO NOTHING;
+      `);
+    } catch (err: any) {
+      console.warn('[DB MIGRATION] vm_metrics backfill skipped:', err.message);
+    }
+  }
+
   async migrateVmTelemetryColumns() {
-    const cols = await pgPool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'vm_telemetry'");
+    const cols = await pgPool.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'vm_metrics'");
     const names = cols.rows.map(r => r.column_name);
     if (!names.includes('diskread_bytes')) {
-      await pgPool.query("ALTER TABLE vm_telemetry ADD COLUMN IF NOT EXISTS diskread_bytes BIGINT");
+      await pgPool.query("ALTER TABLE vm_metrics ADD COLUMN IF NOT EXISTS diskread_bytes BIGINT");
     }
     if (!names.includes('diskwrite_bytes')) {
-      await pgPool.query("ALTER TABLE vm_telemetry ADD COLUMN IF NOT EXISTS diskwrite_bytes BIGINT");
+      await pgPool.query("ALTER TABLE vm_metrics ADD COLUMN IF NOT EXISTS diskwrite_bytes BIGINT");
     }
     // Guarantee one sample per VM per second: duplicates from restarts or race
     // conditions are merged instead of creating double-counted history.
     try {
-      await pgPool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vm_telemetry_vmid_ts ON vm_telemetry (vmid, timestamp)");
+      await pgPool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_vm_metrics_vmid_ts ON vm_metrics (vmid, timestamp)");
     } catch (err: any) {
       console.warn('[DB MIGRATION] unique telemetry index:', err.message);
     }
+  }
+
+  async upsertProxmoxVMs(resources: Array<{ vmid: number; node: string; name?: string; status?: string; cpus?: number; maxmem?: number; maxdisk?: number; type?: string }>, defaultOwnerEmail: string) {
+    if (resources.length === 0) return;
+    await pgPool.query(
+      `INSERT INTO vms (vmid, vm_name, node, status, cpus, maxmem, maxdisk, memory, disk, cpu_cores, ram_mb, disk_gb, owner_email, type)
+       SELECT resource.vmid,
+              COALESCE(NULLIF(resource.name, ''), 'vm-' || resource.vmid),
+              resource.node,
+              COALESCE(NULLIF(resource.status, ''), 'unknown'),
+              GREATEST(COALESCE(resource.cpus, 1), 1),
+              COALESCE(resource.maxmem, 0),
+              COALESCE(resource.maxdisk, 0),
+              COALESCE(resource.maxmem, 0),
+              COALESCE(resource.maxdisk, 0),
+              GREATEST(COALESCE(resource.cpus, 1), 1),
+              GREATEST(CEIL(COALESCE(resource.maxmem, 0) / 1048576.0)::int, 1),
+              GREATEST(CEIL(COALESCE(resource.maxdisk, 0) / 1073741824.0)::int, 1),
+              $2,
+              CASE WHEN resource.type = 'lxc' THEN 'lxc' ELSE 'qemu' END
+       FROM jsonb_to_recordset($1::jsonb) AS resource(
+         vmid INT, node TEXT, name TEXT, status TEXT, cpus INT, maxmem BIGINT, maxdisk BIGINT, type TEXT
+       )
+       ON CONFLICT (vmid) DO UPDATE SET
+         vm_name = EXCLUDED.vm_name,
+         node = EXCLUDED.node,
+         status = CASE
+           WHEN vms.status IN ('starting', 'stopping', 'restarting') AND EXCLUDED.status = 'unknown' THEN vms.status
+           ELSE EXCLUDED.status
+         END,
+         cpus = EXCLUDED.cpus,
+         maxmem = EXCLUDED.maxmem,
+         maxdisk = EXCLUDED.maxdisk,
+         memory = EXCLUDED.memory,
+         disk = EXCLUDED.disk,
+         cpu_cores = EXCLUDED.cpu_cores,
+         ram_mb = EXCLUDED.ram_mb,
+         disk_gb = EXCLUDED.disk_gb,
+         type = EXCLUDED.type`,
+      [JSON.stringify(resources), defaultOwnerEmail]
+    );
+  }
+
+  async insertVmMetricsBatch(samples: Array<{ vmid: number; cpuPct: number; ramBytes: number; netInBytes: number; netOutBytes: number; diskReadBytes?: number; diskWriteBytes?: number }>) {
+    if (samples.length === 0) return;
+    await pgPool.query(
+      `INSERT INTO vm_metrics (vmid, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
+       SELECT sample.vmid, sample.cpu_pct, sample.ram_bytes, sample.net_in_bytes, sample.net_out_bytes, sample.diskread_bytes, sample.diskwrite_bytes
+       FROM jsonb_to_recordset($1::jsonb) AS sample(
+         vmid INT, cpu_pct NUMERIC, ram_bytes BIGINT, net_in_bytes BIGINT, net_out_bytes BIGINT, diskread_bytes BIGINT, diskwrite_bytes BIGINT
+       )
+       ON CONFLICT (vmid, timestamp) DO UPDATE SET
+         cpu_pct = EXCLUDED.cpu_pct,
+         ram_bytes = EXCLUDED.ram_bytes,
+         net_in_bytes = EXCLUDED.net_in_bytes,
+         net_out_bytes = EXCLUDED.net_out_bytes,
+         diskread_bytes = EXCLUDED.diskread_bytes,
+         diskwrite_bytes = EXCLUDED.diskwrite_bytes`,
+      [JSON.stringify(samples)]
+    );
+  }
+
+  async updateVmStatus(vmid: number, status: string) {
+    const result = await pgPool.query('UPDATE vms SET status = $1 WHERE vmid = $2 RETURNING *', [status, vmid]);
+    return result.rows[0] || null;
   }
 
   async insertVmTelemetry(vmid: number, cpuPct: number, ramBytes: number, netIn: number, netOut: number, diskRead?: number, diskWrite?: number) {
@@ -652,7 +760,7 @@ export class DatabaseService {
     // index is created automatically by migrateVmTelemetryColumns() on startup.
     try {
       await pgPool.query(
-        `INSERT INTO vm_telemetry (vmid, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
+        `INSERT INTO vm_metrics (vmid, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (vmid, timestamp) DO UPDATE SET
            cpu_pct = EXCLUDED.cpu_pct,
@@ -670,7 +778,7 @@ export class DatabaseService {
 
   async getVmTelemetryHistory(vmid: number, hours: number = 24) {
     const res = await pgPool.query(
-      "SELECT * FROM vm_telemetry WHERE vmid = $1 AND timestamp > NOW() - INTERVAL '1 hour' * $2 ORDER BY timestamp ASC",
+      "SELECT * FROM vm_metrics WHERE vmid = $1 AND timestamp > NOW() - INTERVAL '1 hour' * $2 ORDER BY timestamp ASC",
       [vmid, hours]
     );
     return res.rows;
@@ -681,7 +789,7 @@ export class DatabaseService {
     const res = await pgPool.query(
       `SELECT timestamp, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes,
               diskread_bytes, diskwrite_bytes
-       FROM vm_telemetry
+              FROM vm_metrics
        WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
        ORDER BY timestamp ASC`,
       [hours]
@@ -700,7 +808,7 @@ export class DatabaseService {
               max(ram_bytes) AS peak_ram_bytes,
               sum(net_in_bytes) AS total_net_in_bytes,
               sum(net_out_bytes) AS total_net_out_bytes
-       FROM vm_telemetry
+              FROM vm_metrics
        WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
        GROUP BY vmid`,
       [hours]

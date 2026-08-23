@@ -48,7 +48,7 @@ export class ProxmoxService {
   /**
    * PHASE 2.2: Proxmox VM Power Control (Start, Stop, Shutdown, Reboot)
    */
-  async executePowerAction(node: string, vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown', userEmail: string = 'system') {
+  async executePowerAction(node: string, vmid: number, action: 'start' | 'stop' | 'reset' | 'reboot' | 'shutdown', userEmail: string = 'system') {
     const vm = await dbService.getVMByVMID(vmid);
     if (!vm) {
       throw new Error(`Proxmox VMID ${vmid} not found on cluster.`);
@@ -58,7 +58,38 @@ export class ProxmoxService {
       throw new Error(`Proxmox VMID ${vmid} is currently suspended due to billing expiry. Power action ${action.toUpperCase()} blocked.`);
     }
 
-    return await dbService.executeVMAction(vmid, action, userEmail);
+    const connections = await dbService.getProxmoxConnections();
+    const connection = connections[0];
+    if (!connection) {
+      throw new Error('No Proxmox connection is configured. Configure a connection before issuing VM actions.');
+    }
+
+    const targetNode = vm.node || node;
+    const vmType = vm.type === 'lxc' ? 'lxc' : 'qemu';
+    const operation = action === 'shutdown' ? 'stop' : action;
+    const host = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const port = Number(connection.port) || 8006;
+    const response = await fetch(`https://${host}:${port}/api2/json/nodes/${encodeURIComponent(targetNode)}/${vmType}/${vmid}/status/${operation}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `PVEAPIToken=${connection.token_id}=${connection.token_secret}`,
+      },
+    });
+
+    const payload = await response.json().catch(() => ({})) as { data?: string; errors?: unknown; message?: string };
+    if (!response.ok) {
+      throw new Error(String(payload.message || `Proxmox power action returned HTTP ${response.status}`));
+    }
+
+    const pendingStatus = action === 'stop' || action === 'shutdown' ? 'stopping' : 'starting';
+    const updated = await dbService.updateVmStatus(vmid, pendingStatus);
+    await dbService.logAudit(userEmail, `VM_${action.toUpperCase()}`, `VMID ${vmid}`, `Proxmox action accepted; local status set to ${pendingStatus}`);
+
+    return {
+      ...(updated || vm),
+      status: pendingStatus,
+      taskId: payload.data || null,
+    };
   }
 
   /**
