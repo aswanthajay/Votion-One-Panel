@@ -4,7 +4,7 @@ import { apiRouter } from './routes/api.js';
 import { adminRouter } from './routes/admin.js';
 import { clientRouter } from './routes/client.js';
 import { ticketRouter } from './routes/tickets.js';
-import { vncRouter, vncCookieCache } from './routes/vnc.js';
+import { vncRouter } from './routes/vnc.js';
 import { expiryWorker } from './jobs/expiryWorker.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';

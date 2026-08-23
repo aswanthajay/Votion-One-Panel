@@ -1,60 +1,13 @@
 import { Router } from 'express';
 import { dbService } from '../db/database.js';
-import https from 'https';
 import { requireAuth } from '../middleware.js';
+import { ProxmoxHttpError, proxmoxFetch } from '../services/proxmoxHttp.js';
 
 export const vncRouter = Router();
 vncRouter.use(requireAuth);
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
 
-// Minimal global cache for the PVEAuthCookie
-export const vncCookieCache = new Map<string, { cookie: string, csrf: string, expiresAt: number }>();
-
-async function getAuthCookie(host: string, port: number, username: string, password: string): Promise<any> {
-  const cacheKey = `${host}:${port}:${username}`;
-  const cached = vncCookieCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) return cached;
-  
-  return new Promise((resolve, reject) => {
-    const postData = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    const req = https.request({
-      hostname: host,
-      port: port,
-      path: '/api2/json/access/ticket',
-      method: 'POST',
-      rejectUnauthorized: true,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': postData.length
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', d => data += d);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.data) {
-            const ticketData = {
-              cookie: `PVEAuthCookie=${json.data.ticket}`,
-              csrf: json.data.CSRFPreventionToken,
-              expiresAt: Date.now() + 1000 * 60 * 60 // 1 hr cache
-            };
-            vncCookieCache.set(cacheKey, ticketData);
-            resolve(ticketData);
-          } else {
-            resolve(null);
-          }
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    });
-    req.on('error', (e) => reject(e));
-    req.write(postData);
-    req.end();
-  });
-}
 
 // 1. POST /api/vnc/init -> acquires VNC ticket and port from Proxmox
 vncRouter.post('/init', async (req, res) => {
@@ -85,68 +38,60 @@ vncRouter.post('/init', async (req, res) => {
     // Use the node and type stored for the authorized VM; never trust caller-supplied routing fields.
     const nodePath = node;
 
-    // Call POST /vncproxy to generate ticket using API Token
-    return new Promise((resolve) => {
-      const vncproxyReq = https.request({
-        hostname: host,
-        port: port,
-        path: `/api2/json/nodes/${nodePath.replace(/ /g, '%20')}/${type}/${vmid}/vncproxy`,
-        method: 'POST',
-        rejectUnauthorized: true,
-        headers: {
-          'Authorization': token,
-          'Content-Length': '0' // Important for POST requests without body
-        }
-      }, (proxyRes) => {
-        let proxyData = '';
-        proxyRes.on('data', d => proxyData += d);
-        proxyRes.on('end', () => {
-          if (proxyRes.statusCode === 401 || proxyRes.statusCode === 403) {
-            res.status(401).json({ 
-              success: false, 
-              error: 'API Token Unauthorized for console relay. The token lacks console privileges.' 
-            });
-            return resolve(null);
-          }
-
-          if (proxyRes.statusCode !== 200) {
-            res.status(500).json({ 
-              success: false, 
-              error: `Console relay error (HTTP ${proxyRes.statusCode}): ${proxyData}` 
-            });
-            return resolve(null);
-          }
-
-          try {
-            const json = JSON.parse(proxyData);
-            if (json.data && json.data.ticket) {
-              res.json({
-                success: true,
-                data: {
-                  ticket: json.data.ticket,
-                  port: json.data.port,
-                  host,
-                  apiPort: port
-                }
-              });
-              resolve(null);
-            } else {
-              res.status(500).json({ success: false, error: 'Failed to allocate a console session ticket.', details: json });
-              resolve(null);
-            }
-          } catch (e) {
-            res.status(500).json({ success: false, error: 'Invalid response from Proxmox vncproxy: ' + proxyData });
-            resolve(null);
-          }
-        });
-      });
-      vncproxyReq.on('error', (e) => {
-        res.status(500).json({ success: false, error: 'Network error reaching the console relay service.' });
-        resolve(null);
-      });
-      vncproxyReq.end();
+    // Call POST /vncproxy to generate a ticket using the API token.
+    const proxyResponse = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${nodePath.replace(/ /g, '%20')}/${type}/${vmid}/vncproxy`, {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+        'Content-Length': '0',
+      },
+      sslFingerprint: c.ssl_fingerprint,
     });
+    const proxyData = await proxyResponse.text();
+
+    if (proxyResponse.status === 401 || proxyResponse.status === 403) {
+      return res.status(401).json({
+        success: false,
+        error: 'API Token Unauthorized for console relay. The token lacks console privileges.',
+      });
+    }
+
+    if (!proxyResponse.ok) {
+      return res.status(500).json({
+        success: false,
+        error: `Console relay error (HTTP ${proxyResponse.status}): ${proxyData}`,
+      });
+    }
+
+    try {
+      const json = JSON.parse(proxyData);
+      if (json.data && json.data.ticket) {
+        return res.json({
+          success: true,
+          data: {
+            ticket: json.data.ticket,
+            port: json.data.port,
+            host,
+            apiPort: port,
+          },
+        });
+      }
+      return res.status(500).json({ success: false, error: 'Failed to allocate a console session ticket.' });
+    } catch {
+      return res.status(500).json({ success: false, error: 'Invalid response from Proxmox vncproxy.' });
+    }
   } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
+    const code = String(e?.code || e?.cause?.code || '');
+    const detail = `${e?.message || ''} ${code}`;
+    const isTlsFailure = e instanceof ProxmoxHttpError || /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|TLS|FINGERPRINT/i.test(detail);
+    const isNetworkFailure = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EAI_AGAIN/i.test(detail);
+    res.status(500).json({
+      success: false,
+      error: isTlsFailure
+        ? 'Proxmox TLS verification failed. Confirm that the saved SHA-256 SSL fingerprint matches the server certificate.'
+        : isNetworkFailure
+          ? 'Network error reaching the console relay service.'
+          : (e?.message || 'Failed to initialize the VNC console.'),
+    });
   }
 });
