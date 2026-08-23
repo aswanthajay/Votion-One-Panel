@@ -47,6 +47,10 @@ export const ProxmoxConnections: React.FC = () => {
         return;
       } catch (error) {
         lastError = error;
+        if (!localStorage.getItem('votion_jwt_token')) {
+          setLoading(false);
+          return;
+        }
       }
     }
 

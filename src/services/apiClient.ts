@@ -145,6 +145,18 @@ class ApiClient {
     return localStorage.getItem('votion_user_role') || 'client';
   }
 
+  private notifyAuthExpired(response: Response): void {
+    if (response.status === 401 && this.getToken()) {
+      window.dispatchEvent(new CustomEvent('votion:auth-expired'));
+    }
+  }
+
+  private async apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const response = await globalThis['fetch'](input, init);
+    this.notifyAuthExpired(response);
+    return response;
+  }
+
   private getHeaders(extra: Record<string, string> = {}): HeadersInit {
     const token = this.getToken();
     return {
@@ -160,7 +172,7 @@ class ApiClient {
    * PROMPT 5: Client Portal Specific Methods
    */
   async getClientVMs(): Promise<ApiVM[]> {
-    const res = await fetch(`${API_BASE_URL}/client/vms`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -168,14 +180,14 @@ class ApiClient {
   }
 
   async getVMTelemetry(vmid: number) {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry`, {
       headers: this.getHeaders(),
     });
     return await res.json();
   }
 
   async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown') {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/power`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/power`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ action }),
@@ -187,7 +199,7 @@ class ApiClient {
    * PROMPT 4: Admin Allocation, Expiry & Suspension Methods
    */
   async assignServerToUser(assignData: { vmid?: number; name?: string; targetEmail: string; cpus?: number; memoryGb?: number; diskGb?: number; expiryDays?: number; os?: string }) {
-    const res = await fetch(`${API_BASE_URL}/admin/vms/assign`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/vms/assign`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(assignData),
@@ -196,7 +208,7 @@ class ApiClient {
   }
 
   async updateServerExpiry(vmid: number, additionalDays: number) {
-    const res = await fetch(`${API_BASE_URL}/admin/vms/${vmid}/expiry`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/vms/${vmid}/expiry`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ additionalDays }),
@@ -205,7 +217,7 @@ class ApiClient {
   }
 
   async toggleServerSuspend(vmid: number, suspend: boolean) {
-    const res = await fetch(`${API_BASE_URL}/admin/vms/${vmid}/suspend`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/vms/${vmid}/suspend`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ suspend }),
@@ -217,13 +229,13 @@ class ApiClient {
    * PROMPT 3: Admin Node Monitoring & Cluster Overview APIs
    */
   async getAdminNodes(): Promise<ApiNode[]> {
-    const res = await fetch(`${API_BASE_URL}/admin/nodes`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/nodes`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
 
   async getClusterOverview(): Promise<ApiClusterOverview | null> {
-    const res = await fetch(`${API_BASE_URL}/admin/cluster/overview`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/cluster/overview`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || null;
   }
@@ -233,7 +245,7 @@ class ApiClient {
    */
   async login(email: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -259,7 +271,7 @@ class ApiClient {
    */
   async register(name: string, email: string, password: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/register`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
@@ -282,7 +294,7 @@ class ApiClient {
    */
   async getUserProfile(email?: string): Promise<ApiAccount | null> {
     const targetEmail = email || this.getUserEmail();
-    const res = await fetch(`${API_BASE_URL}/user/profile?email=${encodeURIComponent(targetEmail)}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/profile?email=${encodeURIComponent(targetEmail)}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -294,7 +306,7 @@ class ApiClient {
    */
   async updateUserProfile(profileData: { email?: string; name?: string; phone?: string; supportPin?: string; twoFactorActive?: boolean }) {
     const email = profileData.email || this.getUserEmail();
-    const res = await fetch(`${API_BASE_URL}/user/profile`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/profile`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ ...profileData, email }),
@@ -306,7 +318,7 @@ class ApiClient {
    * Change Password Endpoint with PBKDF2 Hashing
    */
   async changePassword(currentPassword: string, newPassword: string) {
-    const res = await fetch(`${API_BASE_URL}/user/change-password`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/change-password`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail(), currentPassword, newPassword }),
@@ -318,7 +330,7 @@ class ApiClient {
    * Regenerate Support PIN in PostgreSQL
    */
   async regenerateSupportPin() {
-    const res = await fetch(`${API_BASE_URL}/user/regenerate-pin`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/regenerate-pin`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail() }),
@@ -330,7 +342,7 @@ class ApiClient {
    * Toggle 2FA State in PostgreSQL
    */
   async toggle2FA(active: boolean) {
-    const res = await fetch(`${API_BASE_URL}/user/2fa/toggle`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/2fa/toggle`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail(), active }),
@@ -342,19 +354,19 @@ class ApiClient {
    * SUPPORT TICKET SYSTEM METHODS
    */
   async getSupportTickets(): Promise<ApiSupportTicket[]> {
-    const res = await fetch(`${API_BASE_URL}/support/tickets`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
 
   async getTicketDetails(ticketId: string): Promise<{ ticket: ApiSupportTicket; replies: ApiTicketReply[] } | null> {
-    const res = await fetch(`${API_BASE_URL}/support/tickets/${ticketId}`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || null;
   }
 
   async createSupportTicket(subject: string, category: string, priority: 'low' | 'medium' | 'high' | 'urgent', vmid?: number) {
-    const res = await fetch(`${API_BASE_URL}/support/tickets`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ subject, category, priority, vmid }),
@@ -363,7 +375,7 @@ class ApiClient {
   }
 
   async addTicketReply(ticketId: string, message: string) {
-    const res = await fetch(`${API_BASE_URL}/support/tickets/${ticketId}/replies`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/replies`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ message }),
@@ -372,7 +384,7 @@ class ApiClient {
   }
 
   async updateTicketStatus(ticketId: string, status: 'open' | 'in-progress' | 'resolved' | 'closed') {
-    const res = await fetch(`${API_BASE_URL}/support/tickets/${ticketId}/status`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/status`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ status }),
@@ -384,7 +396,7 @@ class ApiClient {
    * VM & EXPIRY SUSPENSION METHODS
    */
   async suspendVM(vmid: number, suspend: boolean) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/suspend`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/suspend`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ suspend }),
@@ -393,7 +405,7 @@ class ApiClient {
   }
 
   async extendVMExpiry(vmid: number, additionalDays: number) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/extend`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/extend`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ additionalDays }),
@@ -402,7 +414,7 @@ class ApiClient {
   }
 
   async reinstallVMOS(vmid: number, targetOS: string) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/reinstall`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/reinstall`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ targetOS }),
@@ -414,7 +426,7 @@ class ApiClient {
    * Fetch Registered Accounts
    */
   async getAccounts(): Promise<ApiAccount[]> {
-    const res = await fetch(`${API_BASE_URL}/accounts`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/accounts`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -423,7 +435,7 @@ class ApiClient {
    * Fetch PVE Nodes Matrix from Express API
    */
   async getNodes(): Promise<ApiNode[]> {
-    const res = await fetch(`${API_BASE_URL}/nodes`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/nodes`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -432,7 +444,7 @@ class ApiClient {
    * Reboot Node Signal
    */
   async rebootNode(nodeId: string) {
-    const res = await fetch(`${API_BASE_URL}/nodes/${nodeId}/reboot`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/nodes/${nodeId}/reboot`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -446,7 +458,7 @@ class ApiClient {
     const url = ownerEmail 
       ? `${API_BASE_URL}/vms?ownerEmail=${encodeURIComponent(ownerEmail)}` 
       : `${API_BASE_URL}/vms`;
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.apiFetch(url, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -455,7 +467,7 @@ class ApiClient {
    * Admin Reassign VM Ownership by VMID
    */
   async assignVM(vmid: number, targetEmail: string) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/assign`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/assign`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ targetEmail }),
@@ -467,7 +479,7 @@ class ApiClient {
    * Admin Delete VM Allocation by VMID
    */
   async deleteVM(vmid: number) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -478,7 +490,7 @@ class ApiClient {
    * Provision New VM/LXC Container & Assign to Account by VMID
    */
   async provisionVM(vmData: { vmid?: number; name: string; type: string; node: string; ownerEmail?: string; cpus: number; memoryGb: number; diskGb: number; expiryDays?: number; os?: string }) {
-    const res = await fetch(`${API_BASE_URL}/vms`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(vmData),
@@ -490,7 +502,7 @@ class ApiClient {
    * Trigger VM Lifecycle Action via Express Backend
    */
   async executeVMAction(node: string, vmid: number, type: 'qemu' | 'lxc', action: 'start' | 'stop' | 'reboot' | 'shutdown') {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/action`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/action`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ node, type, action }),
@@ -502,7 +514,7 @@ class ApiClient {
    * Execute Command in VNC Terminal Console
    */
   async executeVncCommand(vmid: number, command: string) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/vnc/cmd`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/vnc/cmd`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ command }),
@@ -514,7 +526,7 @@ class ApiClient {
    * Fetch ISO & Software Downloads
    */
   async getDownloads() {
-    const res = await fetch(`${API_BASE_URL}/downloads`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/downloads`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -523,7 +535,7 @@ class ApiClient {
    * Fetch Data Room Verification Documents
    */
   async getDataRoom() {
-    const res = await fetch(`${API_BASE_URL}/dataroom`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/dataroom`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -532,7 +544,7 @@ class ApiClient {
    * Fetch Cluster Pricing & Tier Plans
    */
   async getPricing() {
-    const res = await fetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -541,7 +553,7 @@ class ApiClient {
    * Fetch Engine Release Notes
    */
   async getReleaseNotes() {
-    const res = await fetch(`${API_BASE_URL}/release-notes`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/release-notes`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -550,7 +562,7 @@ class ApiClient {
    * Fetch Terms & Privacy SLA
    */
   async getTerms() {
-    const res = await fetch(`${API_BASE_URL}/terms`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/terms`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || { title: 'VOTION Terms', sections: [] };
   }
@@ -559,7 +571,7 @@ class ApiClient {
    * Trigger ZFS Scrub via Express Backend
    */
   async triggerZfsScrub() {
-    const res = await fetch(`${API_BASE_URL}/storage/zfs/scrub`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/storage/zfs/scrub`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -570,7 +582,7 @@ class ApiClient {
    * Fetch TimescaleDB Telemetry History
    */
   async getTelemetryHistory() {
-    const res = await fetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -579,7 +591,7 @@ class ApiClient {
    * Fetch Tasks List
    */
   async getTasks(): Promise<ApiTask[]> {
-    const res = await fetch(`${API_BASE_URL}/tasks`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/tasks`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -588,7 +600,7 @@ class ApiClient {
    * Fetch Cluster Audit Logs
    */
   async getAuditLogs(): Promise<ApiAuditLog[]> {
-    const res = await fetch(`${API_BASE_URL}/audit-logs`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/audit-logs`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -597,12 +609,12 @@ class ApiClient {
   // ADVANCED USER MANAGEMENT
   // ==========================================
   async getAdminUsers(): Promise<ApiAccount[]> {
-    const res = await fetch(`${API_BASE_URL}/admin/users`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/users`, { headers: this.getHeaders() });
     return await res.json();
   }
 
   async createAdminUser(payload: any) {
-    const res = await fetch(`${API_BASE_URL}/admin/users`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/users`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(payload),
@@ -611,7 +623,7 @@ class ApiClient {
   }
 
   async updateAdminUserRole(userId: number, role: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/role`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/users/${userId}/role`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ role }),
@@ -620,7 +632,7 @@ class ApiClient {
   }
 
   async deleteAdminUser(userId: number) {
-    const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/users/${userId}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -631,7 +643,7 @@ class ApiClient {
   // CLUSTER CONNECTIONS MANAGER
   // ==========================================
   async getProxmoxConnections(): Promise<ApiProxmoxConnection[]> {
-    const res = await fetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
     let payload: unknown;
 
     try {
@@ -655,7 +667,7 @@ class ApiClient {
   }
 
   async addProxmoxConnection(payload: any) {
-    const res = await fetch(`${API_BASE_URL}/admin/proxmox`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(payload),
@@ -664,7 +676,7 @@ class ApiClient {
   }
 
   async deleteProxmoxConnection(id: string) {
-    const res = await fetch(`${API_BASE_URL}/admin/proxmox/${id}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -672,7 +684,7 @@ class ApiClient {
   }
 
   async testProxmoxConnection(payload: { host_ip: string; port: number; token_id: string; token_secret: string }) {
-    const res = await fetch(`${API_BASE_URL}/admin/proxmox/test`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/test`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(payload),
@@ -684,7 +696,7 @@ class ApiClient {
   // USER SECURITY & SETTINGS ENDPOINTS
   // ==========================================
   async changePrimaryEmail(newEmail: string) {
-    const res = await fetch(`${API_BASE_URL}/user/change-email`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/change-email`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail(), newEmail: newEmail.toLowerCase().trim() }),
@@ -693,7 +705,7 @@ class ApiClient {
   }
 
   async getSecondaryEmails() {
-    const res = await fetch(`${API_BASE_URL}/user/secondary-emails?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/secondary-emails?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -701,7 +713,7 @@ class ApiClient {
   }
 
   async addSecondaryEmail(secondaryEmail: string) {
-    const res = await fetch(`${API_BASE_URL}/user/secondary-emails`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/secondary-emails`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail(), secondaryEmail }),
@@ -710,7 +722,7 @@ class ApiClient {
   }
 
   async removeSecondaryEmail(secondaryEmail: string) {
-    const res = await fetch(`${API_BASE_URL}/user/secondary-emails/${encodeURIComponent(secondaryEmail)}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/secondary-emails/${encodeURIComponent(secondaryEmail)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -718,7 +730,7 @@ class ApiClient {
   }
 
   async setup2FA() {
-    const res = await fetch(`${API_BASE_URL}/user/2fa/setup`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/2fa/setup`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail() }),
@@ -727,7 +739,7 @@ class ApiClient {
   }
 
   async getPasskeys() {
-    const res = await fetch(`${API_BASE_URL}/user/passkeys?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -735,7 +747,7 @@ class ApiClient {
   }
 
   async registerPasskey(credentialId: string, keyName: string) {
-    const res = await fetch(`${API_BASE_URL}/user/passkeys`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail(), credentialId, keyName }),
@@ -744,7 +756,7 @@ class ApiClient {
   }
 
   async deletePasskey(credentialId: string) {
-    const res = await fetch(`${API_BASE_URL}/user/passkeys/${encodeURIComponent(credentialId)}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys/${encodeURIComponent(credentialId)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -752,7 +764,7 @@ class ApiClient {
   }
 
   async startRemoteSession() {
-    const res = await fetch(`${API_BASE_URL}/user/remote-session/start`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/remote-session/start`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail() }),
@@ -761,14 +773,14 @@ class ApiClient {
   }
 
   async getActiveRemoteSession() {
-    const res = await fetch(`${API_BASE_URL}/user/remote-session/active?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/remote-session/active?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     return await res.json();
   }
 
   async disconnectRemoteSession() {
-    const res = await fetch(`${API_BASE_URL}/user/remote-session/disconnect`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/remote-session/disconnect`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ email: this.getUserEmail() }),
@@ -779,7 +791,7 @@ class ApiClient {
   async uploadFile(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch(`${API_BASE_URL}/files/upload`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/files/upload`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.getToken()}`,
@@ -791,7 +803,7 @@ class ApiClient {
   }
 
   async getUploadedFiles() {
-    const res = await fetch(`${API_BASE_URL}/files/list`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/files/list`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -802,13 +814,13 @@ class ApiClient {
   // VM SNAPSHOTS / BACKUPS
   // ==========================================
   async getVmSnapshots(vmid: number) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
 
   async createVmSnapshot(vmid: number, name: string, description: string) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ name, description }),
@@ -817,7 +829,7 @@ class ApiClient {
   }
 
   async deleteVmSnapshot(vmid: number, name: string) {
-    const res = await fetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -828,12 +840,12 @@ class ApiClient {
   // VM FIREWALL RULES
   // ==========================================
   async getFirewallRules(vmid: number) {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, { headers: this.getHeaders() });
     return await res.json();
   }
 
   async toggleFirewall(vmid: number, enable: boolean) {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/toggle`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/toggle`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ enable }),
@@ -842,7 +854,7 @@ class ApiClient {
   }
 
   async addFirewallRule(vmid: number, rule: { action: string; type: string; proto?: string; dport?: string; enable?: boolean; comment?: string }) {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(rule),
@@ -851,7 +863,7 @@ class ApiClient {
   }
 
   async deleteFirewallRule(vmid: number, pos: number) {
-    const res = await fetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/${pos}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/${pos}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -863,7 +875,7 @@ class ApiClient {
   // USER EDIT + PASSWORD RESET (ADMIN)
   async updateAdminUser(userId: number, payload: { name?: string; email?: string; role?: string; phone?: string }) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/users/${userId}`, {
         method: 'PUT',
         headers: this.getHeaders(),
         body: JSON.stringify(payload),
@@ -876,7 +888,7 @@ class ApiClient {
 
   async resetAdminUserPassword(userId: number, newPassword: string, confirmPassword: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/users/${userId}/reset-password`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/users/${userId}/reset-password`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({ newPassword, confirmPassword }),
@@ -890,7 +902,7 @@ class ApiClient {
   // CLUSTER CONNECTION EDIT
   async updateProxmoxConnection(id: string, payload: any) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/proxmox/${id}`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/${id}`, {
         method: 'PUT',
         headers: this.getHeaders(),
         body: JSON.stringify(payload),
@@ -911,7 +923,7 @@ class ApiClient {
       if (params.q) qs.set('q', params.q);
       if (params.limit) qs.set('limit', String(params.limit));
       if (params.offset) qs.set('offset', String(params.offset));
-      const res = await fetch(`${API_BASE_URL}/audit-logs/filtered?${qs.toString()}`, { headers: this.getHeaders() });
+      const res = await this.apiFetch(`${API_BASE_URL}/audit-logs/filtered?${qs.toString()}`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error. Please check your connection.', total: 0, data: [] };
@@ -920,7 +932,7 @@ class ApiClient {
 
   async getAuditLogStats() {
     try {
-      const res = await fetch(`${API_BASE_URL}/audit-logs/stats`, { headers: this.getHeaders() });
+      const res = await this.apiFetch(`${API_BASE_URL}/audit-logs/stats`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: { total: 0, byAction: [], byStatus: [], byUser: [] } };
@@ -930,7 +942,7 @@ class ApiClient {
   // MAIL TEMPLATES
   async getMailTemplates() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/mail-templates`, { headers: this.getHeaders() });
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/mail-templates`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: [] };
@@ -939,7 +951,7 @@ class ApiClient {
 
   async updateMailTemplate(key: string, payload: { subject?: string; body?: string; enabled?: boolean }) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/mail-templates/${encodeURIComponent(key)}`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/mail-templates/${encodeURIComponent(key)}`, {
         method: 'PUT',
         headers: this.getHeaders(),
         body: JSON.stringify(payload),
@@ -953,7 +965,7 @@ class ApiClient {
   // MAIL NOTIFICATIONS
   async getMailNotifications() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/mail-notifications`, { headers: this.getHeaders() });
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/mail-notifications`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: {} };
@@ -962,7 +974,7 @@ class ApiClient {
 
   async updateMailNotifications(payload: any) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/mail-notifications`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/mail-notifications`, {
         method: 'PUT',
         headers: this.getHeaders(),
         body: JSON.stringify(payload),
@@ -976,7 +988,7 @@ class ApiClient {
   // SMTP (API v1)
   async getSmtpConfig() {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/smtp`, { headers: this.getHeaders() });
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/smtp`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: null };
@@ -985,7 +997,7 @@ class ApiClient {
 
   async saveSmtpConfig(config: any) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/smtp`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/smtp`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify(config),
@@ -998,7 +1010,7 @@ class ApiClient {
 
   async testSmtp(testEmail: string) {
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings/smtp/test`, {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/smtp/test`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify({ testEmail }),
@@ -1012,12 +1024,12 @@ class ApiClient {
 // ALERT RULES & NOTIFICATIONS
   // ==========================================
   async getAlertRules() {
-    const res = await fetch(`${API_BASE_URL}/alert-rules`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/alert-rules`, { headers: this.getHeaders() });
     return await res.json();
   }
 
   async createAlertRule(rule: any) {
-    const res = await fetch(`${API_BASE_URL}/alert-rules`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/alert-rules`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(rule),
@@ -1026,7 +1038,7 @@ class ApiClient {
   }
 
   async updateAlertRule(id: number, rule: any) {
-    const res = await fetch(`${API_BASE_URL}/alert-rules/${id}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/alert-rules/${id}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify(rule),
@@ -1035,7 +1047,7 @@ class ApiClient {
   }
 
   async deleteAlertRule(id: number) {
-    const res = await fetch(`${API_BASE_URL}/alert-rules/${id}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/alert-rules/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -1043,12 +1055,12 @@ class ApiClient {
   }
 
   async getNotifications(unreadOnly: boolean = false) {
-    const res = await fetch(`${API_BASE_URL}/notifications?unreadOnly=${unreadOnly}`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/notifications?unreadOnly=${unreadOnly}`, { headers: this.getHeaders() });
     return await res.json();
   }
 
   async markNotificationsRead(ids?: number[]) {
-    const res = await fetch(`${API_BASE_URL}/notifications/read`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/notifications/read`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ ids: ids || [] }),
@@ -1057,7 +1069,7 @@ class ApiClient {
   }
 
   async deleteNotification(id: number) {
-    const res = await fetch(`${API_BASE_URL}/notifications/${id}`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/notifications/${id}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -1065,7 +1077,7 @@ class ApiClient {
   }
 
   async clearNotifications() {
-    const res = await fetch(`${API_BASE_URL}/notifications/clear`, {
+    const res = await this.apiFetch(`${API_BASE_URL}/notifications/clear`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -1076,7 +1088,7 @@ class ApiClient {
   // TELEMETRY EXPORT
   // ==========================================
   async getTelemetryHistoryFull() {
-    const res = await fetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
     return await res.json();
   }
 
@@ -1086,7 +1098,7 @@ class ApiClient {
       window.open(url, '_blank');
       return;
     }
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.apiFetch(url, { headers: this.getHeaders() });
     const json = await res.json();
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1102,7 +1114,7 @@ class ApiClient {
       window.open(url, '_blank');
       return;
     }
-    const res = await fetch(url, { headers: this.getHeaders() });
+    const res = await this.apiFetch(url, { headers: this.getHeaders() });
     const json = await res.json();
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1115,7 +1127,7 @@ class ApiClient {
   private async automationFetch(path: string, options: RequestInit = {}) {
     const headers = new Headers(this.getHeaders());
     new Headers(options.headers || {}).forEach((value, key) => headers.set(key, value));
-    const res = await fetch(`${API_ORIGIN}/api/automation${path}`, { ...options, headers });
+    const res = await this.apiFetch(`${API_ORIGIN}/api/automation${path}`, { ...options, headers });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Automation request failed (${res.status})`);
     return data;

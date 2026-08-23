@@ -252,7 +252,20 @@ const AppShell: React.FC = () => {
 
 const AppRouter: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const pathname = normalizePath(location.pathname);
+
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      localStorage.removeItem('votion_jwt_token');
+      localStorage.removeItem('votion_user_email');
+      localStorage.removeItem('votion_user_role');
+      startTransition(() => navigate(AUTH_PATHS.login, { replace: true }));
+    };
+
+    window.addEventListener('votion:auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('votion:auth-expired', handleAuthExpired);
+  }, [navigate]);
 
   if (isAuthPath(pathname)) {
     return <AuthRoute mode={authModeForPath(pathname)} />;
