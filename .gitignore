@@ -81,3 +81,4 @@ _verify*.ps1
 _vnc_*.mjs
 
 .runtime/
+pg_log.txt
