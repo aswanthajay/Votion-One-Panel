@@ -1,15 +1,22 @@
+import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
-
 const { Pool } = pg;
 
+const databaseUrl = process.env.DATABASE_URL?.trim();
+const poolConfig: pg.PoolConfig = databaseUrl
+  ? { connectionString: databaseUrl }
+  : {
+      host: (process.env.PGHOST || 'localhost').trim(),
+      port: parseInt((process.env.PGPORT || '5433').trim(), 10),
+      user: (process.env.PGUSER || 'votion').trim(),
+      password: process.env.PGPASSWORD,
+      database: process.env.PGDATABASE || 'votion_proxmox_db',
+    };
+
 export const pgPool = new Pool({
-  host: (process.env.PGHOST || 'localhost').trim(),
-  port: parseInt((process.env.PGPORT || '5433').trim(), 10),
-  user: (process.env.PGUSER || 'votion').trim(),
-  password: process.env.PGPASSWORD || 'votion_secret_2026',
-  database: process.env.PGDATABASE || 'votion_proxmox_db',
+  ...poolConfig,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

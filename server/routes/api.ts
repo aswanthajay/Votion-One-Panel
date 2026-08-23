@@ -11,6 +11,7 @@ import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
+import { checkDbHealth } from '../services/databaseHealth.js';
 import { createSessionToken, requireAdmin, requireAuth } from '../middleware.js';
 
 export const apiRouter = Router();
@@ -43,15 +44,10 @@ const proxmoxService = new ProxmoxService({
   sslFingerprint: process.env.PVE_SSL_FINGERPRINT,
 });
 
-// 1. GET /api/v1/health
-apiRouter.get('/health', (req, res) => {
-  res.json({
-    status: 'online',
-    system: 'Stellar Panel (PostgreSQL Database Pool)',
-    database: 'PostgreSQL Active Pool + In-Memory Telemetry Buffer',
-    platform: 'Stellar Engine',
-    timestamp: new Date().toISOString(),
-  });
+// GET /api/v1/health
+apiRouter.get('/health', async (_req, res) => {
+  const health = await checkDbHealth();
+  res.status(health.status === 'ok' ? 200 : 503).json(health);
 });
 
 // PUBLIC STATUS — used by login page, no auth required

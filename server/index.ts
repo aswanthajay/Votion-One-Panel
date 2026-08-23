@@ -11,6 +11,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
+import { checkDbHealth } from './services/databaseHealth.js';
 import { resolveSessionUser } from './middleware.js';
 import https from 'https';
 
@@ -152,8 +153,14 @@ app.use('/api2', proxmoxProxy);
 app.use('/pve2', proxmoxProxy);
 app.use('/proxmox-console', proxmoxProxy);
 
-// Initialize the schema before any route, worker, or proxy queries run.
+// Initialize and validate the database before any route, worker, or proxy queries run.
 await initializeDatabaseSchema();
+const dbHealth = await checkDbHealth();
+if (dbHealth.status !== 'ok') {
+  console.error(`[POSTGRES] Startup health check failed: ${dbHealth.error}`);
+  throw new Error(`Database health check failed: ${dbHealth.error}`);
+}
+console.log(`[POSTGRES] Startup health check passed (${dbHealth.latencyMs}ms)`);
 const initialConnections = await dbService.getProxmoxConnections();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
