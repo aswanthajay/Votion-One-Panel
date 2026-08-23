@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { lazy, startTransition, Suspense, useEffect, useState } from 'react';
 import {
   BrowserRouter,
   Navigate,
@@ -99,7 +99,7 @@ const navigateForView = (navigate: ReturnType<typeof useNavigate>, view: unknown
   const path = typeof view === 'string' && view in VIEW_PATHS
     ? VIEW_PATHS[view as ViewMode]
     : VIEW_PATHS.dashboard;
-  navigate(path);
+  startTransition(() => navigate(path));
 };
 
 const RouteLoading = () => <div className="app-content" aria-busy="true" />;
@@ -118,8 +118,8 @@ const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
     <Suspense fallback={<div className="min-h-screen bg-white" aria-busy="true" />}>
       <AuthPages
         initialMode={mode}
-        onNavigateToDashboard={() => navigate(VIEW_PATHS.dashboard)}
-        onNavigateToAuth={(nextMode) => navigate(AUTH_PATHS[nextMode])}
+        onNavigateToDashboard={() => startTransition(() => navigate(VIEW_PATHS.dashboard))}
+        onNavigateToAuth={(nextMode) => startTransition(() => navigate(AUTH_PATHS[nextMode]))}
       />
     </Suspense>
   );
@@ -172,7 +172,9 @@ const AppShell: React.FC = () => {
     const nextRole: UserRole = userRole === 'admin' ? 'client' : 'admin';
     setUserRole(nextRole);
     localStorage.setItem('votion_user_role', nextRole);
-    navigate(nextRole === 'client' ? VIEW_PATHS['client-instances'] : VIEW_PATHS.dashboard);
+    startTransition(() => {
+      navigate(nextRole === 'client' ? VIEW_PATHS['client-instances'] : VIEW_PATHS.dashboard);
+    });
   };
 
   return (
