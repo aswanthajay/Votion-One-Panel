@@ -36,6 +36,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^6.30.6",
     "recharts": "^2.12.2",
     "tailwind-merge": "^2.2.1",
     "three": "^0.185.1",
