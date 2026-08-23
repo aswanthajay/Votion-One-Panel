@@ -8,7 +8,7 @@ import { vncRouter, vncCookieCache } from './routes/vnc.js';
 import { expiryWorker } from './jobs/expiryWorker.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
-import { dbService } from './db/database.js';
+import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { resolveSessionUser } from './middleware.js';
@@ -85,9 +85,6 @@ app.use('/api/v1/vnc', vncRouter);
 
 // Cache connection for synchronous WS proxy routing
 let cachedConn: any = null;
-dbService.getProxmoxConnections().then(conns => {
-  if (conns && conns.length > 0) cachedConn = conns[0];
-}).catch(() => {});
 
 // Native WebSocket relay to Proxmox (http-proxy's util._extend is deprecated and
 // throws on Node 22, crashing the whole server on every WS upgrade).
@@ -154,6 +151,11 @@ app.use('/novnc', proxmoxProxy);
 app.use('/api2', proxmoxProxy);
 app.use('/pve2', proxmoxProxy);
 app.use('/proxmox-console', proxmoxProxy);
+
+// Initialize the schema before any route, worker, or proxy queries run.
+await initializeDatabaseSchema();
+const initialConnections = await dbService.getProxmoxConnections();
+if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
 // Start Automated Background Expiry Worker Cron Job
 expiryWorker.start();

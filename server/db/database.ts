@@ -6,7 +6,7 @@ const { Pool } = pg;
 
 export const pgPool = new Pool({
   host: (process.env.PGHOST || 'localhost').trim(),
-  port: parseInt((process.env.PGPORT || '5432').trim(), 10),
+  port: parseInt((process.env.PGPORT || '5433').trim(), 10),
   user: (process.env.PGUSER || 'votion').trim(),
   password: process.env.PGPASSWORD || 'votion_secret_2026',
   database: process.env.PGDATABASE || 'votion_proxmox_db',
@@ -326,8 +326,9 @@ export async function initializeDatabaseSchema() {
   }
 }
 
-// Ensure schema is created on startup
-initializeDatabaseSchema();
+// The server entrypoint awaits initializeDatabaseSchema() before starting workers or accepting requests.
+
+
 
 // STATIC UI CONSTANTS
 const CONSTANTS = {
