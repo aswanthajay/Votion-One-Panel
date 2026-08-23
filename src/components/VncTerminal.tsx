@@ -33,7 +33,8 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
           return;
         }
 
-        const { ticket, port } = json.data;
+        const { ticket, password, port } = json.data;
+        const vncPassword = password || ticket;
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsBase = new URL(apiHost || '/', window.location.origin);
         const wsPath = `${wsBase.pathname.replace(/\/$/, '')}/api/vnc/ws`;
@@ -43,7 +44,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
         
         if (containerRef.current) {
           activeRfb = new RFB(containerRef.current, wsUrl, {
-            credentials: { password: ticket },
+            credentials: { password: vncPassword },
             wsProtocols: ['binary']
           });
 
@@ -60,7 +61,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
           });
 
           activeRfb.addEventListener('credentialsrequired', () => {
-             activeRfb.sendCredentials({ password: ticket });
+             activeRfb.sendCredentials({ password: vncPassword });
           });
 
           setRfb(activeRfb);

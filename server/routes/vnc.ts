@@ -38,13 +38,17 @@ vncRouter.post('/init', async (req, res) => {
     // Use the node and type stored for the authorized VM; never trust caller-supplied routing fields.
     const nodePath = node;
 
-    // Call POST /vncproxy to generate a ticket using the API token.
+    // Ask Proxmox to prepare a websocket-capable VNC proxy. Without both
+    // parameters, PVE may open a plain VNC listener that cannot complete the
+    // later vncwebsocket upgrade used by noVNC.
+    const proxyBody = 'websocket=1&generate-password=1';
     const proxyResponse = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${nodePath.replace(/ /g, '%20')}/${type}/${vmid}/vncproxy`, {
       method: 'POST',
       headers: {
         Authorization: token,
-        'Content-Length': '0',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: proxyBody,
       sslFingerprint: c.ssl_fingerprint,
     });
     const proxyData = await proxyResponse.text();
@@ -70,6 +74,7 @@ vncRouter.post('/init', async (req, res) => {
           success: true,
           data: {
             ticket: json.data.ticket,
+            password: json.data.password || json.data.ticket,
             port: json.data.port,
             host,
             apiPort: port,

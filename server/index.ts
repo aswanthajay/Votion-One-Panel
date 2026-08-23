@@ -229,20 +229,38 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
       // Upgrade the client connection, then open a WebSocket to Proxmox and relay frames bidirectionally.
       vncWss.handleUpgrade(req as any, socket as any, head, (clientWs) => {
         let upstream: WebSocket | null = null;
+        let upstreamOpened = false;
+        const handshakeTimer = setTimeout(() => {
+          if (!upstreamOpened) {
+            console.error('[VNC WS RELAY] Upstream handshake timed out');
+            closeBoth();
+          }
+        }, 12_000);
+        const closeBoth = () => {
+          clearTimeout(handshakeTimer);
+          try { upstream?.close(); } catch (_e) {}
+          try { clientWs.close(); } catch (_e) {}
+        };
         try {
           upstream = new WebSocket(`wss://${cleanHost}:${pvePort}${upstreamPath}`, {
             ...createProxmoxWebSocketTlsOptions(cachedConn.ssl_fingerprint),
             headers: { Authorization: req.proxmoxAuth }
           });
         } catch (e) {
-          clientWs.close();
+          console.error('[VNC WS RELAY ERROR] Failed to create upstream socket', e);
+          closeBoth();
           return;
         }
-        const closeBoth = () => {
-          try { upstream?.close(); } catch (_e) {}
-          try { clientWs.close(); } catch (_e) {}
-        };
+        upstream.on('unexpected-response', (_request, response) => {
+          console.error(`[VNC WS RELAY ERROR] Proxmox rejected websocket upgrade with HTTP ${response.statusCode}`);
+          response.resume();
+          closeBoth();
+        });
+        clientWs.on('error', closeBoth);
+        upstream.on('close', closeBoth);
         upstream.on('open', () => {
+          upstreamOpened = true;
+          clearTimeout(handshakeTimer);
           clientWs.on('message', (data, isBinary) => {
             if (upstream?.readyState === 1) upstream.send(data as any, { binary: isBinary as any });
           });
@@ -250,7 +268,6 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
           upstream.on('message', (data, isBinary) => {
             if (clientWs.readyState === 1) clientWs.send(data as any, { binary: isBinary as any });
           });
-          upstream.on('close', closeBoth);
           upstream.on('error', closeBoth);
         });
         upstream.on('error', (err) => {
