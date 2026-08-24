@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { TextInput } from '@tremor/react';
 import { TelemetryChart } from './TelemetryChart';
-import { apiClient, ApiAccount, ApiVM, ApiSupportTicket, ApiClusterOverview } from '../services/apiClient';
+import { apiClient, ApiAccount, ApiVM, ApiSupportTicket, ApiClusterOverview, ApiReimageRequest } from '../services/apiClient';
 
 interface StellarNode {
   id: string;
@@ -44,7 +45,11 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
   const [selectedTargetOS, setSelectedTargetOS] = useState('Ubuntu 24.04 LTS');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [pendingReimageRequests, setPendingReimageRequests] = useState(0);
   const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
+  const navigate = useNavigate();
 
   // VM Provisioning Form State
   const [newVmid, setNewVmid] = useState(105);
@@ -73,6 +78,12 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
         apiClient.getAccounts(),
         apiClient.getSupportTickets(),
       ]);
+      let pendingRequests: ApiReimageRequest[] = [];
+      try {
+        pendingRequests = await apiClient.getAdminReimageRequests('pending');
+      } catch {
+        // The overview remains usable if the optional approval queue is unavailable.
+      }
 
       const mappedNodes: StellarNode[] = apiNodes.map((n, idx) => ({
         id: String(n.id || idx + 1),
@@ -94,8 +105,11 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
       setNodes(mappedNodes);
       setClusterOverview(apiOverview);
       setVMs(apiVMs);
-      setAccounts(apiAccounts);
+            setAccounts(apiAccounts);
       setTickets(apiTickets);
+      setPendingReimageRequests(pendingRequests.length);
+      setLastUpdated(new Date());
+      setLoadError(null);
       
       // Fix default selections for forms if the default doesn't exist
       if (apiAccounts.length > 0) {
@@ -115,6 +129,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
 
       setIsLoading(false);
     } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Unable to load the administrator overview.');
       setIsLoading(false);
     }
   };
@@ -152,12 +167,12 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
     e.preventDefault();
     if (!selectedVmForAction) return;
     try {
-      await apiClient.reinstallVMOS(selectedVmForAction.vmid, selectedTargetOS);
-      setToastMessage(`VM ${selectedVmForAction.vmid} OS reinstalled to ${selectedTargetOS}.`);
+      await apiClient.createVmReimageRequest(selectedVmForAction.vmid, selectedTargetOS, 'Administrator submitted an OS reimage request from the overview.');
+      setToastMessage(`OS reimage request submitted for VM ${selectedVmForAction.vmid}.`);
       setModalType(null);
       loadData();
     } catch (e) {
-      setToastMessage('Failed to reinstall OS.');
+      setToastMessage('Failed to submit the OS reimage request.');
     }
   };
 
@@ -213,13 +228,37 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
         </div>
       )}
 
-      <div className="mb-8">
-        <h1 className="page-heading">{pageTitle}</h1>
-        <p className="text-sm text-[#656b6b]">Manage compute nodes, guest allocations, and cluster health.</p>
+      <div className="mb-6 flex flex-col gap-4 border-b border-[#dedfdf] pb-6 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8a9090]"><span className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />Control plane</div>
+          <h1 className="page-heading">{pageTitle}</h1>
+          <p className="mt-2 text-sm text-[#656b6b]">Manage compute nodes, guest allocations, and cluster health from one operational view.</p>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-[#656b6b]">
+          <span>{lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Waiting for telemetry'}</span>
+          <button type="button" onClick={loadData} disabled={isLoading} className="btn-secondary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50">{isLoading ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
       </div>
 
+      {loadError && <div className="mb-6 flex flex-col gap-3 rounded-lg border border-[#fecaca] bg-[#fff7f6] px-4 py-3 text-sm text-[#8d3028] sm:flex-row sm:items-center sm:justify-between" role="alert"><span>{loadError}</span><button type="button" onClick={loadData} className="font-semibold underline underline-offset-2">Try again</button></div>}
+
+      <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Operational summary">
+        {[
+          { label: 'Managed guests', value: clusterOverview?.totalVMsCount ?? vms.length, tone: 'text-[#1a1a1a]' },
+          { label: 'Running now', value: clusterOverview?.runningVMsCount ?? vms.filter(vm => vm.status === 'running').length, tone: 'text-[#176b52]' },
+          { label: 'Suspended', value: clusterOverview?.suspendedVMsCount ?? vms.filter(vm => vm.isSuspended).length, tone: 'text-[#8b5e00]' },
+          { label: 'Pending OS reviews', value: pendingReimageRequests, tone: pendingReimageRequests > 0 ? 'text-[#a23d35]' : 'text-[#1a1a1a]' },
+        ].map(item => <div key={item.label} className="rounded-lg border border-[#dedfdf] bg-[#fbfbfb] px-4 py-3 sm:px-5"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a9090]">{item.label}</p><p className={`mt-2 text-2xl font-semibold tracking-[-0.02em] ${isLoading ? 'h-7 w-12 animate-pulse rounded bg-[#e5e7e7] text-transparent' : item.tone}`}>{isLoading ? '0' : item.value}</p></div>)}
+      </section>
+
+      <section className="mb-8 grid gap-3 md:grid-cols-3" aria-label="Operational attention">
+        <button type="button" onClick={() => navigate('/reimage-requests')} className="group rounded-lg border border-[#dedfdf] bg-white p-4 text-left transition hover:border-[#8b5e00] hover:bg-[#fffdf7]"><div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a9090]">OS reimage review</p><p className="mt-2 text-sm font-semibold text-[#1a1a1a]">{pendingReimageRequests > 0 ? `${pendingReimageRequests} request${pendingReimageRequests === 1 ? '' : 's'} awaiting review` : 'No pending requests'}</p></div><span className="text-lg text-[#8b5e00] transition-transform group-hover:translate-x-0.5">→</span></div><p className="mt-2 text-xs leading-5 text-[#656b6b]">Review approval records separately from operator execution.</p></button>
+        <div className="rounded-lg border border-[#dedfdf] bg-white p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a9090]">Support workload</p><p className="mt-2 text-sm font-semibold text-[#1a1a1a]">{tickets.filter(ticket => ticket.status === 'open' || ticket.status === 'in-progress').length} active ticket{tickets.filter(ticket => ticket.status === 'open' || ticket.status === 'in-progress').length === 1 ? '' : 's'}</p><p className="mt-2 text-xs leading-5 text-[#656b6b]">Open and in-progress client conversations requiring attention.</p></div>
+        <div className="rounded-lg border border-[#dedfdf] bg-white p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8a9090]">Node availability</p><p className="mt-2 text-sm font-semibold text-[#1a1a1a]">{nodes.filter(node => node.status === 'online').length} of {nodes.length || '—'} online</p><p className="mt-2 text-xs leading-5 text-[#656b6b]">Current control-plane visibility across attached hypervisors.</p></div>
+      </section>
+
       {/* Cluster Health Overview Tiles */}
-      {clusterOverview && (
+      {clusterOverview ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6 mb-6 md:mb-10">
           
           <div className="bg-white border border-[#dedfdf] hover:border-[#656b6b] transition-colors rounded-lg p-4 sm:p-6 flex flex-col justify-between h-[130px] font-sans">
@@ -277,6 +316,12 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
           </div>
 
         </div>
+      ) : isLoading ? (
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-busy="true" aria-label="Loading cluster health">
+          {[1, 2, 3, 4].map(tile => <div key={tile} className="h-[130px] animate-pulse rounded-lg border border-[#dedfdf] bg-[#f7f7f6]" />)}
+        </div>
+      ) : (
+        <div className="mb-6 rounded-lg border border-[#dedfdf] bg-[#fbfbfb] px-5 py-6" role="status"><p className="text-sm font-semibold text-[#1a1a1a]">Cluster health is temporarily unavailable.</p><p className="mt-1 text-xs leading-5 text-[#656b6b]">The overview remains available, but live node telemetry could not be loaded. Use Refresh to try again.</p></div>
       )}
 
       {/* Stellar Nodes Table */}
@@ -308,9 +353,11 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
               {isLoading && nodes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-3 sm:px-6 py-8 text-center text-[#656b6b] text-sm">
-                    Loading telemetry data...
+                    <span className="inline-flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-[#a7aaaa]" />Loading telemetry data…</span>
                   </td>
                 </tr>
+              ) : nodes.length === 0 ? (
+                <tr><td colSpan={7} className="px-3 sm:px-6 py-10 text-center"><p className="text-sm font-semibold text-[#1a1a1a]">No hypervisors are reporting to the control plane.</p><p className="mt-1 text-xs text-[#656b6b]">Check the cluster connection and refresh to retry synchronization.</p></td></tr>
               ) : (
                 nodes.map(node => (
                   <tr key={node.id} className="border-b border-[#dedfdf] last:border-0 hover:bg-[#fbfaf9] transition-colors group cursor-pointer" onClick={() => setSelectedNode(node)}>
@@ -403,10 +450,12 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
                   <td colSpan={5} className="px-4 py-8 text-center text-sm text-[#656b6b]" aria-busy="true">
                     <span className="inline-flex items-center gap-2">
                       <span className="h-3 w-3 animate-pulse rounded-full bg-[#a7aaaa]" />
-                      Loading instance data...
+                      Loading instance data…
                     </span>
                   </td>
                 </tr>
+              ) : vms.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-10 text-center"><p className="text-sm font-semibold text-[#1a1a1a]">No guest allocations found.</p><p className="mt-1 text-xs text-[#656b6b]">Provisioned virtual machines and containers will appear here.</p></td></tr>
               ) : vms.map(vm => (
                 <tr key={vm.vmid} className={`border-b border-[#dedfdf] last:border-0 hover:bg-[#fbfaf9] transition-colors ${vm.isSuspended ? 'opacity-70 bg-[#f9f8f6]' : ''}`}>
                   <td className="px-4 py-4">
@@ -465,7 +514,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
                         {vm.isSuspended ? 'Unsuspend' : 'Suspend'}
                       </button>
                       <button onClick={() => { setSelectedVmForAction(vm); setModalType('extend-expiry'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Extend</button>
-                      <button onClick={() => { setSelectedVmForAction(vm); setModalType('reinstall-os'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">OS</button>
+                      <button onClick={() => { setSelectedVmForAction(vm); setModalType('reinstall-os'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Request OS</button>
                       <button onClick={() => { setSelectedVmForAction(vm); setTargetAccountEmail(vm.ownerEmail); setModalType('assign-vm'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Assign</button>
                       <button onClick={() => setConfirmTarget(vm.vmid)} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap !text-[#dc2626] !border-[#fecaca] hover:!bg-[#fef2f2]">Remove</button>
                     </div>
@@ -540,12 +589,12 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[50] flex items-center justify-center p-6">
           <div className="w-full max-w-[460px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-6 flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-[#dedfdf] pb-3">
-              <h3 className="text-base font-bold text-[#1a1a1a]">Re-Image OS for VMID {selectedVmForAction.vmid}</h3>
+                <h3 className="text-base font-bold text-[#1a1a1a]">Request OS reimage for VMID {selectedVmForAction.vmid}</h3>
               <button onClick={() => setModalType(null)} className="text-[#1a1a1a]/60 font-bold cursor-pointer">✕</button>
             </div>
             <form onSubmit={handleReinstallOSSubmit} className="flex flex-col gap-3 text-xs">
               <p className="text-[#dc2626] font-semibold bg-[#fef2f2] p-2.5 rounded border border-[#fecaca]">
-                ⚠️ Warning: Re-imaging will format root disk space and mount target OS template.
+                Warning: An approved request may replace the root disk and cause permanent data loss. Submission does not start a Proxmox operation; an administrator must review the request first.
               </p>
               <div>
                 <label className="block font-semibold mb-1">Select Target OS Image Template</label>
@@ -562,7 +611,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
               </div>
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] mt-2">
                 <button type="button" onClick={() => setModalType(null)} className="btn-secondary">Cancel</button>
-                <button type="submit" className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c]">Trigger Re-Image</button>
+                <button type="submit" className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c]">Submit for Approval</button>
               </div>
             </form>
           </div>
