@@ -1720,3 +1720,112 @@ button {
     margin-top: 0;
   }
 }
+
+
+/* Telemetry trends: structured monitoring panels with stable label geometry. */
+.telemetry-trend-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 8px;
+}
+
+.telemetry-chart-card {
+  min-width: 0;
+  border-top: 1px solid var(--ink-color-global-border-subtle);
+  padding-top: 16px;
+}
+
+.telemetry-chart-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.telemetry-chart-heading h4 {
+  color: var(--ink-color-global-text-default);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.telemetry-chart-heading span {
+  flex-shrink: 0;
+  color: var(--ink-color-global-text-subtle);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+}
+
+.telemetry-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 13px;
+  color: var(--ink-color-global-text-subtle);
+  font-size: 10px;
+}
+
+.telemetry-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.telemetry-legend-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.telemetry-legend-net-in { background: #10b981; }
+.telemetry-legend-net-out { background: #3b82f6; }
+.telemetry-legend-disk-read { background: #eab308; }
+.telemetry-legend-disk-write { background: #71717a; }
+
+.telemetry-trend-area-chart {
+  height: 176px;
+  margin-top: 8px;
+}
+
+.telemetry-chart-card .recharts-cartesian-axis-tick-value {
+  fill: var(--ink-color-global-text-subtle);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+}
+
+.telemetry-chart-card .recharts-cartesian-grid-horizontal line {
+  stroke: var(--ink-color-global-brand-gray-30);
+  stroke-opacity: 0.8;
+}
+
+@media (max-width: 1100px) {
+  .telemetry-trends-span {
+    grid-column: span 2 / span 2;
+  }
+
+  .telemetry-trend-grid {
+    gap: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .telemetry-trends-span {
+    grid-column: span 1 / span 1;
+  }
+
+  .telemetry-trend-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .telemetry-chart-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+}

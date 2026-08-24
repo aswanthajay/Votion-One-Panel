@@ -287,34 +287,54 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
           </div>
         </div>
 
-        <div className="col-span-1 flex flex-col">
-          <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">Network Traffic (24h)</h4>
-          <AreaChart
-            className="h-44 mt-4"
-            data={chartData}
-            index="time"
-            categories={['Net In (Mbps)', 'Net Out (Mbps)']}
-            colors={['emerald', 'blue']}
-            valueFormatter={(number) => number.toFixed(1) + ' Mbps'}
-            showAnimation={false}
-            showYAxis={false}
-            showLegend={true}
-          />
-        </div>
+        <div className="telemetry-trends-span col-span-1 md:col-span-2">
+          <div className="telemetry-trend-grid">
+            <div className="telemetry-chart-card">
+              <div className="telemetry-chart-heading">
+                <h4>Network traffic</h4>
+                <span>24H · Mbps</span>
+              </div>
+              <div className="telemetry-chart-legend" aria-label="Network traffic legend">
+                <span><i className="telemetry-legend-dot telemetry-legend-net-in" />Net in</span>
+                <span><i className="telemetry-legend-dot telemetry-legend-net-out" />Net out</span>
+              </div>
+              <AreaChart
+                className="telemetry-trend-area-chart"
+                data={chartData}
+                index="time"
+                categories={['Net In (Mbps)', 'Net Out (Mbps)']}
+                colors={['emerald', 'blue']}
+                valueFormatter={(number) => number.toFixed(1) + ' Mbps'}
+                showAnimation={false}
+                showYAxis={false}
+                showLegend={false}
+                showGridLines={true}
+              />
+            </div>
 
-        <div className="col-span-1 flex flex-col">
-          <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">Disk I/O Rates (24h)</h4>
-          <AreaChart
-            className="h-44 mt-4"
-            data={chartData}
-            index="time"
-            categories={['Disk R (MB/s)', 'Disk W (MB/s)']}
-            colors={['yellow', 'zinc']}
-            valueFormatter={(number) => number.toFixed(1) + ' MB/s'}
-            showAnimation={false}
-            showLegend={true}
-            yAxisWidth={56}
-          />
+            <div className="telemetry-chart-card">
+              <div className="telemetry-chart-heading">
+                <h4>Disk I/O rates</h4>
+                <span>24H · MB/s</span>
+              </div>
+              <div className="telemetry-chart-legend" aria-label="Disk I/O legend">
+                <span><i className="telemetry-legend-dot telemetry-legend-disk-read" />Disk read</span>
+                <span><i className="telemetry-legend-dot telemetry-legend-disk-write" />Disk write</span>
+              </div>
+              <AreaChart
+                className="telemetry-trend-area-chart"
+                data={chartData}
+                index="time"
+                categories={['Disk R (MB/s)', 'Disk W (MB/s)']}
+                colors={['yellow', 'zinc']}
+                valueFormatter={(number) => number.toFixed(1) + ' MB/s'}
+                showAnimation={false}
+                showLegend={false}
+                showGridLines={true}
+                yAxisWidth={76}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="col-span-1 flex flex-col justify-center pl-4 border-l border-[#f0f0f0] max-md:border-l-0 max-md:pl-0">
