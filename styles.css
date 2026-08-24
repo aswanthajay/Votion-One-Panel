@@ -1406,3 +1406,220 @@ button {
 .vm-metadata-footer{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:18px;border-top:1px solid var(--color-subtle-gray);padding-top:13px;color:var(--color-text-subtle);font-size:10px}.vm-metadata-skeleton{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding-top:20px}.vm-skeleton-block{height:30px;border-radius:3px;background:var(--color-light-gray)}.vm-metadata-error{padding-top:18px;color:#84251e;font-size:11px}
 @media (max-width:760px){.vm-instance-card-body{padding:18px}.vm-instance-header{align-items:flex-start;flex-direction:column;gap:14px}.vm-instance-header>div:last-child{width:100%;justify-content:flex-end}.vm-metadata-panel{padding:17px}.vm-metadata-columns{grid-template-columns:1fr;gap:22px}.vm-metadata-group+.vm-metadata-group{border-left:0;border-top:1px solid var(--color-subtle-gray);padding-left:0;padding-top:20px}}
 @media (max-width:480px){.vm-usage-grid{grid-template-columns:1fr;gap:16px}.vm-usage-grid>div+div{border-left:0;border-top:1px solid var(--color-subtle-gray);padding-left:0;padding-top:16px}.vm-metadata-heading,.vm-metadata-group-heading{align-items:flex-start;flex-direction:column;gap:6px}.vm-datapoints,.vm-metadata-skeleton{grid-template-columns:1fr}}
+
+
+/* VM identity header: a clear operational record rather than a generic card. */
+.vm-identity-block {
+  min-width: 0;
+  flex: 1;
+}
+
+.vm-identity-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-color-global-text-subtle);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.vm-identity-separator {
+  color: var(--ink-color-global-border-subtle);
+  font-weight: 400;
+}
+
+.vm-identity-id {
+  color: var(--ink-color-global-text-default);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  letter-spacing: 0.04em;
+}
+
+.vm-identity-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.vm-identity-name {
+  overflow: hidden;
+  color: var(--ink-color-global-text-default);
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vm-instance-status {
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 3px;
+  padding: 4px 7px;
+  color: var(--ink-color-global-text-subtle);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.vm-instance-status-running {
+  border-color: #b7dec9;
+  color: #23613b;
+}
+
+.vm-instance-status-starting,
+.vm-instance-status-stopping,
+.vm-instance-status-rebooting {
+  border-color: #d9c58a;
+  color: #765d13;
+}
+
+.vm-identity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin-top: 18px;
+}
+
+.vm-identity-meta > div {
+  min-width: 110px;
+}
+
+.vm-identity-meta dt {
+  color: var(--ink-color-global-text-subtle);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.vm-identity-meta dd {
+  margin-top: 5px;
+  color: var(--ink-color-global-text-default);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.vm-identity-value-mono {
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.vm-power-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vm-power-caption {
+  color: var(--ink-color-global-text-subtle);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.vm-power-button-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vm-power-action {
+  min-width: 70px;
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 3px;
+  background: var(--ink-color-global-surface-background-default);
+  padding: 7px 10px;
+  color: var(--ink-color-global-text-default);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.vm-power-action:hover:not(:disabled) {
+  border-color: var(--ink-color-global-brand-black);
+  background: var(--ink-color-global-brand-gray-10);
+}
+
+.vm-power-action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.vm-power-action-primary {
+  border-color: var(--ink-color-global-brand-black);
+  background: var(--ink-color-global-brand-black);
+  color: var(--ink-color-global-brand-white);
+}
+
+.vm-power-action-primary:hover:not(:disabled) {
+  border-color: #000;
+  background: #000;
+  color: #fff;
+}
+
+.vm-power-action-danger {
+  color: #a33a32;
+}
+
+.vm-power-action-danger:hover:not(:disabled) {
+  border-color: #d8a09a;
+  background: #fef5f4;
+  color: #84251e;
+}
+
+.vm-power-action.is-disabled,
+.vm-power-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+@media (max-width: 760px) {
+  .vm-power-actions {
+    align-items: flex-start;
+    width: 100%;
+  }
+
+  .vm-power-button-group {
+    width: 100%;
+  }
+
+  .vm-power-action {
+    flex: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .vm-identity-name {
+    font-size: 21px;
+  }
+
+  .vm-identity-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 18px;
+    width: 100%;
+  }
+
+  .vm-identity-meta > div {
+    min-width: 0;
+  }
+
+  .vm-power-button-group {
+    gap: 4px;
+  }
+
+  .vm-power-action {
+    min-width: 0;
+    padding-inline: 7px;
+    font-size: 9px;
+  }
+}

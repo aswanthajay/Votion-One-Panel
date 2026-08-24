@@ -420,55 +420,58 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               
               {/* PANEL HEADER & POWER CONTROLS */}
               <div className="vm-instance-header">
-                <div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-mono font-bold text-xs text-[#656b6b]">
-                      [{selectedVm.type === 'qemu' ? 'VM' : 'CT'}-{selectedVm.vmid}]
-                    </span>
-                    <h3 className="text-xl font-bold tracking-tight text-[#1a1a1a]">{selectedVm.name}</h3>
+                <div className="vm-identity-block">
+                  <div className="vm-identity-kicker">
+                    <span>Instance</span>
+                    <span className="vm-identity-separator" aria-hidden="true">/</span>
+                    <span className="vm-identity-id">{selectedVm.type === 'qemu' ? 'VM' : 'CT'}-{selectedVm.vmid}</span>
                   </div>
-                  <div className="text-xs text-[#888] mt-1.5">
-                    <span className="font-medium text-[#1a1a1a]">{selectedVm.os || 'Ubuntu 24.04 LTS'}</span> &nbsp;&middot;&nbsp; IP: <span className="font-mono text-[#1a1a1a]">{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</span> &nbsp;&middot;&nbsp; Expires: <span className="font-mono text-[#1a1a1a]">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Never'}</span>
+                  <div className="vm-identity-name-row">
+                    <h3 className="vm-identity-name">{selectedVm.name}</h3>
+                    <span className={`vm-instance-status vm-instance-status-${selectedVm.status}`}>{selectedVm.status}</span>
                   </div>
+                  <dl className="vm-identity-meta">
+                    <div>
+                      <dt>Operating system</dt>
+                      <dd>{selectedVm.os || 'Ubuntu 24.04 LTS'}</dd>
+                    </div>
+                    <div>
+                      <dt>Address</dt>
+                      <dd className="vm-identity-value-mono">{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</dd>
+                    </div>
+                    <div>
+                      <dt>Expires</dt>
+                      <dd className="vm-identity-value-mono">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Never'}</dd>
+                    </div>
+                  </dl>
                 </div>
 
                 {/* CLIENT POWER BUTTONS */}
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => handlePowerAction('start')}
-                    disabled={selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null}
-                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${
-                      (selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null) 
-                        ? 'opacity-40 cursor-not-allowed text-[#a0a1a2]' 
-                        : 'bg-[#1a1a1a] text-white hover:bg-black cursor-pointer'
-                    }`}
-                  >
-                    {isPowerLoading === 'start' ? 'Starting...' : 'Start'}
-                  </button>
-
-                  <button 
-                    onClick={() => handlePowerAction('reboot')}
-                    disabled={selectedVm.isSuspended || isPowerLoading !== null}
-                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors border border-[#dedfdf] ${
-                      (selectedVm.isSuspended || isPowerLoading !== null) 
-                        ? 'opacity-40 cursor-not-allowed bg-transparent text-[#a0a1a2]' 
-                        : 'bg-transparent text-[#1a1a1a] hover:bg-[#f8f8f8] hover:border-[#1a1a1a] cursor-pointer'
-                    }`}
-                  >
-                    {isPowerLoading === 'reboot' ? 'Restarting...' : 'Restart'}
-                  </button>
-
-                  <button 
-                    onClick={() => handlePowerAction('stop')}
-                    disabled={selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null}
-                    className={`px-4 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors border border-[#dedfdf] ${
-                      (selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null) 
-                        ? 'opacity-40 cursor-not-allowed bg-transparent text-[#a0a1a2]' 
-                        : 'bg-transparent text-[#dc2626] hover:bg-[#fef2f2] hover:border-[#fca5a5] cursor-pointer'
-                    }`}
-                  >
-                    {isPowerLoading === 'stop' ? 'Stopping...' : 'Stop'}
-                  </button>
+                <div className="vm-power-actions" aria-label="Instance power controls">
+                  <span className="vm-power-caption">Power</span>
+                  <div className="vm-power-button-group">
+                    <button
+                      onClick={() => handlePowerAction('start')}
+                      disabled={selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null}
+                      className={`vm-power-action vm-power-action-primary ${selectedVm.isSuspended || selectedVm.status === 'running' || isPowerLoading !== null ? 'is-disabled' : ''}`}
+                    >
+                      {isPowerLoading === 'start' ? 'Starting...' : 'Start'}
+                    </button>
+                    <button
+                      onClick={() => handlePowerAction('reboot')}
+                      disabled={selectedVm.isSuspended || isPowerLoading !== null}
+                      className={`vm-power-action ${selectedVm.isSuspended || isPowerLoading !== null ? 'is-disabled' : ''}`}
+                    >
+                      {isPowerLoading === 'reboot' ? 'Restarting...' : 'Restart'}
+                    </button>
+                    <button
+                      onClick={() => handlePowerAction('stop')}
+                      disabled={selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null}
+                      className={`vm-power-action vm-power-action-danger ${selectedVm.isSuspended || selectedVm.status === 'stopped' || isPowerLoading !== null ? 'is-disabled' : ''}`}
+                    >
+                      {isPowerLoading === 'stop' ? 'Stopping...' : 'Stop'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
