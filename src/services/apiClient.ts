@@ -71,6 +71,43 @@ export interface ApiVM {
   createdAt?: string;
 }
 
+export interface ApiVmMetadata {
+  network: {
+    source: 'cloud-init' | 'guest-agent' | 'proxmox-config' | 'unavailable';
+    primaryIp: string | null;
+    configuredIp: string | null;
+    gateway: string | null;
+    macAddress: string | null;
+    interfaces: Array<{
+      name: string;
+      macAddress: string | null;
+      bridge: string | null;
+      ipAddress: string | null;
+      gateway: string | null;
+      source: 'cloud-init' | 'guest-agent' | 'proxmox-config';
+    }>;
+    guestAgentAvailable: boolean;
+  };
+  hardware: {
+    type: 'qemu' | 'lxc';
+    vcpus: number | null;
+    sockets: number | null;
+    coresPerSocket: number | null;
+    memoryMb: number | null;
+    ballooning: boolean | null;
+    machine: string | null;
+    bios: string | null;
+    cpuType: string | null;
+    bootOrder: string | null;
+    disks: Array<{ device: string; storage: string | null; sizeGb: number | null }>;
+    networkAdapters: number;
+    qemuGuestAgent: boolean | null;
+    osType: string | null;
+    features: string[];
+  };
+  fetchedAt: string;
+}
+
 export interface ApiAccount {
   id: number;
   email: string;
@@ -185,6 +222,17 @@ class ApiClient {
     });
     const data = await res.json();
     return data.data || [];
+  }
+
+  async getVMMetadata(vmid: number): Promise<ApiVmMetadata> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata`, {
+      headers: this.getHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `VM metadata request failed (HTTP ${res.status})`);
+    }
+    return data.data as ApiVmMetadata;
   }
 
   async getVMMetrics(vmid: number) {

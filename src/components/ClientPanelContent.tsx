@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
-import { apiClient, ApiVM } from '../services/apiClient';
+import { apiClient, ApiVM, ApiVmMetadata } from '../services/apiClient';
+import { VmMetadataPanel } from './VmMetadataPanel';
 
 const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
 const VmMetricsChart = lazy(() => import('./charts/VmMetricsChart'));
@@ -14,6 +15,9 @@ interface ClientPanelContentProps {
 export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter }) => {
   const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
   const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
+  const [vmMetadata, setVmMetadata] = useState<ApiVmMetadata | null>(null);
+  const [isMetadataLoading, setIsMetadataLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const [vncCommand, setVncCommand] = useState('');
   const [vncOutput, setVncOutput] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'metrics' | 'console' | 'reinstall' | 'ticket' | 'firewall' | 'backups'>('metrics');
@@ -73,6 +77,38 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     const interval = setInterval(loadClientVMs, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedVm) {
+      setVmMetadata(null);
+      setMetadataError(null);
+      return;
+    }
+
+    const loadMetadata = async () => {
+      setIsMetadataLoading(true);
+      setMetadataError(null);
+      try {
+        const metadata = await apiClient.getVMMetadata(selectedVm.vmid);
+        if (!cancelled) setVmMetadata(metadata);
+      } catch (err) {
+        if (!cancelled) {
+          setVmMetadata(null);
+          setMetadataError(err instanceof Error ? err.message : 'Proxmox metadata is unavailable.');
+        }
+      } finally {
+        if (!cancelled) setIsMetadataLoading(false);
+      }
+    };
+
+    void loadMetadata();
+    const interval = setInterval(loadMetadata, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedVm?.vmid]);
 
   // PROMPT 5.3: Sync filter prop from Sidebar to VM Selection and Active Tab
   useEffect(() => {
@@ -392,7 +428,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                     <h3 className="text-xl font-bold tracking-tight text-[#1a1a1a]">{selectedVm.name}</h3>
                   </div>
                   <div className="text-xs text-[#888] mt-1.5">
-                    <span className="font-medium text-[#1a1a1a]">{selectedVm.os || 'Ubuntu 24.04 LTS'}</span> &nbsp;&middot;&nbsp; IP: <span className="font-mono text-[#1a1a1a]">{selectedVm.ipAddress || 'Pending'}</span> &nbsp;&middot;&nbsp; Expires: <span className="font-mono text-[#1a1a1a]">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Never'}</span>
+                    <span className="font-medium text-[#1a1a1a]">{selectedVm.os || 'Ubuntu 24.04 LTS'}</span> &nbsp;&middot;&nbsp; IP: <span className="font-mono text-[#1a1a1a]">{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</span> &nbsp;&middot;&nbsp; Expires: <span className="font-mono text-[#1a1a1a]">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Never'}</span>
                   </div>
                 </div>
 
@@ -461,6 +497,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                    </div>
                  </div>
               </div>
+
+              <VmMetadataPanel metadata={vmMetadata} isLoading={isMetadataLoading} error={metadataError} />
 
               {/* MANAGEMENT TABS */}
             <div className="flex border-b border-[#dedfdf] text-xs gap-6 font-semibold">

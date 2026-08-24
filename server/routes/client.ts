@@ -4,6 +4,7 @@ import { dbService } from '../db/database.js';
 import { proxmoxApi } from '../services/proxmox.js';
 import { requireAuth } from '../middleware.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
+import { mapProxmoxVmMetadata } from '../services/proxmoxVmMetadata.js';
 
 export const clientRouter = Router();
 clientRouter.use(requireAuth);
@@ -28,6 +29,61 @@ clientRouter.get('/vms', async (req, res) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const vms = await proxmoxApi.getLiveVMs(userEmail);
   res.json({ success: true, count: vms.length, data: vms });
+});
+
+// 1.5. GET /api/client/vms/:vmid/metadata — Fetch sanitized Cloud-Init and Proxmox VM details
+clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
+  const vm = (req as any).authorizedVm;
+  if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
+
+  try {
+    const connections = await dbService.getProxmoxConnections();
+    const conn = connections[0];
+    if (!conn) return res.status(503).json({ success: false, error: 'No Proxmox connection is configured' });
+
+    const cleanHost = String(conn.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
+    const configUrl = `https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/${resourceType}/${vm.vmid}/config`;
+    const configResponse = await proxmoxFetch(configUrl, {
+      method: 'GET',
+      headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+      sslFingerprint: conn.ssl_fingerprint,
+      timeoutMs: 10000,
+    });
+
+    if (!configResponse.ok) {
+      return res.status(502).json({ success: false, error: 'Proxmox did not return VM configuration' });
+    }
+
+    const configPayload = await configResponse.json().catch(() => null);
+    const config = (configPayload?.data || {}) as Record<string, unknown>;
+    let guestAgentInterfaces: Array<Record<string, unknown>> = [];
+    const agentEnabled = vm.type === 'qemu' && (
+      config.agent === true || Number(config.agent) > 0 || String(config.agent || '').startsWith('1')
+    );
+
+    if (agentEnabled) {
+      try {
+        const agentResponse = await proxmoxFetch(`https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/qemu/${vm.vmid}/agent/network-get-interfaces`, {
+          method: 'GET',
+          headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+          sslFingerprint: conn.ssl_fingerprint,
+          timeoutMs: 8000,
+        });
+        if (agentResponse.ok) {
+          const agentPayload = await agentResponse.json().catch(() => null);
+          guestAgentInterfaces = Array.isArray(agentPayload?.data?.result) ? agentPayload.data.result : [];
+        }
+      } catch {
+        // Cloud-Init and Proxmox config remain the source of truth if the guest agent is unavailable.
+      }
+    }
+
+    const metadata = mapProxmoxVmMetadata(config, resourceType, guestAgentInterfaces as any);
+    res.json({ success: true, data: metadata });
+  } catch {
+    res.status(502).json({ success: false, error: 'Unable to fetch VM metadata from Proxmox' });
+  }
 });
 
 // 2. GET /api/client/vms/:vmid/telemetry — Fetch live CPU %, RAM, and Bandwidth usage from Proxmox for VMID
