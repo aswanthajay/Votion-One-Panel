@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Title, AreaChart, DonutChart, ProgressBar, Grid, Metric, Text, Flex } from '@tremor/react';
+import { Title, AreaChart, DonutChart, ProgressBar, Grid, Metric, Text, Flex, CustomTooltipProps } from '@tremor/react';
 import { API_ORIGIN, apiClient } from '../../services/apiClient';
 
 interface VmMetricsChartProps {
@@ -16,6 +16,27 @@ interface LiveTelemetry {
   diskread: number;
   diskwrite: number;
   uptime: number;
+}
+
+function TrendTooltip({ active, label, payload }: CustomTooltipProps) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="telemetry-tooltip" role="status">
+      <div className="telemetry-tooltip-time">{label}</div>
+      <div className="telemetry-tooltip-values">
+        {payload.map((entry) => (
+          <div className="telemetry-tooltip-row" key={entry.name}>
+            <span className="telemetry-tooltip-label">
+              <i className="telemetry-tooltip-dot" style={{ backgroundColor: entry.color || '#71717a' }} />
+              {entry.name}
+            </span>
+            <strong>{Array.isArray(entry.value) ? entry.value.join(', ') : entry.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
@@ -309,6 +330,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 showYAxis={false}
                 showLegend={false}
                 showGridLines={true}
+                customTooltip={TrendTooltip}
               />
             </div>
 
@@ -331,6 +353,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 showAnimation={false}
                 showLegend={false}
                 showGridLines={true}
+                customTooltip={TrendTooltip}
                 yAxisWidth={76}
               />
             </div>

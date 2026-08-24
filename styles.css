@@ -1987,3 +1987,66 @@ button {
 .notification-empty-description {
   margin-top: 3px;
 }
+
+
+/* Telemetry tooltip: compact enough to preserve chart visibility on hover. */
+.telemetry-tooltip {
+  min-width: 168px;
+  overflow: hidden;
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 6px 16px rgba(26, 26, 26, 0.12);
+  color: var(--ink-color-global-text-default);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.telemetry-tooltip-time {
+  border-bottom: 1px solid var(--ink-color-global-border-subtle);
+  background: var(--ink-color-global-brand-gray-10);
+  padding: 7px 9px 6px;
+  color: var(--ink-color-global-text-default);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.telemetry-tooltip-values {
+  display: grid;
+  gap: 6px;
+  padding: 8px 9px;
+}
+
+.telemetry-tooltip-row,
+.telemetry-tooltip-label {
+  display: flex;
+  align-items: center;
+}
+
+.telemetry-tooltip-row {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.telemetry-tooltip-label {
+  min-width: 0;
+  gap: 6px;
+  color: var(--ink-color-global-text-subtle);
+  white-space: nowrap;
+}
+
+.telemetry-tooltip-label .telemetry-tooltip-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.telemetry-tooltip-row strong {
+  color: var(--ink-color-global-text-default);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
