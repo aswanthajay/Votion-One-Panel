@@ -1623,3 +1623,74 @@ button {
     font-size: 9px;
   }
 }
+
+
+/* Power controls: one compact command strip with an explicit control label. */
+.vm-instance-header .vm-power-actions {
+  align-items: flex-start;
+  flex-direction: row;
+  gap: 12px;
+  padding-left: 18px;
+  border-left: 1px solid var(--ink-color-global-border-subtle);
+}
+
+.vm-power-caption {
+  padding-top: 8px;
+  white-space: nowrap;
+}
+
+.vm-power-button-group {
+  overflow: hidden;
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 4px;
+  gap: 0;
+  background: var(--ink-color-global-surface-background-default);
+}
+
+.vm-power-action,
+.vm-power-action-primary,
+.vm-power-action-danger {
+  min-width: 76px;
+  border: 0;
+  border-right: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 0;
+  padding: 8px 12px;
+}
+
+.vm-power-action:last-child {
+  border-right: 0;
+}
+
+.vm-power-action-primary {
+  border-right-color: #4b4b4b;
+}
+
+.vm-power-action:hover:not(:disabled) {
+  background: var(--ink-color-global-brand-gray-10);
+}
+
+.vm-power-action-primary:hover:not(:disabled) {
+  background: var(--ink-color-global-brand-black);
+}
+
+.vm-power-action:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--ink-color-global-brand-black);
+  outline-offset: -2px;
+}
+
+@media (max-width: 760px) {
+  .vm-instance-header .vm-power-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .vm-power-caption {
+    padding-top: 0;
+  }
+}
