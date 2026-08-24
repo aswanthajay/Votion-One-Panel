@@ -126,9 +126,11 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
                   Mark all read
                 </button>
               )}
-              <button onClick={handleClear} className="notification-panel-action notification-panel-action-danger">
-                Clear
-              </button>
+              {notifications.length > 0 && (
+                <button onClick={handleClear} className="notification-panel-action notification-panel-action-danger">
+                  Clear
+                </button>
+              )}
             </div>
           </div>
 
@@ -136,7 +138,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
             {notifications.length === 0 ? (
               <div className="notification-empty-state">
                 <span className="notification-empty-mark" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 8h12M6 12h8M6 16h12" /></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m5 12 4 4L19 7" /></svg>
                 </span>
                 <p className="notification-empty-title">No active notifications</p>
                 <p className="notification-empty-description">Triggered alerts will appear here.</p>

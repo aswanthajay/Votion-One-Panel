@@ -1950,3 +1950,40 @@ button {
     padding-inline: 12px;
   }
 }
+
+
+/* Final alert popover polish: compact footprint and explicit all-clear state. */
+.notification-panel {
+  top: 36px;
+  width: 296px;
+  border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(26, 26, 26, 0.11);
+}
+
+.notification-panel-header {
+  min-height: 44px;
+  padding-inline: 13px;
+}
+
+.notification-panel-actions:empty {
+  display: none;
+}
+
+.notification-empty-state {
+  min-height: 112px;
+  padding: 18px 16px 20px;
+}
+
+.notification-empty-mark {
+  width: 24px;
+  height: 24px;
+  color: #23613b;
+}
+
+.notification-empty-title {
+  margin-top: 10px;
+}
+
+.notification-empty-description {
+  margin-top: 3px;
+}
