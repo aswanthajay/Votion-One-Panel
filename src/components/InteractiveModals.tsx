@@ -16,6 +16,9 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   const [ticketReplies, setTicketReplies] = useState<ApiTicketReply[]>([]);
   const [replyMessage, setReplyMessage] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'create' | 'details'>('list');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   // New Ticket Form State
   const [ticketSubject, setTicketSubject] = useState('');
@@ -30,11 +33,13 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
 
   const loadTickets = async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const tickets = await apiClient.getSupportTickets();
       setTicketsList(tickets);
     } catch (err) {
-      // Catch network error
+      setTicketsList([]);
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to load support tickets.');
     } finally {
       setLoading(false);
     }
@@ -45,6 +50,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
       setModalData(null);
       setSelectedTicket(null);
       setViewMode('list');
+      setErrorMessage(null);
       return;
     }
 
@@ -88,14 +94,17 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   const handleSelectTicket = async (ticket: ApiSupportTicket) => {
     setSelectedTicket(ticket);
     setLoading(true);
+    setErrorMessage(null);
     try {
       const details = await apiClient.getTicketDetails(ticket.id);
       if (details) {
         setTicketReplies(details.replies);
         setViewMode('details');
+      } else {
+        throw new Error('Unable to load this support ticket.');
       }
     } catch (err) {
-      // Error fetching details
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to load this support ticket.');
     } finally {
       setLoading(false);
     }
@@ -104,35 +113,62 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   // Submit New Support Ticket
   const handleSupportTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ticketSubject.trim()) return;
+    if (!ticketSubject.trim()) {
+      setErrorMessage('Ticket subject is required.');
+      return;
+    }
 
-    const res = await apiClient.createSupportTicket(ticketSubject, ticketCategory, ticketPriority);
-    showToast(res.message || 'Support ticket created successfully in PostgreSQL');
-    setTicketSubject('');
-    setViewMode('list');
-    await loadTickets();
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await apiClient.createSupportTicket(ticketSubject.trim(), ticketCategory, ticketPriority);
+      showToast(res.message || 'Support ticket created successfully.');
+      setTicketSubject('');
+      setViewMode('list');
+      await loadTickets();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to create the support ticket.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Send Reply Message to Ticket
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTicket || !replyMessage.trim()) return;
+    if (!selectedTicket || !replyMessage.trim()) {
+      setErrorMessage('Reply message cannot be empty.');
+      return;
+    }
 
-    const res = await apiClient.addTicketReply(selectedTicket.id, replyMessage.trim());
-    if (res.success && res.data) {
-      setTicketReplies([...ticketReplies, res.data]);
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await apiClient.addTicketReply(selectedTicket.id, replyMessage.trim());
+      if (!res.data) throw new Error('The reply was not returned by the server.');
+      setTicketReplies(previous => [...previous, res.data]);
       setReplyMessage('');
       showToast('Reply posted to support thread');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to post the reply.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // Update Ticket Status
-  const handleUpdateStatus = async (status: 'open' | 'in-progress' | 'resolved' | 'closed') => {
+  const handleUpdateStatus = async (status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed') => {
     if (!selectedTicket) return;
-    const res = await apiClient.updateTicketStatus(selectedTicket.id, status);
-    if (res.success) {
+    setIsUpdatingStatus(true);
+    setErrorMessage(null);
+    try {
+      await apiClient.updateTicketStatus(selectedTicket.id, status);
       setSelectedTicket({ ...selectedTicket, status });
       showToast(`Ticket status updated to ${status}`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to update ticket status.');
+    } finally {
+      setIsUpdatingStatus(false);
     }
   };
 
@@ -163,6 +199,12 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
             ✕
           </button>
         </div>
+
+        {errorMessage && (
+          <div role="alert" className="border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs text-[#991b1b]">
+            {errorMessage}
+          </div>
+        )}
 
         {loading ? (
           <div className="p-8 text-center text-[#656b6b] font-mono">
@@ -269,7 +311,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
                     </div>
                     <div className="flex justify-end gap-2 pt-2 border-t border-[#dedfdf]">
                       <button type="button" onClick={() => setViewMode('list')} className="btn-secondary">Cancel</button>
-                      <button type="submit" className="btn-primary">Create Support Ticket</button>
+                      <button type="submit" disabled={isSubmitting} className="btn-primary disabled:opacity-50">{isSubmitting ? 'Creating Ticket…' : 'Create Support Ticket'}</button>
                     </div>
                   </form>
                 )}
@@ -283,13 +325,15 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
                         <div className="text-[11px] text-[#656b6b] mt-0.5">Category: {selectedTicket.category} | Priority: {selectedTicket.priority}</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <select 
-                          value={selectedTicket.status} 
-                          onChange={(e) => handleUpdateStatus(e.target.value as any)}
-                          className="p-1 border border-[#dedfdf] rounded text-xs outline-none bg-ink-card font-semibold"
+                        <select
+                          value={selectedTicket.status}
+                          onChange={(e) => handleUpdateStatus(e.target.value as 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed')}
+                          disabled={isUpdatingStatus}
+                          className="p-1 border border-[#dedfdf] rounded text-xs outline-none bg-ink-card font-semibold disabled:opacity-50"
                         >
                           <option value="open">open</option>
                           <option value="in-progress">in-progress</option>
+                          <option value="replied">replied</option>
                           <option value="resolved">resolved</option>
                           <option value="closed">closed</option>
                         </select>
@@ -298,6 +342,9 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
 
                     {/* Replies Thread */}
                     <div className="flex flex-col gap-3 max-h-[260px] overflow-y-auto p-2 border border-[#dedfdf] rounded-lg bg-ink-card">
+                      {ticketReplies.length === 0 && (
+                        <p className="p-3 text-center text-xs text-[#656b6b]">No replies yet. Send a reply to continue the conversation.</p>
+                      )}
                       {ticketReplies.map(r => (
                         <div 
                           key={r.id} 
@@ -326,8 +373,8 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
                         className="flex-1 p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a]" 
                         required 
                       />
-                      <button type="submit" className="btn-primary py-2 px-4 cursor-pointer">
-                        Send Reply
+                      <button type="submit" disabled={isSubmitting} className="btn-primary py-2 px-4 cursor-pointer disabled:opacity-50">
+                        {isSubmitting ? 'Sending…' : 'Send Reply'}
                       </button>
                     </form>
                   </div>

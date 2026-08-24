@@ -512,6 +512,8 @@ apiRouter.get('/files/list', async (req, res) => {
 });
 
 // 10. SUPPORT TICKET SYSTEM ENDPOINTS
+const ticketStatuses = new Set(['open', 'in-progress', 'replied', 'resolved', 'closed']);
+
 apiRouter.get('/support/tickets', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -575,7 +577,10 @@ apiRouter.put('/support/tickets/:id/status', requireAdmin, async (req, res) => {
     return res.status(400).json({ success: false, error: 'Status is required' });
   }
 
-  const statusValue = String(status);
+  const statusValue = String(status).trim();
+  if (!ticketStatuses.has(statusValue)) {
+    return res.status(400).json({ success: false, error: 'Invalid ticket status' });
+  }
   const result = await dbService.updateTicketStatus(String(req.params.id), statusValue, userEmail);
   res.json({ success: true, message: `Ticket ${req.params.id} status updated to ${statusValue}`, data: result });
 });

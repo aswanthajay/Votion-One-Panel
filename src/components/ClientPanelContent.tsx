@@ -39,6 +39,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   const [ticketSubject, setTicketSubject] = useState('');
   const [ticketCategory, setTicketCategory] = useState('Quota Upgrade');
   const [ticketPriority, setTicketPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [isTicketSubmitting, setIsTicketSubmitting] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -152,11 +153,18 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   // Support Ticket Linked to VMID
   const handleTicketSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVm || !ticketSubject.trim()) return;
+    if (!selectedVm || !ticketSubject.trim() || isTicketSubmitting) return;
 
-    const res = await apiClient.createSupportTicket(ticketSubject, ticketCategory, ticketPriority, selectedVm.vmid);
-    showToast(res.message || `Support ticket opened for VMID ${selectedVm.vmid}`);
-    setTicketSubject('');
+    setIsTicketSubmitting(true);
+    try {
+      const res = await apiClient.createSupportTicket(ticketSubject.trim(), ticketCategory, ticketPriority, selectedVm.vmid);
+      showToast(res.message || `Support ticket opened for VMID ${selectedVm.vmid}`);
+      setTicketSubject('');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Unable to open the support ticket.');
+    } finally {
+      setIsTicketSubmitting(false);
+    }
   };
 
   // Interactive VNC Command Execution
@@ -591,8 +599,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                     </select>
                   </div>
                 </div>
-                <button type="submit" className="btn-primary py-2 px-4 text-xs cursor-pointer">
-                  Submit Ticket for VMID {selectedVm.vmid}
+                <button type="submit" disabled={isTicketSubmitting} className="btn-primary py-2 px-4 text-xs cursor-pointer disabled:opacity-50">
+                  {isTicketSubmitting ? 'Submitting Ticket…' : `Submit Ticket for VMID ${selectedVm.vmid}`}
                 </button>
               </form>
             )}

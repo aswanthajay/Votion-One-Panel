@@ -116,7 +116,7 @@ export interface ApiSupportTicket {
   id: string;
   subject: string;
   category: string;
-  status: 'open' | 'in-progress' | 'resolved' | 'closed';
+  status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   vmid?: number;
   userEmail?: string;
@@ -155,6 +155,14 @@ class ApiClient {
     const response = await globalThis['fetch'](input, init);
     this.notifyAuthExpired(response);
     return response;
+  }
+
+  private async readTicketResponse(response: Response): Promise<any> {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || data.message || `Ticket request failed (HTTP ${response.status})`);
+    }
+    return data;
   }
 
   private getHeaders(extra: Record<string, string> = {}): HeadersInit {
@@ -370,13 +378,13 @@ class ApiClient {
    */
   async getSupportTickets(): Promise<ApiSupportTicket[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/support/tickets`, { headers: this.getHeaders() });
-    const data = await res.json();
-    return data.data || [];
+    const data = await this.readTicketResponse(res);
+    return Array.isArray(data.data) ? data.data : [];
   }
 
   async getTicketDetails(ticketId: string): Promise<{ ticket: ApiSupportTicket; replies: ApiTicketReply[] } | null> {
     const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}`, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readTicketResponse(res);
     return data.data || null;
   }
 
@@ -386,7 +394,7 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({ subject, category, priority, vmid }),
     });
-    return await res.json();
+    return await this.readTicketResponse(res);
   }
 
   async addTicketReply(ticketId: string, message: string) {
@@ -395,16 +403,16 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({ message }),
     });
-    return await res.json();
+    return await this.readTicketResponse(res);
   }
 
-  async updateTicketStatus(ticketId: string, status: 'open' | 'in-progress' | 'resolved' | 'closed') {
+  async updateTicketStatus(ticketId: string, status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed') {
     const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/status`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ status }),
     });
-    return await res.json();
+    return await this.readTicketResponse(res);
   }
 
   /**

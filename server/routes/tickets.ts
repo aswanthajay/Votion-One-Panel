@@ -7,6 +7,7 @@ export const ticketRouter = Router();
 ticketRouter.use(requireAuth);
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
+const ticketStatuses = new Set(['open', 'in-progress', 'replied', 'resolved', 'closed']);
 const isAdmin = (req: any) => adminRoles.has(req.authUser?.role);
 
 // 1. POST /api/tickets — Create a new support ticket
@@ -102,19 +103,24 @@ const handleUpdateStatus = async (req: any, res: any) => {
     return res.status(400).json({ success: false, error: 'Status is required' });
   }
 
-  const updated = await dbService.updateTicketStatus(ticketId, status, userEmail);
+  const statusValue = String(status).trim();
+  if (!ticketStatuses.has(statusValue)) {
+    return res.status(400).json({ success: false, error: 'Invalid ticket status' });
+  }
+
+  const updated = await dbService.updateTicketStatus(ticketId, statusValue, userEmail);
   
   // updateTicketStatus returns { success, ticketId, status } — fetch the ticket first to email the owner
   try {
     const details = await dbService.getTicketDetails(ticketId);
     if (details?.ticket?.userEmail) {
-      emailService.sendTicketUpdate(details.ticket.userEmail, ticketId, status);
+      emailService.sendTicketUpdate(details.ticket.userEmail, ticketId, statusValue);
     }
   } catch (e) { /* email failures must not break the status update */ }
 
   res.json({
     success: true,
-    message: `Ticket ${ticketId} status updated to ${status}`,
+    message: `Ticket ${ticketId} status updated to ${statusValue}`,
     data: updated,
   });
 };
