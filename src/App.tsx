@@ -27,6 +27,7 @@ const AlertRulesModal = lazy(() => import('./components/AlertRulesModal').then(m
 const ClusterAuditLogs = lazy(() => import('./components/ClusterAuditLogs').then(module => ({ default: module.ClusterAuditLogs })));
 const ReimageRequestsPanel = lazy(() => import('./components/ReimageRequestsPanel').then(module => ({ default: module.ReimageRequestsPanel })));
 const OperatorReimagePanel = lazy(() => import('./components/OperatorReimagePanel').then(module => ({ default: module.OperatorReimagePanel })));
+const BillingOperationsPanel = lazy(() => import('./components/BillingOperationsPanel').then(module => ({ default: module.BillingOperationsPanel })));
 
 export type ViewMode =
   | 'overview'
@@ -49,6 +50,7 @@ export type ViewMode =
   | 'audit-logs'
   | 'reimage-requests'
   | 'operator-reimage'
+  | 'billing-operations'
   | 'user-settings'
   | 'system-settings'
   | 'proxmox-connections'
@@ -80,6 +82,7 @@ const VIEW_PATHS: Record<ViewMode, string> = {
   'audit-logs': '/audit-logs',
   'reimage-requests': '/reimage-requests',
   'operator-reimage': '/operator-reimage',
+  'billing-operations': '/billing-operations',
   'user-settings': '/user-settings',
   'system-settings': '/system-settings',
   'proxmox-connections': '/proxmox-connections',
@@ -248,6 +251,7 @@ const AppShell: React.FC = () => {
               <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
               <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['operator-reimage']} element={activeRole === 'admin' ? <OperatorReimagePanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS['billing-operations']} element={activeRole === 'admin' ? <BillingOperationsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />
               <Route path={VIEW_PATHS['user-management']} element={<UserManagement />} />

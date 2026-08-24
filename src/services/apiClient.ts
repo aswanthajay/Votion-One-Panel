@@ -160,6 +160,91 @@ export interface ApiNotification {
   createdAt: string;
 }
 
+export interface ApiPricingPlan {
+  id: string;
+  name: string;
+  currency: string;
+  monthlyPriceCents: number;
+  vcpuLimit: number;
+  ramGb: number;
+  diskGb: number;
+  bandwidthGb: number | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export interface ApiBillingInvoice {
+  id: string;
+  accountEmail: string;
+  vmid: number;
+  vmName?: string;
+  planId?: string;
+  planName?: string;
+  periodStart: string;
+  periodEnd: string;
+  issuedAt: string;
+  dueAt: string;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  paidCents: number;
+  outstandingCents: number;
+  currency: string;
+  status: string;
+  paidAt?: string;
+  lastReminderAt?: string;
+  suspensionEligibleAt?: string;
+  notes?: string;
+}
+
+export interface ApiBillingSummary {
+  invoiceCount: number;
+  vmCount: number;
+  billedCents: number;
+  collectedCents: number;
+  outstandingCents: number;
+  overdueCount: number;
+  overdueCents: number;
+  suspendedInvoiceCount: number;
+  monthlyCostCents: number;
+  estimatedGrossProfitCents: number;
+  collectedGrossProfitCents: number;
+  estimatedMarginPercent: number;
+}
+
+export interface ApiBillingConfig {
+  automationEnabled: boolean;
+  reminderEmailsEnabled: boolean;
+  suspensionExecutionEnabled: boolean;
+  daysBeforeDue: number;
+  gracePeriodDays: number;
+  suspendAfterDaysOverdue: number;
+  taxRatePercent: number;
+  currency: string;
+}
+
+export interface ApiVmBillingProfile {
+  vmid: number;
+  vmName?: string;
+  ownerEmail?: string;
+  planId?: string;
+  planName?: string;
+  customMonthlyPriceCents: number | null;
+  monthlyPriceCents: number;
+  billingStatus: string;
+  billingCycleDay: number;
+  gracePeriodDays: number | null;
+  nextDueAt?: string;
+}
+
+export interface ApiBillingCostBase {
+  id: string;
+  name: string;
+  monthlyCostCents: number;
+  allocationMethod: string;
+  isActive: boolean;
+}
+
 export interface ApiSupportTicket {
   id: string;
   subject: string;
@@ -439,6 +524,99 @@ class ApiClient {
       body: JSON.stringify(assignData),
     });
     return await res.json();
+  }
+
+  async getBillingPlans(): Promise<ApiPricingPlan[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/plans`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load pricing plans.');
+    return data.data || [];
+  }
+
+  async getBillingSummary(): Promise<ApiBillingSummary> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/summary`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load billing summary.');
+    return data.data;
+  }
+
+  async getBillingInvoices(status?: string): Promise<ApiBillingInvoice[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/invoices${query}`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load invoices.');
+    return data.data || [];
+  }
+
+  async getBillingConfig(): Promise<ApiBillingConfig> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/config`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load billing policy.');
+    return data.data;
+  }
+
+  async updateBillingConfig(patch: Partial<ApiBillingConfig> & { confirmation?: string }): Promise<ApiBillingConfig> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/config`, { method: 'PUT', headers: this.getHeaders(), body: JSON.stringify(patch) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to update billing policy.');
+    return data.data;
+  }
+
+  async upsertBillingPlan(plan: Partial<ApiPricingPlan>): Promise<ApiPricingPlan> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/plans`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(plan) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to save pricing plan.');
+    return data.data;
+  }
+
+  async toggleBillingPlan(id: string, isActive: boolean): Promise<ApiPricingPlan> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/plans/${encodeURIComponent(id)}`, { method: 'PATCH', headers: this.getHeaders(), body: JSON.stringify({ isActive }) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to update pricing plan.');
+    return data.data;
+  }
+
+  async getBillingCostBases(): Promise<ApiBillingCostBase[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/cost-bases`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load cost bases.');
+    return data.data || [];
+  }
+
+  async upsertBillingCostBase(cost: Partial<ApiBillingCostBase>): Promise<ApiBillingCostBase> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/cost-bases`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(cost) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to save cost basis.');
+    return data.data;
+  }
+
+  async getVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/vm-profiles`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load VM billing profiles.');
+    return data.data || [];
+  }
+
+  async updateVmBillingProfile(vmid: number, profile: Partial<ApiVmBillingProfile>): Promise<ApiVmBillingProfile> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/vms/${vmid}/profile`, { method: 'PUT', headers: this.getHeaders(), body: JSON.stringify(profile) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to save VM billing profile.');
+    return data.data;
+  }
+
+  async recordBillingPayment(invoiceId: string, amountCents: number, notes?: string): Promise<ApiBillingInvoice> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}/payment`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ amountCents, method: 'manual', notes }) });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to record payment.');
+    return data.data;
+  }
+
+  async getBillingSuspensionActions(status?: string) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/suspension-actions${query}`, { headers: this.getHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) throw new Error(data.error || 'Unable to load suspension actions.');
+    return data.data || [];
   }
 
   async updateServerExpiry(vmid: number, additionalDays: number) {

@@ -35,6 +35,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     {
+      title: 'Billing Operations',
+      key: 'billing-operations',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M4 3.5h14a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 17V5A1.5 1.5 0 0 1 4 3.5Zm0 2a.5.5 0 0 0-.5.5v1h15V6a.5.5 0 0 0-.5-.5H4Zm-.5 4v7a.5.5 0 0 0 .5.5h14a.5.5 0 0 0 .5-.5v-7h-15Z" />
+          <path d="M6 12h4v2H6zm6 0h4v2h-4z" />
+        </svg>
+      )
+    },
+    {
       title: 'Cluster Audit Logs',
       key: 'audit-logs',
       icon: (
