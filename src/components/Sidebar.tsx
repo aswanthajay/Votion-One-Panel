@@ -48,8 +48,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       key: 'reimage-requests',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path d="M11 2.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 11 2.5Zm0 15a6.5 6.5 0 1 1 6.5-6.5 6.51 6.51 0 0 1-6.5 6.5Z" />
+          <path d="M11 2.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 11 2.5Zm0 15a6.5 6.5 0 1 1 6.5-6.5 6.51 6.51 0 0 1-6.5-6.5Z" />
           <path d="M10 6h2v6h-2zm0 7.5h2v2h-2z" />
+        </svg>
+      )
+    },
+    {
+      title: 'Operator Reimage Console',
+      key: 'operator-reimage',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M8.8 2.5a4.3 4.3 0 1 0 0 8.6 4.3 4.3 0 0 0 0-8.6Zm0 2a2.3 2.3 0 1 1 0 4.6 2.3 2.3 0 0 1 0-4.6ZM14 13.5a1 1 0 0 0-1 1v2h-2v2h2v2h2v-2h2v-2h-2v-2a1 1 0 0 0-1-1Z" />
+          <path d="M1.5 20.5a7.3 7.3 0 0 1 14.6 0h-2a5.3 5.3 0 0 0-10.6 0h-2Z" />
         </svg>
       )
     },
