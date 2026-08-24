@@ -94,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* WORKSPACE / COMPANY SELECTOR DROPDOWN */}
-        <div className="relative" ref={workspaceRef}>
+        <div className="header-workspace-menu-wrap" ref={workspaceRef}>
           <button 
             onClick={() => {
               setWorkspaceMenuOpen(!workspaceMenuOpen);
@@ -113,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {workspaceMenuOpen && (
-            <div className="absolute left-0 top-10 w-72 bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-3 z-[200] text-sm flex flex-col gap-3 animate-in fade-in zoom-in-95 duration-100">
+            <div className="workspace-dropdown-menu absolute left-0 top-10 w-72 bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-3 z-[200] text-sm flex flex-col gap-3 animate-in fade-in zoom-in-95 duration-100">
               <div>
                 <input
                   type="text"
@@ -211,65 +211,69 @@ export const Header: React.FC<HeaderProps> = ({
         />
 
         {/* TASKS BUTTON — Live data from /api/v1/tasks */}
-        <button 
-          onClick={() => {
-            setTasksOpen(!tasksOpen);
-            setNotificationsOpen(false);
-            setUserMenuOpen(false);
-            setWorkspaceMenuOpen(false);
-          }}
-          className="header-task-control header-btn relative cursor-pointer"
-        >
-          <span>Tasks</span>
-          {activeBadgeCount > 0 && <span className="badge-dot"></span>}
-          <svg aria-label="open dropdown" height="14" role="img" viewBox="0 0 22 22" width="14" fill="currentColor">
-            <title>open dropdown</title>
-            <path clipRule="evenodd" d="m10 16.1-9-8L3 6l8 7 8-7L21 8l-9 8c-.6.5-1.4.5-2 0Z" fillRule="evenodd"></path>
-          </svg>
-        </button>
+        <div className="header-task-menu-wrap">
+          <button
+            onClick={() => {
+              setTasksOpen(!tasksOpen);
+              setNotificationsOpen(false);
+              setUserMenuOpen(false);
+              setWorkspaceMenuOpen(false);
+            }}
+            className="header-task-control header-btn relative cursor-pointer"
+          >
+            <span>Tasks</span>
+            {activeBadgeCount > 0 && <span className="badge-dot"></span>}
+            <svg aria-label="open dropdown" height="14" role="img" viewBox="0 0 22 22" width="14" fill="currentColor">
+              <title>open dropdown</title>
+              <path clipRule="evenodd" d="m10 16.1-9-8L3 6l8 7 8-7L21 8l-9 8c-.6.5-1.4.5-2 0Z" fillRule="evenodd"></path>
+            </svg>
+          </button>
 
-        {/* Tasks Dropdown Drawer — Live tasks from PostgreSQL */}
-        {tasksOpen && (
-          <div className="tasks-dropdown-menu active">
-            <div className="tasks-header">
-              Active Background Tasks ({liveTasks.length})
-            </div>
-            
-            {liveTasks.length === 0 ? (
-              <div className="p-4 text-center text-[#656b6b] text-xs font-mono">
-                No active tasks in the queue.
+          {/* Tasks Dropdown Drawer — Live tasks from PostgreSQL */}
+          {tasksOpen && (
+            <div className="tasks-dropdown-menu active">
+              <div className="tasks-header">
+                Active background tasks{liveTasks.length > 0 ? ` · ${liveTasks.length}` : ''}
               </div>
-            ) : (
-              liveTasks.map(task => (
-                <div 
-                  key={task.id}
-                  className="task-item cursor-pointer mt-2" 
-                  onClick={() => { setSelectedTaskDetail(task); setTasksOpen(false); }}
-                >
-                  <div className="task-title-line">
-                    <span>{task.name}</span>
-                    <span className={`task-status-tag ${
-                      task.status === 'completed' ? 'bg-[#dcfce7] text-[#15803d]' :
-                      task.status === 'failed' ? 'bg-[#fef2f2] text-[#dc2626]' :
-                      'bg-[#fef3c7] text-[#b45309]'
-                    }`}>
-                      {task.status === 'running' ? `${task.progressPct}%` : task.status}
-                    </span>
-                  </div>
-                  <div className="task-progress-bar">
-                    <div 
-                      className={`task-progress-fill ${
-                        task.status === 'completed' ? 'bg-[#10b981]' :
-                        task.status === 'failed' ? 'bg-[#ef4444]' : ''
-                      }`}
-                      style={{ width: `${task.progressPct || 0}%` }}
-                    ></div>
-                  </div>
+
+              {liveTasks.length === 0 ? (
+                <div className="tasks-empty-state">
+                  <span className="tasks-empty-mark" aria-hidden="true">✓</span>
+                  <p>No active tasks</p>
+                  <span>Background work will appear here.</span>
                 </div>
-              ))
-            )}
-          </div>
-        )}
+              ) : (
+                liveTasks.map(task => (
+                  <div
+                    key={task.id}
+                    className="task-item cursor-pointer mt-2"
+                    onClick={() => { setSelectedTaskDetail(task); setTasksOpen(false); }}
+                  >
+                    <div className="task-title-line">
+                      <span>{task.name}</span>
+                      <span className={`task-status-tag ${
+                        task.status === 'completed' ? 'bg-[#dcfce7] text-[#15803d]' :
+                        task.status === 'failed' ? 'bg-[#fef2f2] text-[#dc2626]' :
+                        'bg-[#fef3c7] text-[#b45309]'
+                      }`}>
+                        {task.status === 'running' ? `${task.progressPct}%` : task.status}
+                      </span>
+                    </div>
+                    <div className="task-progress-bar">
+                      <div
+                        className={`task-progress-fill ${
+                          task.status === 'completed' ? 'bg-[#10b981]' :
+                          task.status === 'failed' ? 'bg-[#ef4444]' : ''
+                        }`}
+                        style={{ width: `${task.progressPct || 0}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
 
         {/* DOWNLOADS BUTTON */}
         <button 

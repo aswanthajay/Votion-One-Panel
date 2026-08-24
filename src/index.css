@@ -640,3 +640,156 @@ body {
     overflow-wrap: anywhere;
   }
 }
+
+
+/* Header overlay correction: anchor each popover to its trigger and keep it inside the viewport. */
+.header-workspace-menu-wrap,
+.header-task-menu-wrap,
+.header-user-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.workspace-dropdown-menu {
+  top: calc(100% + 8px) !important;
+  left: 0 !important;
+  width: 288px !important;
+  max-width: min(288px, calc(100vw - 24px));
+  max-height: min(420px, calc(100dvh - var(--app-switcher-height) - var(--ink-header-size-height) - 24px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(26, 26, 26, 0.13) !important;
+}
+
+.tasks-dropdown-menu {
+  position: absolute !important;
+  top: calc(100% + 8px) !important;
+  right: 0 !important;
+  left: auto !important;
+  width: 304px !important;
+  max-width: min(304px, calc(100vw - 24px));
+  max-height: min(360px, calc(100dvh - var(--app-switcher-height) - var(--ink-header-size-height) - 24px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(26, 26, 26, 0.13) !important;
+}
+
+.tasks-header {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  border-bottom: 1px solid var(--ink-color-global-border-subtle);
+  margin: 0 !important;
+  padding: 0 14px !important;
+  background: var(--ink-color-global-brand-gray-10);
+  color: var(--ink-color-global-text-default) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tasks-empty-state {
+  display: flex;
+  min-height: 116px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 16px 20px;
+  text-align: center;
+}
+
+.tasks-empty-mark {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 5px;
+  border: 1px solid #b9d9c2;
+  border-radius: 4px;
+  color: #23613b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tasks-empty-state p {
+  color: var(--ink-color-global-text-default);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tasks-empty-state > span:last-child {
+  color: var(--ink-color-global-text-subtle);
+  font-size: 10px;
+}
+
+.task-item {
+  margin: 0 !important;
+  border-bottom: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 0 !important;
+  padding: 12px 14px !important;
+}
+
+.task-item:last-child {
+  border-bottom: 0;
+}
+
+.header-user-menu {
+  top: calc(100% + 8px) !important;
+  width: 248px !important;
+  max-width: min(248px, calc(100vw - 24px));
+  max-height: min(520px, calc(100dvh - var(--app-switcher-height) - var(--ink-header-size-height) - 24px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(26, 26, 26, 0.13) !important;
+}
+
+.header-user-menu > button {
+  min-height: 36px;
+  padding: 8px 14px !important;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .workspace-dropdown-menu {
+    left: 0 !important;
+    width: min(288px, calc(100vw - 24px)) !important;
+  }
+
+  .tasks-dropdown-menu {
+    position: fixed !important;
+    top: calc(var(--app-switcher-height) + var(--ink-header-size-height) + 8px) !important;
+    right: 12px !important;
+    left: auto !important;
+    width: min(304px, calc(100vw - 24px)) !important;
+  }
+
+  .header-user-menu {
+    position: fixed !important;
+    top: calc(var(--app-switcher-height) + var(--ink-header-size-height) + 8px) !important;
+    right: 12px !important;
+    left: auto !important;
+    width: min(248px, calc(100vw - 24px)) !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .workspace-dropdown-menu,
+  .tasks-dropdown-menu,
+  .header-user-menu {
+    right: 8px !important;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+  }
+
+  .workspace-dropdown-menu {
+    left: auto !important;
+  }
+}
