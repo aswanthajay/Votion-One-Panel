@@ -561,7 +561,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
 
         {/* ---------- RIGHT: OPERATIONS HUB ---------- */}
         {!opsCollapsed && (
-          <aside className="hidden xl:flex flex-col w-[320px] max-w-[360px] border-l border-[#dedfdf] bg-white overflow-y-auto shrink-0">
+          <aside className="overview-ops-rail hidden xl:flex flex-col w-[320px] max-w-[360px] border-l border-[#dedfdf] bg-white overflow-y-auto shrink-0">
             {/* 1. open tickets */}
             <div className="ink-block-header !px-4 py-3 flex items-center justify-between">
               <span className="ink-block-title !text-[12px] flex items-center gap-2">

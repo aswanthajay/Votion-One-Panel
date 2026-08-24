@@ -582,3 +582,61 @@ body {
     flex-shrink: 1;
   }
 }
+
+/* Strict single-column mobile flow for the client Overview. */
+@media (max-width: 767px) {
+  .overview-dashboard {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  .overview-dashboard .overview-header {
+    display: flex !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .overview-dashboard > .overview-header + div {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  .overview-dashboard > .overview-header + div > section {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .overview-dashboard .overview-ops-rail {
+    display: none !important;
+  }
+
+  .overview-dashboard .overview-telemetry-table {
+    display: table !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-td,
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div,
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div > span {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div > span {
+    overflow-wrap: anywhere;
+  }
+}
