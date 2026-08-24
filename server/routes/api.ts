@@ -221,6 +221,12 @@ apiRouter.post('/auth/recover-pin', async (req, res) => {
     }
     const token = createSessionToken(account.id);
     await dbService.logAudit(account.email, 'PIN_RECOVERY_LOGIN', 'auth', `Account recovered via Support PIN`);
+    res.cookie('votion_auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
     res.json({
       success: true,
       token,

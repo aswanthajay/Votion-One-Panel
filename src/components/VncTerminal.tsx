@@ -21,9 +21,14 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
       try {
         const apiHost = API_ORIGIN;
         const apiUrl = new URL(`${apiHost}/api/vnc/init`, window.location.origin);
+        const sessionToken = localStorage.getItem('votion_jwt_token');
         const res = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+          },
           body: JSON.stringify({ vmid, node, type })
         });
         const json = await res.json();
