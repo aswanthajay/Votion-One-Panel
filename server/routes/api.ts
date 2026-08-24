@@ -821,22 +821,11 @@ apiRouter.post('/vms/:vmid/extend', async (req, res) => {
   }
 });
 
-apiRouter.post('/vms/:vmid/reinstall', async (req, res) => {
-  const userEmail = req.authUser?.email;
-  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const targetVmid = parseInt(req.params.vmid, 10);
-  const { targetOS } = req.body;
-
-  if (!targetOS) {
-    return res.status(400).json({ success: false, error: 'Target OS specification is required' });
-  }
-
-  try {
-    const vm = await proxmoxService.reinstallOS(targetVmid, targetOS, userEmail);
-    res.json({ success: true, message: `Proxmox OS re-imaging initiated for VMID ${targetVmid} (${targetOS})`, data: vm });
-  } catch (err: any) {
-    res.status(400).json({ success: false, error: err.message || 'OS reinstallation failed' });
-  }
+apiRouter.post('/vms/:vmid/reinstall', async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Direct OS reinstallation is disabled. Submit an approval-based reimage request instead.',
+  });
 });
 
 apiRouter.delete('/vms/:vmid', async (req, res) => {

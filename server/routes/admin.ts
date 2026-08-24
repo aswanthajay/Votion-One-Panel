@@ -8,6 +8,41 @@ import { requireAdmin, requireAuth } from '../middleware.js';
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
 
+adminRouter.get('/reimage-requests', async (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+  if (status && !new Set(['pending', 'approved', 'rejected', 'cancelled']).has(status)) {
+    return res.status(400).json({ success: false, error: 'Unsupported reimage request status' });
+  }
+  const data = await dbService.getReimageRequests({ status });
+  res.json({
+    success: true,
+    data,
+    message: 'Approval queue only. No Proxmox operation is performed by this endpoint.',
+  });
+});
+
+adminRouter.post('/reimage-requests/:requestId/review', async (req, res) => {
+  const reviewerEmail = req.authUser?.email;
+  if (!reviewerEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const decision = req.body?.decision;
+  if (decision !== 'approved' && decision !== 'rejected') {
+    return res.status(400).json({ success: false, error: 'Decision must be approved or rejected' });
+  }
+  const reviewerNote = typeof req.body?.reviewerNote === 'string' ? req.body.reviewerNote.trim().slice(0, 1000) : undefined;
+  const request = await dbService.reviewReimageRequest(req.params.requestId, decision, reviewerEmail, reviewerNote);
+  if (!request) {
+    return res.status(409).json({ success: false, error: 'Only a pending reimage request can be reviewed.' });
+  }
+  res.json({
+    success: true,
+    data: request,
+    message: decision === 'approved'
+      ? 'Request approved for a separate operator execution step. No Proxmox operation has started.'
+      : 'Request rejected. No Proxmox operation was performed.',
+  });
+});
+
 // 1. POST /api/admin/vms/assign — Assign VMID to client user email with specs & expiry_date
 adminRouter.post('/vms/assign', async (req, res) => {
   const userEmail = req.authUser?.email;

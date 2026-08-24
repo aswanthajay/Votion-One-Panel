@@ -25,6 +25,7 @@ const ProxmoxConnections = lazy(() => import('./components/ProxmoxConnections').
 const SystemSettings = lazy(() => import('./components/SystemSettings').then(module => ({ default: module.SystemSettings })));
 const AlertRulesModal = lazy(() => import('./components/AlertRulesModal').then(module => ({ default: module.AlertRulesModal })));
 const ClusterAuditLogs = lazy(() => import('./components/ClusterAuditLogs').then(module => ({ default: module.ClusterAuditLogs })));
+const ReimageRequestsPanel = lazy(() => import('./components/ReimageRequestsPanel').then(module => ({ default: module.ReimageRequestsPanel })));
 
 export type ViewMode =
   | 'overview'
@@ -45,6 +46,7 @@ export type ViewMode =
   | 'backups'
   | 'ha'
   | 'audit-logs'
+  | 'reimage-requests'
   | 'user-settings'
   | 'system-settings'
   | 'proxmox-connections'
@@ -74,6 +76,7 @@ const VIEW_PATHS: Record<ViewMode, string> = {
   backups: '/backups',
   ha: '/ha',
   'audit-logs': '/audit-logs',
+  'reimage-requests': '/reimage-requests',
   'user-settings': '/user-settings',
   'system-settings': '/system-settings',
   'proxmox-connections': '/proxmox-connections',
@@ -240,6 +243,7 @@ const AppShell: React.FC = () => {
               <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
+              <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />
               <Route path={VIEW_PATHS['user-management']} element={<UserManagement />} />

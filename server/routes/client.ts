@@ -23,6 +23,66 @@ clientRouter.use('/vms/:vmid', async (req, res, next) => {
   next();
 });
 
+const allowedReimageOsByType: Record<'qemu' | 'lxc', Set<string>> = {
+  qemu: new Set(['Ubuntu 24.04 LTS', 'Windows Server 2022 Standard', 'Debian 12 Bookworm']),
+  lxc: new Set(['Alpine Linux 3.19 (LXC)', 'Debian 12 Bookworm']),
+};
+
+const parseReimageOs = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+
+// Approval-based OS reimage requests. These routes persist workflow state only;
+// they never call Proxmox or mutate the VM's OS/status.
+clientRouter.get('/vms/:vmid/reimage-requests', async (req, res) => {
+  const vm = (req as any).authorizedVm;
+  if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
+  const data = await dbService.getReimageRequests({ vmid: vm.vmid });
+  res.json({
+    success: true,
+    data,
+    message: 'Reimage requests are reviewed by an administrator. No reimage has started.',
+  });
+});
+
+clientRouter.post('/vms/:vmid/reimage-requests', async (req, res) => {
+  const vm = (req as any).authorizedVm;
+  const userEmail = (req as any).authUser?.email;
+  if (!vm || !userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  if (vm.isSuspended) return res.status(403).json({ success: false, error: 'Requests are blocked while this VM is suspended.' });
+
+  const requestedOs = parseReimageOs(req.body?.targetOS || req.body?.requestedOs);
+  if (!requestedOs || !allowedReimageOsByType[vm.type as 'qemu' | 'lxc']?.has(requestedOs)) {
+    return res.status(400).json({ success: false, error: `The selected OS image is not permitted for ${vm.type.toUpperCase()} instances.` });
+  }
+
+  const requesterNote = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 1000) : undefined;
+  try {
+    const request = await dbService.createReimageRequest(vm.vmid, requestedOs, userEmail, requesterNote);
+    if (!request) return res.status(404).json({ success: false, error: 'VM not found' });
+    res.status(201).json({
+      success: true,
+      data: request,
+      message: 'Request submitted for administrator approval. No Proxmox operation has started.',
+    });
+  } catch (err: any) {
+    res.status(409).json({ success: false, error: err.message || 'Unable to create reimage request' });
+  }
+});
+
+clientRouter.post('/vms/:vmid/reimage-requests/:requestId/cancel', async (req, res) => {
+  const vm = (req as any).authorizedVm;
+  const userEmail = (req as any).authUser?.email;
+  if (!vm || !userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const user = (req as any).authUser;
+  const isAdmin = Boolean(user && adminRoles.has(user.role));
+  const request = await dbService.cancelReimageRequest(req.params.requestId, vm.vmid, userEmail, isAdmin);
+  if (!request) return res.status(409).json({ success: false, error: 'Only a pending request owned by you can be cancelled.' });
+  res.json({
+    success: true,
+    data: request,
+    message: 'Request cancelled. No Proxmox operation was started.',
+  });
+});
+
 // 1. GET /api/client/vms — Fetch ONLY servers where user_id / email matches authenticated logged-in client
 clientRouter.get('/vms', async (req, res) => {
   const userEmail = (req as any).authUser?.email;

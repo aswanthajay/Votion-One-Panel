@@ -116,6 +116,25 @@ export async function initializeDatabaseSchema() {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS vm_reimage_requests (
+        id VARCHAR(100) PRIMARY KEY,
+        vmid INT NOT NULL REFERENCES vms(vmid) ON DELETE CASCADE,
+        requester_email VARCHAR(255) NOT NULL,
+        requested_os VARCHAR(100) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        requester_note TEXT,
+        reviewer_email VARCHAR(255),
+        reviewer_note TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        reviewed_at TIMESTAMP,
+        cancelled_at TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_reimage_requests_status_created
+        ON vm_reimage_requests (status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_vm_reimage_requests_vmid_created
+        ON vm_reimage_requests (vmid, created_at DESC);
+
       CREATE TABLE IF NOT EXISTS audit_logs (
         id VARCHAR(100) PRIMARY KEY,
         timestamp TIMESTAMP DEFAULT NOW(),
@@ -1066,6 +1085,145 @@ export class DatabaseService {
     await pgPool.query('UPDATE vms SET expiry_date = $1, is_suspended = false, status = $2 WHERE vmid = $3', [newExpiry, 'running', vmid]);
     await this.logAudit(userEmail, 'EXTEND_VM_EXPIRY', `VMID ${vmid}`, `Extended expiry date to ${newExpiry}`);
     return await this.getVMByVMID(vmid);
+  }
+
+  private mapReimageRequest(row: any) {
+    return {
+      id: row.id,
+      vmid: Number(row.vmid),
+      vmName: row.vm_name || undefined,
+      vmType: row.vm_type || undefined,
+      ownerEmail: row.owner_email || undefined,
+      requesterEmail: row.requester_email,
+      requestedOs: row.requested_os,
+      status: row.status,
+      requesterNote: row.requester_note || undefined,
+      reviewerEmail: row.reviewer_email || undefined,
+      reviewerNote: row.reviewer_note || undefined,
+      createdAt: row.created_at,
+      reviewedAt: row.reviewed_at || undefined,
+      cancelledAt: row.cancelled_at || undefined,
+    };
+  }
+
+  async createReimageRequest(vmid: number, requestedOs: string, requesterEmail: string, requesterNote?: string) {
+    const vm = await this.getVMByVMID(vmid);
+    if (!vm) return null;
+    if (vm.isSuspended) throw new Error(`VMID ${vmid} is currently suspended. Reimage requests are blocked.`);
+
+    const duplicate = await pgPool.query(
+      `SELECT id FROM vm_reimage_requests
+       WHERE vmid = $1 AND status = 'pending'
+       LIMIT 1`,
+      [vmid],
+    );
+    if (duplicate.rows.length > 0) {
+      throw new Error('A pending OS reimage request already exists for this VM.');
+    }
+
+    const id = `reimage-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const email = requesterEmail.toLowerCase().trim();
+    await pgPool.query(
+      `INSERT INTO vm_reimage_requests
+       (id, vmid, requester_email, requested_os, status, requester_note, created_at)
+       VALUES ($1, $2, $3, $4, 'pending', $5, NOW())`,
+      [id, vmid, email, requestedOs, requesterNote?.trim() || null],
+    );
+
+    await this.logAudit(
+      email,
+      'REQUEST_REIMAGE_OS',
+      `VMID ${vmid}`,
+      `Submitted approval request ${id} for ${requestedOs}; no Proxmox operation was started.`,
+    );
+
+    const result = await pgPool.query(
+      `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email
+       FROM vm_reimage_requests r
+       JOIN vms v ON v.vmid = r.vmid
+       WHERE r.id = $1`,
+      [id],
+    );
+    return this.mapReimageRequest(result.rows[0]);
+  }
+
+  async getReimageRequests(options: { vmid?: number; requesterEmail?: string; status?: string } = {}) {
+    const params: any[] = [];
+    const conditions: string[] = [];
+    if (options.vmid !== undefined) {
+      params.push(options.vmid);
+      conditions.push(`r.vmid = $${params.length}`);
+    }
+    if (options.requesterEmail) {
+      params.push(options.requesterEmail.toLowerCase().trim());
+      conditions.push(`LOWER(r.requester_email) = $${params.length}`);
+    }
+    if (options.status) {
+      params.push(options.status);
+      conditions.push(`r.status = $${params.length}`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await pgPool.query(
+      `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email
+       FROM vm_reimage_requests r
+       JOIN vms v ON v.vmid = r.vmid
+       ${where}
+       ORDER BY r.created_at DESC
+       LIMIT 100`,
+      params,
+    );
+    return result.rows.map(row => this.mapReimageRequest(row));
+  }
+
+  async cancelReimageRequest(requestId: string, vmid: number, requesterEmail: string, isAdmin = false) {
+    const email = requesterEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_requests
+       SET status = 'cancelled', cancelled_at = NOW()
+       WHERE id = $1 AND vmid = $2 AND status = 'pending'
+         AND ($3 = true OR LOWER(requester_email) = $4)
+       RETURNING *`,
+      [requestId, vmid, isAdmin, email],
+    );
+    if (result.rows.length === 0) return null;
+
+    await this.logAudit(
+      email,
+      'CANCEL_REIMAGE_REQUEST',
+      `VMID ${vmid}`,
+      `Cancelled OS reimage request ${requestId}; no Proxmox operation was started.`,
+    );
+    return this.mapReimageRequest(result.rows[0]);
+  }
+
+  async reviewReimageRequest(requestId: string, decision: 'approved' | 'rejected', reviewerEmail: string, reviewerNote?: string) {
+    const email = reviewerEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_requests
+       SET status = $2, reviewer_email = $3, reviewer_note = $4, reviewed_at = NOW()
+       WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [requestId, decision, email, reviewerNote?.trim() || null],
+    );
+    if (result.rows.length === 0) return null;
+
+    const row = result.rows[0];
+    await this.logAudit(
+      email,
+      `${decision.toUpperCase()}_REIMAGE_REQUEST`,
+      `VMID ${row.vmid}`,
+      `${decision === 'approved' ? 'Approved' : 'Rejected'} OS reimage request ${requestId} for ${row.requested_os}. Approval does not start a Proxmox operation.`,
+    );
+
+    const detailed = await pgPool.query(
+      `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email
+       FROM vm_reimage_requests r
+       JOIN vms v ON v.vmid = r.vmid
+       WHERE r.id = $1`,
+      [requestId],
+    );
+    return this.mapReimageRequest(detailed.rows[0]);
   }
 
   async reinstallVMOS(vmid: number, osType: string, userEmail: string = 'client@votioncloud.org') {

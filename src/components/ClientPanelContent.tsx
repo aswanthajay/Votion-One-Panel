@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
-import { apiClient, ApiVM, ApiVmMetadata } from '../services/apiClient';
+import { apiClient, ApiVM, ApiVmMetadata, ApiReimageRequest } from '../services/apiClient';
 import { VmMetadataPanel } from './VmMetadataPanel';
 
 const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
@@ -36,8 +36,14 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   // Power Action Loading State Spinner
   const [isPowerLoading, setIsPowerLoading] = useState<string | null>(null);
 
-  // OS Reinstall State
+  // Approval-based OS reimage request state
   const [selectedReinstallOs, setSelectedReinstallOs] = useState('Ubuntu 24.04 LTS');
+  const [reimageRequests, setReimageRequests] = useState<ApiReimageRequest[]>([]);
+  const [isReimageLoading, setIsReimageLoading] = useState(false);
+  const [isReimageSubmitting, setIsReimageSubmitting] = useState(false);
+  const [isReimageAcknowledged, setIsReimageAcknowledged] = useState(false);
+  const [reimageReason, setReimageReason] = useState('');
+  const [showReimageConfirm, setShowReimageConfirm] = useState(false);
 
   // Support Ticket Form State linked to VMID
   const [ticketSubject, setTicketSubject] = useState('');
@@ -110,6 +116,38 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     };
   }, [selectedVm?.vmid]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedVm) {
+      setReimageRequests([]);
+      return;
+    }
+
+    setIsReimageLoading(true);
+    apiClient.getVmReimageRequests(selectedVm.vmid)
+      .then(requests => {
+        if (!cancelled) setReimageRequests(requests);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setReimageRequests([]);
+          showToast(err instanceof Error ? err.message : 'Unable to load reimage request status.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsReimageLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [selectedVm?.vmid]);
+
+  useEffect(() => {
+    setSelectedReinstallOs(selectedVm?.type === 'lxc' ? 'Alpine Linux 3.19 (LXC)' : 'Ubuntu 24.04 LTS');
+    setIsReimageAcknowledged(false);
+    setReimageReason('');
+    setShowReimageConfirm(false);
+  }, [selectedVm?.vmid, selectedVm?.type]);
+
   // PROMPT 5.3: Sync filter prop from Sidebar to VM Selection and Active Tab
   useEffect(() => {
     if (filter === 'vnc') { setActiveTab('console'); setViewMode('details'); }
@@ -168,21 +206,38 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     }
   };
 
-  // Client OS Reinstall Request
-  const handleReinstallSubmit = async (e: React.FormEvent) => {
+  // Client OS Reimage Approval Request
+  const handleReinstallSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedVm) return;
+    if (!selectedVm || selectedVm.isSuspended || isReimageSubmitting || !isReimageAcknowledged) return;
+    setShowReimageConfirm(true);
+  };
 
+  const confirmReimageRequest = async () => {
+    if (!selectedVm || isReimageSubmitting) return;
+    setIsReimageSubmitting(true);
     try {
-      const res = await apiClient.reinstallVMOS(selectedVm.vmid, selectedReinstallOs);
-      if (res.success) {
-        showToast(res.message || `OS re-imaging triggered for VMID ${selectedVm.vmid}`);
-        loadClientVMs();
-      } else {
-        showToast(res.error || 'OS reinstallation failed');
-      }
-    } catch (err: any) {
-      showToast(err.message || 'Reinstallation blocked');
+      const res = await apiClient.createVmReimageRequest(selectedVm.vmid, selectedReinstallOs, reimageReason);
+      setReimageRequests(prev => [res.data, ...prev.filter(request => request.id !== res.data.id)]);
+      setShowReimageConfirm(false);
+      setIsReimageAcknowledged(false);
+      setReimageReason('');
+      showToast(res.message);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Unable to submit the reimage request.');
+    } finally {
+      setIsReimageSubmitting(false);
+    }
+  };
+
+  const cancelReimageRequest = async (request: ApiReimageRequest) => {
+    if (!selectedVm || request.status !== 'pending') return;
+    try {
+      const res = await apiClient.cancelVmReimageRequest(selectedVm.vmid, request.id);
+      setReimageRequests(prev => prev.map(item => item.id === request.id ? res.data : item));
+      showToast(res.message);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Unable to cancel the reimage request.');
     }
   };
 
@@ -217,6 +272,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       setVncOutput(prev => [...prev, res.output]);
     }
   };
+
+  const latestReimageRequest = reimageRequests[0];
 
   if (viewMode === 'table') {
     return (
@@ -563,36 +620,98 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               </div>
             )}
 
-            {/* TAB 2: CLIENT OS REINSTALLATION REQUEST */}
+            {/* TAB 2: CLIENT OS REIMAGE APPROVAL REQUEST */}
             {activeTab === 'reinstall' && (
-              <form onSubmit={handleReinstallSubmit} className="flex flex-col gap-4 max-w-[480px]">
-                <p className="text-xs text-[#656b6b]">
-                  Select an OS image template to re-image Instance {selectedVm.vmid} ({selectedVm.name}).
-                </p>
+              <div className="flex flex-col gap-5 max-w-[620px]">
                 <div>
-                  <label className="block text-xs font-semibold mb-1">Target OS Image Template</label>
-                  <select 
-                    value={selectedReinstallOs}
-                    onChange={(e) => setSelectedReinstallOs(e.target.value)}
-                    disabled={selectedVm.isSuspended}
-                    className="w-full p-2.5 border border-[#dedfdf] rounded text-xs outline-none font-semibold"
-                  >
-                    <option value="Ubuntu 24.04 LTS">Ubuntu 24.04 LTS (Noble Numbat)</option>
-                    <option value="Windows Server 2022 Standard">Windows Server 2022 Standard Edition</option>
-                    <option value="Debian 12 Bookworm">Debian 12 Bookworm</option>
-                    <option value="Alpine Linux 3.19 (LXC)">Alpine Linux 3.19 Minimal</option>
-                  </select>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Approval required</p>
+                  <h4 className="mt-1 text-lg font-semibold text-[#1a1a1a]">Request an OS reimage</h4>
+                  <p className="mt-1 text-xs leading-5 text-[#656b6b]">
+                    Submit a request for administrator review. This form does not contact Proxmox, change the VM, or begin an operation.
+                  </p>
                 </div>
-                <button 
-                  type="submit" 
-                  disabled={selectedVm.isSuspended}
-                  className={`btn-primary py-2 px-4 text-xs cursor-pointer ${
-                    selectedVm.isSuspended ? 'opacity-40 cursor-not-allowed' : ''
-                  }`}
-                >
-                  Request OS Re-Image
-                </button>
-              </form>
+
+                {isReimageLoading ? (
+                  <div className="h-20 animate-pulse rounded-lg bg-[#f3f4f4]" aria-busy="true" aria-label="Loading reimage request status" />
+                ) : latestReimageRequest ? (
+                  <div className={`rounded-lg border p-4 ${latestReimageRequest.status === 'pending' ? 'border-[#f3c56b] bg-[#fffaf0]' : latestReimageRequest.status === 'approved' ? 'border-[#b7dfcf] bg-[#f1fbf7]' : 'border-[#dedfdf] bg-[#fbfaf9]'}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Latest request</p>
+                        <p className="mt-1 font-mono text-xs text-[#1a1a1a]">{latestReimageRequest.id}</p>
+                      </div>
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold capitalize text-[#1a1a1a]">{latestReimageRequest.status}</span>
+                    </div>
+                    <p className="mt-3 text-xs text-[#1a1a1a]">{latestReimageRequest.requestedOs}</p>
+                    <p className="mt-1 text-xs leading-5 text-[#656b6b]">
+                      {latestReimageRequest.status === 'pending'
+                        ? 'An administrator must review this request. No reimage has started.'
+                        : latestReimageRequest.status === 'approved'
+                          ? 'Approved for a separate operator execution step. Approval does not start a reimage automatically.'
+                          : latestReimageRequest.status === 'rejected'
+                            ? latestReimageRequest.reviewerNote || 'The administrator rejected this request.'
+                            : 'This request was cancelled before review.'}
+                    </p>
+                    {latestReimageRequest.status === 'pending' && (
+                      <button type="button" onClick={() => cancelReimageRequest(latestReimageRequest)} className="mt-3 text-xs font-semibold text-[#b42318] underline underline-offset-2 cursor-pointer">
+                        Cancel pending request
+                      </button>
+                    )}
+                  </div>
+                ) : null}
+
+                {(!latestReimageRequest || latestReimageRequest.status !== 'pending') && (
+                  <form onSubmit={handleReinstallSubmit} className="flex flex-col gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold mb-1" htmlFor="reimage-os">Target OS image</label>
+                      <select
+                        id="reimage-os"
+                        value={selectedReinstallOs}
+                        onChange={(e) => setSelectedReinstallOs(e.target.value)}
+                        disabled={selectedVm.isSuspended || isReimageSubmitting}
+                        className="w-full p-2.5 border border-[#dedfdf] rounded text-xs outline-none font-semibold"
+                      >
+                        {selectedVm.type === 'lxc' ? (
+                          <>
+                            <option value="Alpine Linux 3.19 (LXC)">Alpine Linux 3.19 Minimal</option>
+                            <option value="Debian 12 Bookworm">Debian 12 Bookworm</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="Ubuntu 24.04 LTS">Ubuntu 24.04 LTS (Noble Numbat)</option>
+                            <option value="Windows Server 2022 Standard">Windows Server 2022 Standard Edition</option>
+                            <option value="Debian 12 Bookworm">Debian 12 Bookworm</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold mb-1" htmlFor="reimage-reason">Reason or operator context <span className="font-normal text-[#656b6b]">(optional)</span></label>
+                      <textarea
+                        id="reimage-reason"
+                        value={reimageReason}
+                        onChange={(e) => setReimageReason(e.target.value)}
+                        maxLength={1000}
+                        rows={3}
+                        placeholder="Provide context for the administrator reviewing this request."
+                        disabled={selectedVm.isSuspended || isReimageSubmitting}
+                        className="w-full resize-y rounded border border-[#dedfdf] p-2.5 text-xs outline-none focus:border-[#1a1a1a]"
+                      />
+                    </div>
+                    <label className="flex items-start gap-2 rounded-lg border border-[#f0c36d] bg-[#fffaf0] p-3 text-xs leading-5 text-[#7a4b00] cursor-pointer">
+                      <input type="checkbox" checked={isReimageAcknowledged} onChange={(e) => setIsReimageAcknowledged(e.target.checked)} disabled={selectedVm.isSuspended || isReimageSubmitting} className="mt-1" />
+                      <span>I understand that an approved reimage is a destructive operation that may replace the VM disk and permanently remove its data. I will verify backups before any future execution.</span>
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={selectedVm.isSuspended || isReimageSubmitting || !isReimageAcknowledged}
+                      className={`btn-primary py-2 px-4 text-xs cursor-pointer ${selectedVm.isSuspended || isReimageSubmitting || !isReimageAcknowledged ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      {isReimageSubmitting ? 'Submitting request…' : 'Continue to confirmation'}
+                    </button>
+                  </form>
+                )}
+              </div>
             )}
 
             {/* TAB 3: LINKED SUPPORT TICKET FORM */}
@@ -692,6 +811,25 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
           <a href="#">Privacy policy</a>
         </div>
       </footer>
+
+      {showReimageConfirm && selectedVm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1a1a1a]/45 p-4" role="presentation">
+          <div className="w-full max-w-md rounded-xl border border-[#dedfdf] bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="reimage-confirm-title">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#b42318]">Final confirmation</p>
+            <h4 id="reimage-confirm-title" className="mt-2 text-lg font-semibold text-[#1a1a1a]">Submit OS reimage request?</h4>
+            <p className="mt-3 text-sm leading-6 text-[#656b6b]">
+              You are requesting <span className="font-semibold text-[#1a1a1a]">{selectedReinstallOs}</span> for VM-{selectedVm.vmid}. The request will be recorded and sent to an administrator for review.
+            </p>
+            <div className="mt-4 rounded-lg border border-[#f0c36d] bg-[#fffaf0] p-3 text-xs leading-5 text-[#7a4b00]">
+              This approval step will not contact Proxmox or erase data. If approved, a separate, future operator action would still be required before any destructive reimage execution.
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setShowReimageConfirm(false)} disabled={isReimageSubmitting} className="rounded border border-[#dedfdf] px-4 py-2 text-xs font-semibold text-[#1a1a1a] hover:bg-[#fbfaf9] cursor-pointer disabled:opacity-50">Go back</button>
+              <button type="button" onClick={confirmReimageRequest} disabled={isReimageSubmitting} className="rounded bg-[#1a1a1a] px-4 py-2 text-xs font-semibold text-white hover:bg-black cursor-pointer disabled:opacity-50">{isReimageSubmitting ? 'Submitting…' : 'Submit request'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };

@@ -43,6 +43,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       )
     },
+    {
+      title: 'OS Reimage Requests',
+      key: 'reimage-requests',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M11 2.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 11 2.5Zm0 15a6.5 6.5 0 1 1 6.5-6.5 6.51 6.51 0 0 1-6.5 6.5Z" />
+          <path d="M10 6h2v6h-2zm0 7.5h2v2h-2z" />
+        </svg>
+      )
+    },
     { 
       title: 'Cluster Connections',
       key: 'proxmox-connections',

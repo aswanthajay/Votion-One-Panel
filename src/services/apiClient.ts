@@ -169,6 +169,23 @@ export interface ApiTicketReply {
   timestamp: string;
 }
 
+export interface ApiReimageRequest {
+  id: string;
+  vmid: number;
+  vmName?: string;
+  vmType?: 'qemu' | 'lxc';
+  ownerEmail?: string;
+  requesterEmail: string;
+  requestedOs: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requesterNote?: string;
+  reviewerEmail?: string;
+  reviewerNote?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  cancelledAt?: string;
+}
+
 class ApiClient {
   private getToken(): string | null {
     return localStorage.getItem('votion_jwt_token');
@@ -222,6 +239,67 @@ class ApiClient {
     });
     const data = await res.json();
     return data.data || [];
+  }
+
+  async getVmReimageRequests(vmid: number): Promise<ApiReimageRequest[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests`, {
+      headers: this.getHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Reimage request lookup failed (HTTP ${res.status})`);
+    }
+    return data.data || [];
+  }
+
+  async createVmReimageRequest(vmid: number, requestedOs: string, reason?: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ targetOS: requestedOs, reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Reimage request failed (HTTP ${res.status})`);
+    }
+    return data as { success: true; message: string; data: ApiReimageRequest };
+  }
+
+  async cancelVmReimageRequest(vmid: number, requestId: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests/${encodeURIComponent(requestId)}/cancel`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Reimage request cancellation failed (HTTP ${res.status})`);
+    }
+    return data as { success: true; message: string; data: ApiReimageRequest };
+  }
+
+  async getAdminReimageRequests(status?: ApiReimageRequest['status']): Promise<ApiReimageRequest[]> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/reimage-requests${query}`, {
+      headers: this.getHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Reimage queue request failed (HTTP ${res.status})`);
+    }
+    return data.data || [];
+  }
+
+  async reviewAdminReimageRequest(requestId: string, decision: 'approved' | 'rejected', reviewerNote?: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/reimage-requests/${encodeURIComponent(requestId)}/review`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ decision, reviewerNote }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Reimage request review failed (HTTP ${res.status})`);
+    }
+    return data as { success: true; message: string; data: ApiReimageRequest };
   }
 
   async getVMMetadata(vmid: number): Promise<ApiVmMetadata> {
