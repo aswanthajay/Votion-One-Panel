@@ -245,6 +245,23 @@ export interface ApiBillingCostBase {
   isActive: boolean;
 }
 
+export interface ApiBillingSuspensionAction {
+  id: string;
+  invoice_id?: string;
+  vmid: number;
+  status: 'pending' | 'executed' | 'reversed' | 'failed' | string;
+  reason?: string;
+  requested_at?: string;
+  executed_at?: string;
+  reversed_at?: string;
+  actor_email?: string;
+  error_message?: string;
+  account_email?: string;
+  total_cents?: number;
+  paid_cents?: number;
+  vm_name?: string;
+}
+
 export interface ApiSupportTicket {
   id: string;
   subject: string;
@@ -607,11 +624,20 @@ class ApiClient {
     return data.data;
   }
 
-  async getBillingSuspensionActions(status?: string) {
+  async getBillingSuspensionActions(status?: string): Promise<ApiBillingSuspensionAction[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
     const res = await this.apiFetch(`${API_BASE_URL}/billing/suspension-actions${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load suspension actions.');
     return data.data || [];
+  }
+
+  async reverseBillingSuspension(actionId: string): Promise<{ success: boolean; data?: ApiVM; message?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/suspension-actions/${encodeURIComponent(actionId)}/reverse`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ confirmation: 'RESTORE_PAID_SERVICE' }),
+    });
+    return await this.readApiResponse(res, 'Unable to restore paid service.');
   }
 
   async updateServerExpiry(vmid: number, additionalDays: number) {
