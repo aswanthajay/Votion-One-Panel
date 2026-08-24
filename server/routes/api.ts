@@ -1457,6 +1457,11 @@ apiRouter.get('/billing/plans', async (req, res) => {
 apiRouter.get('/billing/summary', async (req, res) => {
   try {
     const data = await dbService.getBillingSummary(isBillingAdmin(req) ? undefined : billingActor(req));
+    if (!isBillingAdmin(req)) {
+      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, ...clientData } = data;
+      res.json({ success: true, data: clientData });
+      return;
+    }
     res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { apiClient, ApiVM, ApiAuditLog } from '../services/apiClient';
+import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan } from '../services/apiClient';
 
 /*
   OVERVIEW — v3 (editorial Carta Ink redesign)
@@ -41,6 +41,7 @@ interface LiveTelemetry {
 }
 
 const num = (v: any): number => (typeof v === 'number' ? v : Number(v) || 0);
+const money = (cents: number, currency = 'USD') => new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format((Number(cents) || 0) / 100);
 const API_BASE = '/api/v1';
 const TOKEN = () => `Bearer ${localStorage.getItem('votion_jwt_token')}`;
 
@@ -141,6 +142,9 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
   const [selectedVmid, setSelectedVmid] = useState<number | null>(null);
   const [tickets, setTickets] = useState<any[]>([]);
   const [audit, setAudit] = useState<ApiAuditLog[]>([]);
+  const [billingSummary, setBillingSummary] = useState<ApiBillingSummary | null>(null);
+  const [billingInvoices, setBillingInvoices] = useState<ApiBillingInvoice[]>([]);
+  const [billingPlans, setBillingPlans] = useState<ApiPricingPlan[]>([]);
   const [opsCollapsed, setOpsCollapsed] = useState(false);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -179,6 +183,19 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
       if (tk?.data) setTickets(tk.data);
       if (al?.data) setAudit(al.data);
     } catch { /* self-heals on next cycle */ }
+
+    // BILLING STREAM — optional and non-blocking. A billing outage must never
+    // blank the operational telemetry surface.
+    void Promise.all([
+      apiClient.getBillingSummary(),
+      apiClient.getBillingInvoices(),
+      apiClient.getBillingPlans(),
+    ]).then(([summary, invoices, plans]) => {
+      if (!mountedRef.current) return;
+      setBillingSummary(summary);
+      setBillingInvoices(invoices);
+      setBillingPlans(plans);
+    }).catch(() => { /* billing state retries on the next refresh cycle */ });
 
     // FLEET STREAM with backoff retry — hard-capped at 12s total so the UI
     // always fails CLOSED (error card) instead of hanging on skeleton bars.
@@ -267,42 +284,36 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
   }, []);
 
   const openTickets = tickets.filter(t => t.status === 'pending' || t.status === 'open' || t.status === 'in-progress');
-  // Real billing: the earliest VM expiry date across the fleet is the next
-  // renewal deadline, and the monthly total is derived from each VM's assigned
-  // resource tier matched against the published pricing plans (stellar_pricing).
-  const PRICING_TIERS = [
-    { price: 29, vcpus: 2, ramGb: 4, diskGb: 50 },
-    { price: 89, vcpus: 8, ramGb: 16, diskGb: 200 },
-    { price: 249, vcpus: 32, ramGb: 64, diskGb: 1000 },
-  ];
-  const matchTier = (vcpus: number, ramGb: number, diskGb: number) => {
-    for (const t of PRICING_TIERS) {
-      if (vcpus <= t.vcpus && ramGb <= t.ramGb && diskGb <= t.diskGb) return t;
-    }
-    return PRICING_TIERS[PRICING_TIERS.length - 1];
+  const matchPlan = (vcpus: number, ramGb: number, diskGb: number) => {
+    const eligible = [...billingPlans].filter(plan => plan.isActive).sort((a, b) => a.monthlyPriceCents - b.monthlyPriceCents);
+    return eligible.find(plan => vcpus <= plan.vcpuLimit && ramGb <= plan.ramGb && diskGb <= plan.diskGb) || eligible[eligible.length - 1] || null;
   };
   const billing = useMemo(() => {
     const rows = vms.map(v => {
       const vcpus = v.cpus;
       const ramGb = num(v.maxmem) / GB;
-      const diskGb = num(v.disk) / 1073741824;
-      const tier = matchTier(vcpus, ramGb, diskGb);
-      return { vcpus, ramGb, diskGb, tier };
+      const diskGb = num(v.disk) / GB;
+      const plan = matchPlan(vcpus, ramGb, diskGb);
+      return { vcpus, ramGb, diskGb, plan };
     });
-    const monthlyTotal = rows.reduce((s, r) => s + r.tier.price, 0);
-    const ceilings = rows.reduce((acc, r) => ({
-      vcpus: acc.vcpus + r.tier.vcpus,
-      ramGb: acc.ramGb + r.tier.ramGb,
-      diskGb: acc.diskGb + r.tier.diskGb,
+    const projectedMonthlyCents = rows.reduce((sum, row) => sum + Number(row.plan?.monthlyPriceCents || 0), 0);
+    const ceilings = rows.reduce((acc, row) => ({
+      vcpus: acc.vcpus + Number(row.plan?.vcpuLimit || 0),
+      ramGb: acc.ramGb + Number(row.plan?.ramGb || 0),
+      diskGb: acc.diskGb + Number(row.plan?.diskGb || 0),
     }), { vcpus: 0, ramGb: 0, diskGb: 0 });
-    // Next payment due = earliest VM expiry across the fleet
-    const expiries = vms.map(v => v.expiryDate ? new Date(v.expiryDate).getTime() : 0).filter(t => t > 0);
-    const earliest = expiries.length ? Math.min(...expiries) : 0;
-    const nextPayment = earliest > 0
-      ? new Date(earliest).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()
-      : '—';
-    return { rows, monthlyTotal, ceilings, nextPayment };
-  }, [vms]);
+    const unpaid = billingInvoices.filter(invoice => invoice.outstandingCents > 0);
+    const nextInvoice = [...unpaid].sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
+    return {
+      rows,
+      projectedMonthlyCents,
+      ceilings,
+      nextPayment: nextInvoice ? new Date(nextInvoice.dueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase() : '—',
+      outstandingCents: billingSummary?.outstandingCents || 0,
+      overdueCount: billingSummary?.overdueCount || 0,
+      overdueCents: billingSummary?.overdueCents || 0,
+    };
+  }, [vms, billingPlans, billingInvoices, billingSummary]);
 
   // Aggregated fleet resources — use the GREATER of the live allocation and the
   // DB quota as each VM's effective capacity, so stale DB defaults (8 GB / 64 GB)
@@ -603,33 +614,56 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
               <span className="ink-block-title !text-[12px]">Account & billing</span>
             </div>
             <div className="px-4 py-2.5 border-b border-[#dedfdf]">
-              <div className="flex justify-between items-center text-xs font-mono mb-1.5">
-                <span className="text-[#656b6b]">Next payment due</span>
-                <span className="text-[#1a1a1a] font-semibold">{billing.nextPayment}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs font-mono mb-2.5">
-                <span className="text-[#656b6b]">Monthly subscription</span>
-                <span className="text-[#1a1a1a] font-semibold">${billing.monthlyTotal}.00/mo</span>
-              </div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] text-[#656b6b]">Billing period</span>
-                <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border bg-white border-[#dedfdf] text-[#656b6b]">Monthly</span>
-              </div>
-              <div className="flex flex-col gap-2.5">
-                {[
-                  { label: `vCPU (${acctCpus})`, cap: `${billing.ceilings.vcpus} tier cap`, pct: (acctCpus / Math.max(billing.ceilings.vcpus, 1)) * 100 },
-                  { label: `Memory (${acctRamGib.toFixed(0)} GB)`, cap: `${billing.ceilings.ramGb} GB tier cap`, pct: (acctRamGib / Math.max(billing.ceilings.ramGb, 1)) * 100 },
-                  { label: `Disk (${acctDiskGb.toFixed(0)} GB)`, cap: `${billing.ceilings.diskGb} GB tier cap`, pct: (acctDiskGb / Math.max(billing.ceilings.diskGb, 1)) * 100 },
-                ].map(q => (
-                  <div key={q.label}>
-                    <div className="text-[10px] text-[#656b6b] flex justify-between font-mono">
-                      <span>{q.label}</span>
-                      <span>{q.cap}</span>
-                    </div>
-                    <UsageBar pct={q.pct} tone="subtle" />
+              {billingSummary === null ? (
+                <div className="space-y-2.5" aria-busy="true">
+                  <div className="h-3 w-2/3 animate-pulse rounded bg-[#f1f1f1]" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-[#f1f1f1]" />
+                  <div className="h-2 w-full animate-pulse rounded bg-[#f1f1f1]" />
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center text-xs font-mono mb-1.5">
+                    <span className="text-[#656b6b]">Next payment due</span>
+                    <span className="text-[#1a1a1a] font-semibold">{billing.nextPayment}</span>
                   </div>
-                ))}
-              </div>
+                  <div className="flex justify-between items-center text-xs font-mono mb-2.5">
+                    <span className="text-[#656b6b]">Projected monthly</span>
+                    <span className="text-[#1a1a1a] font-semibold">{billingPlans.length ? money(billing.projectedMonthlyCents) : 'Not configured'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs font-mono mb-2.5">
+                    <span className="text-[#656b6b]">Outstanding balance</span>
+                    <span className={`font-semibold ${billing.outstandingCents > 0 ? 'text-[#8d3028]' : 'text-[#176b52]'}`}>{money(billing.outstandingCents, billingInvoices[0]?.currency || 'USD')}</span>
+                  </div>
+                  {billing.overdueCount > 0 ? (
+                    <div className="mb-3 rounded border border-[#f0c0bb] bg-[#fff7f6] px-3 py-2 text-[11px] leading-5 text-[#8d3028]">
+                      <strong>Payment attention required.</strong> {billing.overdueCount} invoice{billing.overdueCount === 1 ? '' : 's'} overdue ({money(billing.overdueCents, billingInvoices[0]?.currency || 'USD')}). Service may be suspended only after the configured grace period; your VM and disks are never deleted by this workflow.
+                    </div>
+                  ) : billingInvoices.length === 0 ? (
+                    <div className="mb-3 rounded border border-[#dedfdf] bg-[#fbfaf9] px-3 py-2 text-[11px] leading-5 text-[#656b6b]">No invoices have been recorded yet. Your account team will publish billing details here when the billing profile is activated.</div>
+                  ) : (
+                    <div className="mb-3 rounded border border-[#b8e3cf] bg-[#eef9f4] px-3 py-2 text-[11px] leading-5 text-[#176b52]">Billing account in good standing. No overdue balance is currently recorded.</div>
+                  )}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[11px] text-[#656b6b]">Billing period</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border bg-white border-[#dedfdf] text-[#656b6b]">Monthly</span>
+                  </div>
+                  <div className="flex flex-col gap-2.5">
+                    {[
+                      { label: `vCPU (${acctCpus})`, cap: `${billing.ceilings.vcpus || '—'} catalog cap`, pct: billing.ceilings.vcpus ? (acctCpus / billing.ceilings.vcpus) * 100 : 0 },
+                      { label: `Memory (${acctRamGib.toFixed(0)} GB)`, cap: `${billing.ceilings.ramGb || '—'} GB catalog cap`, pct: billing.ceilings.ramGb ? (acctRamGib / billing.ceilings.ramGb) * 100 : 0 },
+                      { label: `Disk (${acctDiskGb.toFixed(0)} GB)`, cap: `${billing.ceilings.diskGb || '—'} GB catalog cap`, pct: billing.ceilings.diskGb ? (acctDiskGb / billing.ceilings.diskGb) * 100 : 0 },
+                    ].map(q => (
+                      <div key={q.label}>
+                        <div className="text-[10px] text-[#656b6b] flex justify-between font-mono">
+                          <span>{q.label}</span>
+                          <span>{q.cap}</span>
+                        </div>
+                        <UsageBar pct={q.pct} tone="subtle" />
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* 3. incidents & audit */}
