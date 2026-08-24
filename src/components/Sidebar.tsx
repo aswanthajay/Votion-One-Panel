@@ -34,60 +34,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       )
     },
-    { 
-      title: 'PVE Node Matrix', 
-      key: 'node-matrix',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M18.8 6.55a5.55 5.55 0 1 1-11.1 0 5.55 5.55 0 0 1 11.1 0ZM13.25 3a3.55 3.55 0 1 0 0 7.1 3.55 3.55 0 0 0 0-7.1ZM1 13.9a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1ZM6.3 17.5a1 1 0 0 1 1-1h9.4a1 1 0 1 1 0 2H7.3a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'Storage & ZFS Pools', 
-      key: 'storage',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M1 5a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H5a4 4 0 0 1-4-4V5Zm4-2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Zm2.6 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm3.8-1a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm-3.8-3a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm3.8-1a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Zm-3.8-3a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm3.8-1a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'SDN & Firewall', 
-      key: 'firewall',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M11 1.25a8.75 8.75 0 1 0 0 17.5 8.75 8.75 0 0 0 0-17.5ZM.25 10a10.75 10.75 0 1 1 21.5 0 10.75 10.75 0 0 1-21.5 0Zm14.28-2.53a1 1 0 0 1 0 1.41l-4.5 4.5a1 1 0 0 1-1.41 0l-2-2a1 1 0 0 1 1.41-1.41l1.3 1.29 3.79-3.79a1 1 0 0 1 1.41 0Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'PBS Backup Sync', 
-      key: 'backups',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path d="M2.54 10.68 7.92 5.3l3.85 3.84 6.6-6.6h-5.32V1H21v7.95h-1.54V3.63l-7.69 7.69-3.85-3.85-5.38 5.39v6.6H21V21H1V1h1.54z"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'High Availability (HA)', 
-      key: 'ha',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M11 1.387c-5.523 0-10 4.477-10 10s4.477 10 10 10 10-4.477-10-10-4.477-10-10-10ZM3 11.387c0-4.418 3.582-8 8-8s8 3.582 8 8-3.582 8-8 8-8-3.582-8-8Zm11.707-3.707a1 1 0 0 0-1.414 0L9.5 11.473 7.707 9.68a1 1 0 0 0-1.414 1.414l2.5 2.5a1 1 0 0 0 1.414 0l4.5-4.5a1 1 0 0 0 0-1.414Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'Cluster Audit Logs', 
-      key: 'audit-logs',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M4 2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7.414a2 2 0 0 0-.586-1.414l-4-4A2 2 0 0 0 14.586 2H4Zm11 1.414L18.586 7H15V3.414ZM13 3H4v16h14V9h-4a1 1 0 0 1-1-1V3Zm-7 7a1 1 0 0 1 1-1h8a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1Zm1 3a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2H7Zm-1 5a1 1 0 0 1 1-1h5a1 1 0 1 1 0 2H7a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
+
+
     { 
       title: 'Cluster Connections', 
       key: 'proxmox-connections',
@@ -178,14 +126,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const activeNavItems = userRole === 'admin' ? adminNavItems : clientNavItems;
 
   const essentialsSublinks = userRole === 'admin' ? [
-    { title: 'View Cluster Nodes', key: 'node-matrix' },
     { title: 'Virtual Machines', key: 'client-instances-qemu' },
     { title: 'LXC Containers', key: 'client-instances-lxc' },
-    { title: 'ZFS Pool Scrub', key: 'storage' },
-    { title: 'PBS Snapshot Jobs', key: 'backups' },
-    { title: 'HA Fencing Rules', key: 'ha' },
     { title: 'System Settings (SMTP)', key: 'system-settings' },
-    { title: 'Manage Users & Roles', key: 'user-settings' }
+    { title: 'Manage Users & Roles', key: 'user-management' }
   ] : [
     { title: 'My Virtual Machines', key: 'client-instances-qemu' },
     { title: 'LXC Containers', key: 'client-instances-lxc' },

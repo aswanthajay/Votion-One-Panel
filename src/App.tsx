@@ -11,6 +11,7 @@ import { AppSwitcher } from './components/AppSwitcher';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastContext';
+import { RouteNotFound } from './components/RouteNotFound';
 
 const DashboardContent = lazy(() => import('./components/DashboardContent'));
 const ClientPanelContent = lazy(() => import('./components/ClientPanelContent').then(module => ({ default: module.ClientPanelContent })));
@@ -22,6 +23,7 @@ const UserManagement = lazy(() => import('./components/UserManagement').then(mod
 const ProxmoxConnections = lazy(() => import('./components/ProxmoxConnections').then(module => ({ default: module.ProxmoxConnections })));
 const SystemSettings = lazy(() => import('./components/SystemSettings').then(module => ({ default: module.SystemSettings })));
 const AlertRulesModal = lazy(() => import('./components/AlertRulesModal').then(module => ({ default: module.AlertRulesModal })));
+const ClusterAuditLogs = lazy(() => import('./components/ClusterAuditLogs').then(module => ({ default: module.ClusterAuditLogs })));
 
 export type ViewMode =
   | 'dashboard'
@@ -204,12 +206,7 @@ const AppShell: React.FC = () => {
           <Suspense fallback={<RouteLoading />}>
             <Routes>
               <Route path={VIEW_PATHS.dashboard} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS['node-matrix']} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS.storage} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS.firewall} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS.backups} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS.ha} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS['audit-logs']} element={<DashboardContent />} />
+              <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />
               <Route path={VIEW_PATHS['user-management']} element={<UserManagement />} />
@@ -221,7 +218,7 @@ const AppShell: React.FC = () => {
               <Route path={VIEW_PATHS['client-instances-metrics']} element={<ClientPanelRoute filter="metrics" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
               <Route path={VIEW_PATHS['client-instances-firewall']} element={<ClientPanelRoute filter="firewall" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
               <Route path={VIEW_PATHS['client-instances-backups']} element={<ClientPanelRoute filter="backups" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path="*" element={<Navigate to={VIEW_PATHS.dashboard} replace />} />
+              <Route path="*" element={<RouteNotFound />} />
             </Routes>
           </Suspense>
         </div>
