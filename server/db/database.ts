@@ -1448,6 +1448,21 @@ export class DatabaseService {
     return result.rows.length > 0 ? await this.getReimageExecution(executionId) : null;
   }
 
+  async cancelReimageExecution(executionId: string, operatorEmail: string) {
+    const email = operatorEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_executions
+       SET state = 'cancelled', error_code = 'OPERATOR_CANCELLED', error_message = 'Cancelled by operator before any Proxmox mutation.', updated_at = NOW()
+       WHERE id = $1 AND operator_email = $2
+         AND state IN ('created', 'preflight_passed', 'awaiting_confirmation', 'queued')
+       RETURNING id`,
+      [executionId, email],
+    );
+    if (result.rows.length === 0) return null;
+    await this.recordReimageAuditEvent({ executionId, actorEmail: email, action: 'CANCEL_EXECUTION', toState: 'cancelled', safeDetails: { mutationAttempted: false } });
+    return await this.getReimageExecution(executionId);
+  }
+
   async recordReimageAuditEvent(input: { requestId?: string; executionId?: string; actorEmail: string; action: string; fromState?: string; toState?: string; correlationId?: string; planHash?: string; safeDetails?: Record<string, unknown> }) {
     const id = `reimage-audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     await pgPool.query(
@@ -1809,6 +1824,28 @@ export class DatabaseService {
     }
     await pgPool.query(`UPDATE tasks SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
     return { success: true };
+  }
+
+    async setOperatorAccess(accountEmail: string, enabled: boolean, actorEmail: string) {
+    const email = accountEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE accounts SET operator_access = $1 WHERE email = $2
+       RETURNING email, name, role, operator_access`,
+      [enabled, email],
+    );
+    if (result.rows.length === 0) return null;
+    await this.logAudit(
+      actorEmail,
+      enabled ? 'GRANT_REIMAGE_OPERATOR_ACCESS' : 'REVOKE_REIMAGE_OPERATOR_ACCESS',
+      email,
+      `Dedicated reimage operator access ${enabled ? 'granted' : 'revoked'}.`,
+    );
+    return {
+      email: result.rows[0].email,
+      name: result.rows[0].name,
+      role: result.rows[0].role,
+      operatorAccess: result.rows[0].operator_access === true,
+    };
   }
 
   // ADVANCED USER MANAGEMENT

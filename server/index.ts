@@ -4,6 +4,7 @@ import cors from 'cors';
 import { apiRouter } from './routes/api.js';
 import { adminRouter } from './routes/admin.js';
 import { clientRouter } from './routes/client.js';
+import { operatorRouter } from './routes/operator.js';
 import { ticketRouter } from './routes/tickets.js';
 import { vncRouter } from './routes/vnc.js';
 import { expiryWorker } from './jobs/expiryWorker.js';
@@ -66,6 +67,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/v1/client', clientRouter);
+app.use('/api/operator', operatorRouter);
+app.use('/api/v1/operator', operatorRouter);
 app.use('/api/tickets', ticketRouter);
 app.use('/api/v1/tickets', ticketRouter);
 

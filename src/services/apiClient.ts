@@ -186,6 +186,37 @@ export interface ApiReimageRequest {
   cancelledAt?: string;
 }
 
+export type ReimageExecutionState = 'created' | 'preflight_passed' | 'awaiting_confirmation' | 'queued' | 'processing' | 'verifying' | 'awaiting_cutover_confirmation' | 'cutover_processing' | 'completed' | 'failed' | 'blocked' | 'cancelled';
+
+export interface ApiReimageExecution {
+  id: string;
+  requestId: string;
+  vmid: number;
+  vmName?: string;
+  vmType?: 'qemu' | 'lxc';
+  ownerEmail?: string;
+  requesterEmail?: string;
+  requestedOs?: string;
+  requestStatus?: string;
+  imageProfileId?: string;
+  imageProfileVersion?: string;
+  state: ReimageExecutionState;
+  planHash?: string;
+  operatorEmail?: string;
+  operatorConfirmedAt?: string;
+  preflightSnapshot?: Record<string, unknown>;
+  backupReference?: string;
+  currentStep?: string;
+  attemptCount: number;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  queuedAt?: string;
+  completedAt?: string;
+  blockedAt?: string;
+}
+
 class ApiClient {
   private getToken(): string | null {
     return localStorage.getItem('votion_jwt_token');
@@ -300,6 +331,49 @@ class ApiClient {
       throw new Error(data.error || `Reimage request review failed (HTTP ${res.status})`);
     }
     return data as { success: true; message: string; data: ApiReimageRequest };
+  }
+
+  async getOperatorApprovedReimageRequests(): Promise<ApiReimageRequest[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-requests`, { headers: this.getHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Operator queue request failed (HTTP ${res.status})`);
+    return data.data || [];
+  }
+
+  async getOperatorReimageExecutions(state?: ReimageExecutionState): Promise<ApiReimageExecution[]> {
+    const query = state ? `?state=${encodeURIComponent(state)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions${query}`, { headers: this.getHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Operator execution history failed (HTTP ${res.status})`);
+    return data.data || [];
+  }
+
+  async createOperatorReimageExecution(requestId: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-requests/${encodeURIComponent(requestId)}/executions`, { method: 'POST', headers: this.getHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Execution creation failed (HTTP ${res.status})`);
+    return data as { success: true; execution: ApiReimageExecution; planHash: string; executionEnabled: boolean; message: string };
+  }
+
+  async preflightOperatorReimageExecution(executionId: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/preflight`, { method: 'POST', headers: this.getHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Preflight failed (HTTP ${res.status})`);
+    return data as { success: true; execution: ApiReimageExecution; planHash: string; executionEnabled: boolean; message: string };
+  }
+
+  async confirmOperatorReimageExecution(executionId: string, input: { planHash: string; confirmationPhrase: string; expectedVmid: number; expectedImageProfileVersion: string }) {
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/confirm`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(input) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Execution confirmation failed (HTTP ${res.status})`);
+    return data as { success: true; execution: ApiReimageExecution; executionEnabled: boolean; message: string };
+  }
+
+  async cancelOperatorReimageExecution(executionId: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/cancel`, { method: 'POST', headers: this.getHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) throw new Error(data.error || `Execution cancellation failed (HTTP ${res.status})`);
+    return data as { success: true; execution: ApiReimageExecution; message: string };
   }
 
   async getVMMetadata(vmid: number): Promise<ApiVmMetadata> {

@@ -8,6 +8,19 @@ import { requireAdmin, requireAuth } from '../middleware.js';
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
 
+adminRouter.post('/operator-access', async (req, res) => {
+  const actorEmail = req.authUser?.email;
+  const accountEmail = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+  if (!actorEmail || !accountEmail) return res.status(400).json({ success: false, error: 'Account email is required' });
+  if (accountEmail.toLowerCase() === actorEmail.toLowerCase()) {
+    return res.status(409).json({ success: false, error: 'Self-granting operator access is not permitted.' });
+  }
+  const enabled = req.body?.enabled === true;
+  const account = await dbService.setOperatorAccess(accountEmail, enabled, actorEmail);
+  if (!account) return res.status(404).json({ success: false, error: 'Account not found' });
+  res.json({ success: true, data: account, message: `Operator access ${enabled ? 'granted' : 'revoked'} for ${account.email}.` });
+});
+
 adminRouter.get('/reimage-requests', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
   if (status && !new Set(['pending', 'approved', 'rejected', 'cancelled']).has(status)) {
