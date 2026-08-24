@@ -240,6 +240,7 @@ export async function initializeDatabaseSchema() {
         name VARCHAR(255),
         target VARCHAR(20) NOT NULL DEFAULT 'cluster',
         vmid INT,
+        node_name VARCHAR(100),
         metric VARCHAR(30) NOT NULL,
         operator VARCHAR(5) NOT NULL DEFAULT '>',
         threshold NUMERIC NOT NULL,
@@ -491,6 +492,7 @@ export class DatabaseService {
       name: r.name,
       target: r.target,
       vmid: r.vmid,
+      nodeName: r.node_name,
       metric: r.metric,
       operator: r.operator,
       threshold: Number(r.threshold),
@@ -504,8 +506,9 @@ export class DatabaseService {
   async createAlertRule(rule: {
     accountEmail: string;
     name?: string;
-    target: 'cluster' | 'vm';
+    target: 'cluster' | 'vm' | 'node';
     vmid?: number;
+    nodeName?: string;
     metric: string;
     operator: '>' | '<' | '>=' | '<=' | '==';
     threshold: number;
@@ -514,13 +517,14 @@ export class DatabaseService {
     enabled?: boolean;
   }) {
     const res = await pgPool.query(
-      `INSERT INTO alert_rules (account_email, name, target, vmid, metric, operator, threshold, severity, cooldown_minutes, enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      `INSERT INTO alert_rules (account_email, name, target, vmid, node_name, metric, operator, threshold, severity, cooldown_minutes, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
       [
         rule.accountEmail.toLowerCase().trim(),
         rule.name || `${rule.metric} ${rule.operator} ${rule.threshold}`,
         rule.target,
         rule.vmid ?? null,
+        rule.nodeName ?? null,
         rule.metric,
         rule.operator,
         rule.threshold,
@@ -544,6 +548,7 @@ export class DatabaseService {
     apply('name', updates.name);
     apply('target', updates.target);
     apply('vmid', updates.vmid);
+    apply('node_name', updates.nodeName);
     apply('metric', updates.metric);
     apply('operator', updates.operator);
     apply('threshold', updates.threshold);
@@ -564,11 +569,17 @@ export class DatabaseService {
   // Check rules against a telemetry sample; returns fired notification rows (may be empty)
   async evaluateAlertRules(sample: {
     accountEmail: string;
+    target?: 'cluster' | 'node' | 'vm';
     cpuPct: number;      // cluster average CPU
     memPct: number;      // cluster memory utilization
     vmid?: number;
     vmCpuPct?: number;
     vmMemPct?: number;
+    nodeName?: string;
+    nodeAvailable?: number;
+    nodeCpuPct?: number;
+    nodeMemPct?: number;
+    nodeStoragePct?: number;
   }): Promise<{ accountEmail: string; ruleId: number; title: string; message: string; severity: string }[]> {
     // Load active enabled rules for this account (or globally visible admin rules)
     const res = await pgPool.query(
@@ -588,6 +599,16 @@ export class DatabaseService {
     };
 
     const metricValue = (rule: any): number | null => {
+      if (rule.target === 'node' || rule.node_name) {
+        if (rule.node_name && rule.node_name !== '*' && rule.node_name.toLowerCase() !== String(sample.nodeName || '').toLowerCase()) return null;
+        switch (rule.metric) {
+          case 'node_availability': return sample.nodeAvailable ?? null;
+          case 'node_cpu_pct': return sample.nodeCpuPct ?? null;
+          case 'node_mem_pct': return sample.nodeMemPct ?? null;
+          case 'node_storage_pct': return sample.nodeStoragePct ?? null;
+          default: return null;
+        }
+      }
       if (rule.target === 'vm' || rule.vmid) {
         if (rule.vmid !== sample.vmid) return null;
         switch (rule.metric) {
@@ -610,6 +631,7 @@ export class DatabaseService {
     };
 
     for (const rule of res.rows) {
+      if (sample.target && rule.target !== sample.target) continue;
       const value = metricValue(rule);
       if (value === null) continue;
       if (!compare(rule.operator, value, Number(rule.threshold))) continue;
@@ -622,10 +644,19 @@ export class DatabaseService {
       );
       if (recent.rows.length > 0) continue;
 
-      const targets = rule.target === 'vm' ? `VMID ${rule.vmid ?? sample.vmid ?? '-'}` : 'Cluster';
-      const unit = rule.metric.includes('mem') ? '%' : '%';
+      const targets = rule.target === 'vm'
+        ? `VMID ${rule.vmid ?? sample.vmid ?? '-'}`
+        : rule.target === 'node'
+          ? `Node ${sample.nodeName || rule.node_name || 'unknown'}`
+          : 'Cluster';
+      const isAvailability = rule.metric === 'node_availability';
+      const unit = isAvailability ? '' : '%';
+      const valueText = isAvailability ? (value >= 0.5 ? 'online' : 'offline') : `${value.toFixed(1)}${unit}`;
+      const thresholdText = isAvailability ? (Number(rule.threshold) >= 0.5 ? 'online' : 'offline') : `${Number(rule.threshold).toFixed(1)}${unit}`;
       const title = `Alert: ${rule.name || rule.metric} breached`;
-      const message = `${targets} ${rule.metric.replace('_', ' ')} is now ${value.toFixed(1)}${unit} — exceeds rule "${rule.name || ''}" (${rule.operator} ${Number(rule.threshold).toFixed(1)}${unit}). Severity: ${rule.severity}.`;
+      const message = isAvailability
+        ? `${targets} is ${valueText} — breached rule "${rule.name || rule.metric}" (${rule.operator} ${thresholdText}). Severity: ${rule.severity}.`
+        : `${targets} ${rule.metric.replaceAll('_', ' ')} is now ${valueText} — breached rule "${rule.name || ''}" (${rule.operator} ${thresholdText}). Severity: ${rule.severity}.`;
       fired.push({ accountEmail: rule.account_email || sample.accountEmail, ruleId: rule.id, title, message, severity: rule.severity || 'warning' });
     }
     return fired;
@@ -703,6 +734,7 @@ export class DatabaseService {
         name VARCHAR(255),
         target VARCHAR(20) NOT NULL DEFAULT 'cluster',
         vmid INT,
+        node_name VARCHAR(100),
         metric VARCHAR(30) NOT NULL,
         operator VARCHAR(5) NOT NULL DEFAULT '>',
         threshold NUMERIC NOT NULL,
@@ -722,16 +754,25 @@ export class DatabaseService {
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);
-    // Auto-create a sensible default rule for new installations: cluster CPU > 85%
-    const existing = await pgPool.query("SELECT id FROM alert_rules LIMIT 1");
-    if (existing.rows.length === 0) {
+    await pgPool.query('ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS node_name VARCHAR(100)');
+    await pgPool.query('CREATE INDEX IF NOT EXISTS idx_alert_rules_target_node ON alert_rules (target, node_name, enabled)');
+
+    // Seed named defaults independently so existing installations receive new
+    // availability and storage coverage without duplicating user-created rules.
+    const adminResult = await pgPool.query("SELECT email FROM accounts WHERE role IN ('admin', 'administrator') ORDER BY id ASC LIMIT 1");
+    const defaultEmail = String(adminResult.rows[0]?.email || process.env.ALERT_FALLBACK_EMAIL || 'admin@votioncloud.org').toLowerCase().trim();
+    const defaults = [
+      [defaultEmail, 'Cluster CPU high', 'cluster', null, null, 'cpu_pct', '>', 85, 'warning', 10, true],
+      [defaultEmail, 'Cluster memory critical', 'cluster', null, null, 'mem_pct', '>', 90, 'critical', 10, true],
+      [defaultEmail, 'Node unavailable', 'node', null, null, 'node_availability', '<', 1, 'critical', 5, true],
+      [defaultEmail, 'Node storage high', 'node', null, null, 'node_storage_pct', '>', 85, 'warning', 10, true],
+    ];
+    for (const rule of defaults) {
       await pgPool.query(
-        "INSERT INTO alert_rules (account_email, name, target, vmid, metric, operator, threshold, severity, cooldown_minutes, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-        ['admin@votioncloud.org', 'Cluster CPU high', 'cluster', null, 'cpu_pct', '>', 85, 'warning', 10, true]
-      );
-      await pgPool.query(
-        "INSERT INTO alert_rules (account_email, name, target, vmid, metric, operator, threshold, severity, cooldown_minutes, enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-        ['admin@votioncloud.org', 'VM memory critical', 'vm', null, 'mem_pct', '>', 90, 'critical', 10, true]
+        `INSERT INTO alert_rules (account_email, name, target, vmid, node_name, metric, operator, threshold, severity, cooldown_minutes, enabled)
+         SELECT $1::VARCHAR(255), $2::VARCHAR(255), $3::VARCHAR(20), $4::INT, $5::VARCHAR(100), $6::VARCHAR(30), $7::VARCHAR(5), $8::NUMERIC, $9::VARCHAR(20), $10::INT, $11::BOOLEAN
+         WHERE NOT EXISTS (SELECT 1 FROM alert_rules WHERE name = $2::VARCHAR(255) AND target = $3::VARCHAR(20) AND metric = $6::VARCHAR(30))`,
+        rule
       );
     }
     console.log('[ALERTS] Alert tables ready.');

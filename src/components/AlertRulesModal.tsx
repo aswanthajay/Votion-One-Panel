@@ -5,8 +5,9 @@ import { useToast } from './ToastContext';
 interface AlertRule {
   id: number;
   name: string;
-  target: string;
+  target: 'cluster' | 'node' | 'vm';
   vmid?: number;
+  nodeName?: string;
   metric: string;
   operator: string;
   threshold: number;
@@ -21,8 +22,9 @@ interface AlertRulesModalProps {
 
 const EMPTY_FORM = {
   name: '',
-  target: 'cluster' as 'cluster' | 'vm',
+  target: 'cluster' as 'cluster' | 'node' | 'vm',
   vmid: '' as string | number,
+  nodeName: '',
   metric: 'cpu_pct',
   operator: '>',
   threshold: '85' as string | number,
@@ -41,6 +43,7 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
   const { showToast } = useToast();
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [vms, setVms] = useState<VmEntry[]>([]);
+  const [nodes, setNodes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<number | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -64,6 +67,11 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
         setVms(vms.map((v: any) => ({ vmid: v.vmid, name: v.name, type: v.type || 'qemu' })));
       }
     }).catch(() => {});
+    apiClient.getAdminNodes().then((adminNodes: any[]) => {
+      if (Array.isArray(adminNodes)) {
+        setNodes(adminNodes.map(node => String(node.nodeName || node.node || '')).filter(Boolean));
+      }
+    }).catch(() => {});
   }, []);
 
   const notify = (msg: string) => {
@@ -72,8 +80,10 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.threshold || isNaN(Number(form.threshold)) || Number(form.threshold) <= 0) {
-      notify('Please enter a valid positive threshold.');
+    const threshold = Number(form.threshold);
+    const maxThreshold = form.metric === 'node_availability' ? 1 : 100;
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > maxThreshold) {
+      notify(form.metric === 'node_availability' ? 'Availability threshold must be 0 or 1.' : 'Please enter a threshold between 0 and 100.');
       return;
     }
     try {
@@ -82,7 +92,7 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
         target: form.target,
         metric: form.metric,
         operator: form.operator,
-        threshold: Number(form.threshold),
+        threshold,
         severity: form.severity,
         cooldownMinutes: Number(form.cooldownMinutes) || 10,
         enabled: form.enabled,
@@ -91,6 +101,13 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
         payload.vmid = Number(form.vmid);
         if (!payload.vmid) {
           notify('Please select a VM for this VM-scoped rule.');
+          return;
+        }
+      }
+      if (form.target === 'node') {
+        payload.nodeName = form.nodeName || undefined;
+        if (!payload.nodeName) {
+          notify('Please select a node or choose the all-nodes option.');
           return;
         }
       }
@@ -131,8 +148,9 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
     setEditing(rule.id);
     setForm({
       name: rule.name || '',
-      target: rule.target as 'cluster' | 'vm',
+      target: rule.target as 'cluster' | 'node' | 'vm',
       vmid: rule.vmid ?? '',
+      nodeName: rule.nodeName ?? '',
       metric: rule.metric,
       operator: rule.operator,
       threshold: String(rule.threshold),
@@ -147,6 +165,10 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
     mem_pct: 'Memory %',
     cpu: 'Cluster CPU %',
     mem: 'Cluster Memory %',
+    node_availability: 'Availability',
+    node_cpu_pct: 'Node CPU %',
+    node_mem_pct: 'Node memory %',
+    node_storage_pct: 'Node storage %',
   }[m] || m);
 
   const vmName = (vmid?: number) => vms.find(v => v.vmid === vmid)?.name || `VMID ${vmid ?? '-'}`;
@@ -157,7 +179,7 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
         <div className="flex items-center justify-between border-b border-[#dedfdf] px-6 py-4 shrink-0">
           <div>
             <h3 className="text-base font-bold text-[#1a1a1a]">Alert Rules</h3>
-            <p className="text-xs text-[#656b6b] mt-0.5">Real-time thresholds — evaluated every 15s against live cluster telemetry. Breaches create notifications and toast alerts.</p>
+            <p className="text-xs text-[#656b6b] mt-0.5">Rules are evaluated every 15s against live telemetry. Node availability and resource breaches create notifications without changing VM state.</p>
           </div>
           <button onClick={onClose} className="text-[#1a1a1a]/60 hover:text-[#1a1a1a] font-bold cursor-pointer text-lg">✕</button>
         </div>
@@ -187,11 +209,10 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
                         rule.severity === 'info' ? 'text-[#2563eb] bg-[#eff6ff] border-[#bfdbfe]' :
                         'text-[#b45309] bg-[#fffbeb] border-[#fde68a]'
                       }`}>{rule.severity}</span>
-                      <span className="text-[10px] text-[#a7aaaa]">{rule.target === 'vm' ? `VM: ${vmName(rule.vmid)}` : 'Cluster-wide'}</span>
+                      <span className="text-[10px] text-[#a7aaaa]">{rule.target === 'vm' ? `VM: ${vmName(rule.vmid)}` : rule.target === 'node' ? `Node: ${rule.nodeName || 'All nodes'}` : 'Cluster-wide'}</span>
                     </div>
                     <p className="text-[11px] text-[#656b6b] mt-0.5">
-                      {metricLabel(rule.metric)} {rule.operator} {rule.threshold}
-                      {rule.metric.includes('mem') ? '' : '%'} · cooldown {rule.cooldownMinutes}m
+                      {metricLabel(rule.metric)} {rule.operator} {rule.metric === 'node_availability' ? (Number(rule.threshold) >= 0.5 ? 'online' : 'offline') : `${rule.threshold}%`} · cooldown {rule.cooldownMinutes}m
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
@@ -223,13 +244,31 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
                 <label className="block font-semibold mb-1 text-[#1a1a1a]">Scope</label>
                 <select
                   value={form.target}
-                  onChange={(e) => setForm({ ...form, target: e.target.value as 'cluster' | 'vm' })}
+                  onChange={(e) => {
+                    const target = e.target.value as 'cluster' | 'node' | 'vm';
+                    setForm({ ...form, target, metric: target === 'node' ? 'node_availability' : 'cpu_pct', vmid: '', nodeName: '' });
+                  }}
                   className="w-full p-2 border border-[#dedfdf] rounded outline-none font-medium text-[#1a1a1a] bg-white"
                 >
                   <option value="cluster">Cluster (all nodes)</option>
+                  <option value="node">Specific node</option>
                   <option value="vm">Specific VM</option>
                 </select>
               </div>
+              {form.target === 'node' && (
+                <div>
+                  <label className="block font-semibold mb-1 text-[#1a1a1a]">Target node</label>
+                  <select
+                    value={form.nodeName}
+                    onChange={(e) => setForm({ ...form, nodeName: e.target.value })}
+                    className="w-full p-2 border border-[#dedfdf] rounded outline-none font-medium text-[#1a1a1a] bg-white"
+                  >
+                    <option value="">Select node scope...</option>
+                    <option value="*">All nodes</option>
+                    {nodes.map(node => <option key={node} value={node}>{node}</option>)}
+                  </select>
+                </div>
+              )}
               {form.target === 'vm' && (
                 <div>
                   <label className="block font-semibold mb-1 text-[#1a1a1a]">Target VM</label>
@@ -252,10 +291,17 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
                   onChange={(e) => setForm({ ...form, metric: e.target.value })}
                   className="w-full p-2 border border-[#dedfdf] rounded outline-none font-medium text-[#1a1a1a] bg-white"
                 >
-                  <option value="cpu_pct">CPU % (utilization)</option>
-                  <option value="mem_pct">Memory % (utilization)</option>
-                  <option value="cpu">Cluster CPU %</option>
-                  <option value="mem">Cluster Memory %</option>
+                  {form.target === 'node' ? <>
+                    <option value="node_availability">Availability (online/offline)</option>
+                    <option value="node_cpu_pct">CPU % (utilization)</option>
+                    <option value="node_mem_pct">Memory % (utilization)</option>
+                    <option value="node_storage_pct">Storage % (utilization)</option>
+                  </> : <>
+                    <option value="cpu_pct">CPU % (utilization)</option>
+                    <option value="mem_pct">Memory % (utilization)</option>
+                    <option value="cpu">Cluster CPU %</option>
+                    <option value="mem">Cluster Memory %</option>
+                  </>}
                 </select>
               </div>
               <div className="flex gap-2">
@@ -273,11 +319,12 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block font-semibold mb-1 text-[#1a1a1a]">Threshold (%)</label>
+                  <label className="block font-semibold mb-1 text-[#1a1a1a]">{form.metric === 'node_availability' ? 'Threshold (1 = online, 0 = offline)' : 'Threshold (%)'}</label>
                   <input
                     type="number"
                     min="0"
-                    max="100"
+                    max={form.metric === 'node_availability' ? '1' : '100'}
+                    step={form.metric === 'node_availability' ? '1' : '0.1'}
                     value={form.threshold}
                     onChange={(e) => setForm({ ...form, threshold: e.target.value })}
                     className="w-full p-2 border border-[#dedfdf] rounded outline-none font-mono font-medium text-[#1a1a1a] bg-white"

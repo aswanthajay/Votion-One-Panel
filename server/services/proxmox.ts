@@ -30,6 +30,7 @@ async function fetchVersion(cleanHost: string, port: any, tokenId: string, secre
 
 export class ProxmoxApiService {
   private config: ProxmoxApiConfig;
+  private telemetryTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.config = {
@@ -568,7 +569,8 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
    * Background Telemetry Poller (also drives the real-time alerting engine)
    */
   startTelemetryPoller() {
-    setInterval(async () => {
+    if (this.telemetryTimer) return;
+    this.telemetryTimer = setInterval(async () => {
       try {
         const vms = await dbService.getVMs();
         const conns = await dbService.getProxmoxConnections();
@@ -581,9 +583,11 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
         // ---- Cluster-level CPU/memory utilization for cluster-scoped alert rules ----
         let clusterCpuPct = 0;
         let clusterMemPct = 0;
+        let liveNodes: any[] = [];
         try {
           const nodes = await this.getNodeMetrics();
-          const realNodes = nodes.filter((n: any) => !(n as any).simulated);
+          const realNodes = nodes.filter((n: any) => !(n as any).simulated && n.status === 'online');
+          liveNodes = nodes.filter((n: any) => !(n as any).simulated || n.status === 'offline');
           if (realNodes.length > 0) {
             clusterCpuPct = +(realNodes.reduce((a, n) => a + Number(n.cpuUsagePct), 0) / realNodes.length).toFixed(2);
             const used = realNodes.reduce((a, n) => a + Number(n.ramUsageBytes), 0);
@@ -597,6 +601,7 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
         try {
           const fired = await dbService.evaluateAlertRules({
             accountEmail: process.env.ALERT_FALLBACK_EMAIL || '',
+            target: 'cluster',
             cpuPct: clusterCpuPct,
             memPct: clusterMemPct,
           });
@@ -605,7 +610,34 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
             console.log(`[ALERT FIRED] ${f.title} — ${f.message}`);
           }
         } catch (e) {}
-        
+
+        // ---- Per-node availability and resource threshold evaluation ----
+        for (const node of liveNodes) {
+          const totalStorageGb = Number(node.storageTotalGb) || 0;
+          const storagePct = totalStorageGb > 0
+            ? +((Number(node.storageUsageGb || 0) / totalStorageGb) * 100).toFixed(2)
+            : 0;
+          try {
+            const fired = await dbService.evaluateAlertRules({
+              accountEmail: process.env.ALERT_FALLBACK_EMAIL || '',
+              target: 'node',
+              cpuPct: clusterCpuPct,
+              memPct: clusterMemPct,
+              nodeName: String(node.nodeName || node.node || ''),
+              nodeAvailable: node.status === 'online' && !node.simulated ? 1 : 0,
+              nodeCpuPct: Number(node.cpuUsagePct || 0),
+              nodeMemPct: Number(node.ramTotalBytes || 0) > 0
+                ? +((Number(node.ramUsageBytes || 0) / Number(node.ramTotalBytes)) * 100).toFixed(2)
+                : 0,
+              nodeStoragePct: storagePct,
+            });
+            for (const f of fired) {
+              await dbService.createNotification(f);
+              console.log(`[ALERT FIRED] ${f.title} — ${f.message}`);
+            }
+          } catch (e) {}
+        }
+
         for (const vm of vms) {
           if (vm.status === 'stopped' || vm.isSuspended) continue;
           
@@ -633,6 +665,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
                 try {
                   const fired = await dbService.evaluateAlertRules({
                     accountEmail: process.env.ALERT_FALLBACK_EMAIL || '',
+                    target: 'vm',
                     cpuPct: clusterCpuPct,
                     memPct: clusterMemPct,
                     vmid: vm.vmid,
@@ -654,6 +687,13 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
         }
       } catch (err) {}
     }, 15000); // Poll every 15 seconds
+    this.telemetryTimer.unref?.();
+  }
+
+  stopTelemetryPoller() {
+    if (!this.telemetryTimer) return;
+    clearInterval(this.telemetryTimer);
+    this.telemetryTimer = null;
   }
 }
 

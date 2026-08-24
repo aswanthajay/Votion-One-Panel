@@ -156,8 +156,10 @@ const initialConnections = await dbService.getProxmoxConnections();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
 // Start Automated Background Expiry Worker Cron Job
-expiryWorker.start();
-proxmoxSync.start();
+  expiryWorker.start();
+  proxmoxSync.start();
+  proxmoxApi.startTelemetryPoller();
+  console.log('[ALERTS] Telemetry threshold monitor started (15s interval)');
 
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);

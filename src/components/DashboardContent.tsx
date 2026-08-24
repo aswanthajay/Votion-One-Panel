@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TextInput } from '@tremor/react';
 import { TelemetryChart } from './TelemetryChart';
-import { apiClient, ApiAccount, ApiVM, ApiSupportTicket, ApiClusterOverview, ApiReimageRequest } from '../services/apiClient';
+import { apiClient, ApiAccount, ApiVM, ApiSupportTicket, ApiClusterOverview, ApiReimageRequest, ApiNotification } from '../services/apiClient';
 
 interface StellarNode {
   id: string;
@@ -48,6 +48,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [pendingReimageRequests, setPendingReimageRequests] = useState(0);
+  const [activeNotifications, setActiveNotifications] = useState<ApiNotification[]>([]);
   const [confirmTarget, setConfirmTarget] = useState<number | null>(null);
   const navigate = useNavigate();
 
@@ -78,11 +79,17 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
         apiClient.getAccounts(),
         apiClient.getSupportTickets(),
       ]);
-      let pendingRequests: ApiReimageRequest[] = [];
+            let pendingRequests: ApiReimageRequest[] = [];
       try {
         pendingRequests = await apiClient.getAdminReimageRequests('pending');
       } catch {
         // The overview remains usable if the optional approval queue is unavailable.
+      }
+      try {
+        const notificationResponse = await apiClient.getNotifications(true);
+        setActiveNotifications(notificationResponse.success ? notificationResponse.data.slice(0, 5) : []);
+      } catch {
+        // Alert banners are additive; the global notification bell remains available.
       }
 
       const mappedNodes: StellarNode[] = apiNodes.map((n, idx) => ({
@@ -189,6 +196,17 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
     }
   };
 
+  const dismissNotification = async (id: number) => {
+    const previous = activeNotifications;
+    setActiveNotifications(current => current.filter(notification => notification.id !== id));
+    try {
+      await apiClient.markNotificationsRead([id]);
+    } catch {
+      setActiveNotifications(previous);
+      setToastMessage('Unable to dismiss the alert.');
+    }
+  };
+
   const handleProvisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -241,6 +259,8 @@ export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle =
       </div>
 
       {loadError && <div className="mb-6 flex flex-col gap-3 rounded-lg border border-[#fecaca] bg-[#fff7f6] px-4 py-3 text-sm text-[#8d3028] sm:flex-row sm:items-center sm:justify-between" role="alert"><span>{loadError}</span><button type="button" onClick={loadData} className="font-semibold underline underline-offset-2">Try again</button></div>}
+
+      {activeNotifications.length > 0 && <section className="mb-6 rounded-lg border border-[#f3d19a] bg-[#fffaf0]" aria-labelledby="active-alerts-title"><div className="flex flex-col gap-1 border-b border-[#f3d19a] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 id="active-alerts-title" className="text-sm font-semibold text-[#1a1a1a]">Active alerts</h2><p className="mt-0.5 text-xs text-[#8b5e00]">Unread threshold notifications from the telemetry monitor.</p></div><button type="button" onClick={() => Promise.all(activeNotifications.map(notification => dismissNotification(notification.id)))} className="self-start text-xs font-semibold text-[#8b5e00] underline underline-offset-2 sm:self-auto">Mark all read</button></div><div className="divide-y divide-[#f3d19a]">{activeNotifications.slice(0, 3).map(notification => <div key={notification.id} className="flex items-start gap-3 px-4 py-3"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${notification.severity === 'critical' ? 'bg-[#dc2626]' : notification.severity === 'info' ? 'bg-[#2563eb]' : 'bg-[#f59e0b]'}`} /><div className="min-w-0 flex-1"><p className="text-xs font-semibold text-[#1a1a1a]">{notification.title}</p><p className="mt-1 text-xs leading-5 text-[#656b6b]">{notification.message}</p></div><button type="button" onClick={() => dismissNotification(notification.id)} className="shrink-0 text-xs font-semibold text-[#8b5e00] hover:text-[#1a1a1a]">Dismiss</button></div>)}</div>{activeNotifications.length > 3 && <p className="border-t border-[#f3d19a] px-4 py-2 text-[11px] text-[#8b5e00]">{activeNotifications.length - 3} more alert{activeNotifications.length - 3 === 1 ? '' : 's'} available in Alerts.</p>}</section>}
 
       <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Operational summary">
         {[

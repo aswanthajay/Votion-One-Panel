@@ -1110,10 +1110,14 @@ function getUserEmail(req: any): string {
   return String(req.authUser?.email || '').toLowerCase().trim();
 }
 
+const ALERT_TARGETS = ['cluster', 'node', 'vm'] as const;
+const ALERT_METRICS = ['cpu_pct', 'mem_pct', 'cpu', 'mem', 'node_availability', 'node_cpu_pct', 'node_mem_pct', 'node_storage_pct'] as const;
+
 apiRouter.get('/alert-rules', async (req, res) => {
   try {
     const email = getUserEmail(req);
-    const rules = await dbService.getAlertRules(email);
+    const role = String(req.authUser?.role || '').toLowerCase();
+    const rules = await dbService.getAlertRules(['admin', 'administrator'].includes(role) ? undefined : email);
     res.json({ success: true, count: rules.length, data: rules });
   } catch (err: any) {
     res.json({ success: false, error: err.message, data: [] });
@@ -1124,12 +1128,22 @@ apiRouter.post('/alert-rules', async (req, res) => {
   try {
     const email = getUserEmail(req);
     const b = req.body || {};
+    const target = ALERT_TARGETS.includes(b.target) ? b.target : 'cluster';
+    const metric = ALERT_METRICS.includes(b.metric) ? b.metric : 'cpu_pct';
+    const nodeMetric = metric.startsWith('node_');
+    if ((target === 'node') !== nodeMetric || (target !== 'node' && nodeMetric)) {
+      return res.status(400).json({ success: false, error: 'Node metrics require node scope; cluster and VM scopes cannot use node metrics.' });
+    }
+    if (target === 'vm' && !Number.isInteger(Number(b.vmid))) {
+      return res.status(400).json({ success: false, error: 'VM scope requires a valid VMID.' });
+    }
     const id = await dbService.createAlertRule({
       accountEmail: email,
       name: b.name,
-      target: ['cluster', 'vm'].includes(b.target) ? b.target : 'cluster',
-      vmid: b.vmid !== undefined ? Number(b.vmid) : undefined,
-      metric: b.metric || 'cpu_pct',
+      target,
+      vmid: target === 'vm' ? Number(b.vmid) : undefined,
+      nodeName: target === 'node' ? String(b.nodeName || '').trim() || undefined : undefined,
+      metric,
       operator: ['>', '<', '>=', '<=', '=='].includes(b.operator) ? b.operator : '>',
       threshold: Number(b.threshold),
       severity: ['info', 'warning', 'critical'].includes(b.severity) ? b.severity : 'warning',
@@ -1147,7 +1161,19 @@ apiRouter.post('/alert-rules', async (req, res) => {
 apiRouter.put('/alert-rules/:id', async (req, res) => {
   try {
     const email = getUserEmail(req);
-    const ok = await dbService.updateAlertRule(Number(req.params.id), email, req.body || {});
+    const updates = { ...(req.body || {}) };
+    if (updates.target !== undefined && !ALERT_TARGETS.includes(updates.target)) {
+      return res.status(400).json({ success: false, error: 'Unsupported alert scope.' });
+    }
+    if (updates.metric !== undefined && !ALERT_METRICS.includes(updates.metric)) {
+      return res.status(400).json({ success: false, error: 'Unsupported alert metric.' });
+    }
+    if ((updates.target === 'node') !== (typeof updates.metric === 'string' && updates.metric.startsWith('node_'))) {
+      if (updates.target !== undefined || updates.metric !== undefined) {
+        return res.status(400).json({ success: false, error: 'Node metrics require node scope.' });
+      }
+    }
+    const ok = await dbService.updateAlertRule(Number(req.params.id), email, updates);
     res.json({ success: ok, ...(ok ? {} : { error: 'Rule not found or not yours' }) });
   } catch (err: any) {
     res.json({ success: false, error: err.message });

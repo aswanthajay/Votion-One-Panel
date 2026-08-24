@@ -149,6 +149,17 @@ export interface ApiTask {
   startTime: string;
 }
 
+export interface ApiNotification {
+  id: number;
+  accountEmail: string;
+  ruleId?: number;
+  title: string;
+  message: string;
+  severity: 'info' | 'warning' | 'critical' | string;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export interface ApiSupportTicket {
   id: string;
   subject: string;
@@ -1277,7 +1288,7 @@ class ApiClient {
     return await res.json();
   }
 
-  async getNotifications(unreadOnly: boolean = false) {
+  async getNotifications(unreadOnly: boolean = false): Promise<{ success: boolean; unreadCount: number; count: number; data: ApiNotification[] }> {
     const res = await this.apiFetch(`${API_BASE_URL}/notifications?unreadOnly=${unreadOnly}`, { headers: this.getHeaders() });
     return await res.json();
   }
