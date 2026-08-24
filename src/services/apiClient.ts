@@ -160,10 +160,12 @@ export interface ApiNotification {
   createdAt: string;
 }
 
+export type BillingCurrency = 'INR' | 'USD' | 'EUR';
+
 export interface ApiPricingPlan {
   id: string;
   name: string;
-  currency: string;
+  currency: BillingCurrency;
   monthlyPriceCents: number;
   vcpuLimit: number;
   ramGb: number;
@@ -220,7 +222,7 @@ export interface ApiBillingConfig {
   gracePeriodDays: number;
   suspendAfterDaysOverdue: number;
   taxRatePercent: number;
-  currency: string;
+  currency: BillingCurrency;
 }
 
 export interface ApiVmBillingProfile {
@@ -231,6 +233,7 @@ export interface ApiVmBillingProfile {
   planName?: string;
   customMonthlyPriceCents: number | null;
   monthlyPriceCents: number;
+  currency?: BillingCurrency;
   billingStatus: string;
   billingCycleDay: number;
   gracePeriodDays: number | null;

@@ -2332,6 +2332,7 @@ export class DatabaseService {
     next.reminderEmailsEnabled = next.reminderEmailsEnabled === true;
     next.suspensionExecutionEnabled = next.suspensionExecutionEnabled === true;
     next.currency = String(next.currency || 'USD').toUpperCase().slice(0, 3);
+    if (!['INR', 'USD', 'EUR'].includes(next.currency)) throw new Error('Billing currency must be INR, USD, or EUR.');
     return await this.updateSystemSetting('billing_config', next);
   }
 
@@ -2349,8 +2350,8 @@ export class DatabaseService {
     const ramGb = Number(plan.ramGb);
     const diskGb = Number(plan.diskGb);
     const bandwidthGb = plan.bandwidthGb === null || plan.bandwidthGb === '' || plan.bandwidthGb === undefined ? null : Number(plan.bandwidthGb);
-    if (!id || !name || !/^[A-Z]{3}$/.test(currency) || !Number.isInteger(monthlyPriceCents) || monthlyPriceCents < 0 || !Number.isInteger(vcpuLimit) || vcpuLimit < 1 || !Number.isFinite(ramGb) || ramGb <= 0 || !Number.isFinite(diskGb) || diskGb <= 0 || (bandwidthGb !== null && (!Number.isFinite(bandwidthGb) || bandwidthGb < 0))) {
-      throw new Error('Pricing plan values are invalid.');
+    if (!id || !name || !['INR', 'USD', 'EUR'].includes(currency) || !Number.isInteger(monthlyPriceCents) || monthlyPriceCents < 0 || !Number.isInteger(vcpuLimit) || vcpuLimit < 1 || !Number.isFinite(ramGb) || ramGb <= 0 || !Number.isFinite(diskGb) || diskGb <= 0 || (bandwidthGb !== null && (!Number.isFinite(bandwidthGb) || bandwidthGb < 0))) {
+      throw new Error('Pricing plan values are invalid. Currency must be INR, USD, or EUR.');
     }
     const res = await pgPool.query(
       `INSERT INTO pricing_plans (id, name, currency, monthly_price_cents, vcpu_limit, ram_gb, disk_gb, bandwidth_gb, is_active, sort_order, updated_at)
@@ -2405,7 +2406,8 @@ export class DatabaseService {
        ORDER BY v.vmid ASC`,
       params
     );
-    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name, customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents),       billingStatus: row.billing_status || 'active',
+    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name,       customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents), currency: row.currency || 'USD', billingStatus: row.billing_status || 'active',
+
       billingCycleDay: Number(row.billing_cycle_day || 1),
       gracePeriodDays: row.grace_period_days === null || row.grace_period_days === undefined ? null : Number(row.grace_period_days),
       nextDueAt: row.next_due_at || row.expiry_date, updatedAt: row.updated_at }));
@@ -2490,7 +2492,7 @@ export class DatabaseService {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'open', $13)
        ON CONFLICT (vmid, period_start, period_end) DO UPDATE SET due_at = EXCLUDED.due_at, suspension_eligible_at = EXCLUDED.suspension_eligible_at
        RETURNING *`,
-      [invoiceId, profile.ownerEmail, vmid, profile.planId, periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), issuedAt, dueAt, subtotal, tax, subtotal + tax, config.currency || 'USD', new Date(dueAt.getTime() + Number(profile.gracePeriodDays ?? config.gracePeriodDays ?? 7) * 86400000)]
+      [invoiceId, profile.ownerEmail, vmid, profile.planId, periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), issuedAt, dueAt, subtotal, tax, subtotal + tax, profile.currency || config.currency || 'USD', new Date(dueAt.getTime() + Number(profile.gracePeriodDays ?? config.gracePeriodDays ?? 7) * 86400000)]
     );
     return this.mapBillingInvoice((await pgPool.query('SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i JOIN vms v ON v.vmid = i.vmid LEFT JOIN pricing_plans p ON p.id = i.plan_id WHERE i.id = $1', [res.rows[0].id])).rows[0]);
   }
