@@ -26,8 +26,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Distinct SVGs & dedicated view keys corresponding 1:1 to Carta Ink Design System
   const adminNavItems = [
     { 
-      title: 'Cluster Dashboard', 
-      key: 'dashboard',
+      title: 'Overview',
+      key: 'overview',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
           <path clipRule="evenodd" d="M1 9.387h8V1.387H1v8ZM13 1.387h8v8h-8v-8ZM21 12.613h-8v8h8v-8ZM9 20.613H1v-8h8v8Z" fillRule="evenodd"></path>
@@ -74,8 +74,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const clientNavItems = [
     { 
-      title: 'My Instances', 
-      key: 'client-instances',
+      title: 'Overview',
+      key: 'overview',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
           <path clipRule="evenodd" d="M1 9.387h8V1.387H1v8ZM13 1.387h8v8h-8v-8ZM21 12.613h-8v8h8v-8ZM9 20.613H1v-8h8v8Z" fillRule="evenodd"></path>
@@ -83,8 +83,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     { 
-      title: 'Virtual Machines (KVM)', 
-      key: 'client-instances-qemu',
+      title: 'All Instances',
+      key: 'instances',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path clipRule="evenodd" d="M18.8 6.55a5.55 5.55 0 1 1-11.1 0 5.55 5.55 0 0 1 11.1 0ZM13.25 3a3.55 3.55 0 1 0 0 7.1 3.55 3.55 0 0 0 0-7.1ZM1 13.9a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1ZM6.3 17.5a1 1 0 0 1 1-1h9.4a1 1 0 1 1 0 2H7.3a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
+        </svg>
+      )
+    },
+    {
+      title: 'Virtual Machines (QEMU)',
+      key: 'instances-qemu',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
           <path clipRule="evenodd" d="M18.8 6.55a5.55 5.55 0 1 1-11.1 0 5.55 5.55 0 0 1 11.1 0ZM13.25 3a3.55 3.55 0 1 0 0 7.1 3.55 3.55 0 0 0 0-7.1ZM1 13.9a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1ZM6.3 17.5a1 1 0 0 1 1-1h9.4a1 1 0 1 1 0 2H7.3a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
@@ -93,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     { 
       title: 'LXC Containers', 
-      key: 'client-instances-lxc',
+      key: 'instances-lxc',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
           <path clipRule="evenodd" d="M1 5a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H5a4 4 0 0 1-4-4V5Zm4-2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Z" fillRule="evenodd"></path>
@@ -133,13 +142,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const activeNavItems = userRole === 'admin' ? adminNavItems : clientNavItems;
 
   const essentialsSublinks = userRole === 'admin' ? [
-    { title: 'Virtual Machines', key: 'client-instances-qemu' },
-    { title: 'LXC Containers', key: 'client-instances-lxc' },
+    { title: 'Virtual Machines', key: 'instances-qemu' },
+    { title: 'LXC Containers', key: 'instances-lxc' },
     { title: 'System Settings (SMTP)', key: 'system-settings' },
     { title: 'Manage Users & Roles', key: 'user-management' }
   ] : [
-    { title: 'My Virtual Machines', key: 'client-instances-qemu' },
-    { title: 'LXC Containers', key: 'client-instances-lxc' },
+    { title: 'My Virtual Machines', key: 'instances-qemu' },
+    { title: 'LXC Containers', key: 'instances-lxc' },
     { title: 'VNC Console Access', key: 'client-instances-vnc' },
     { title: 'Resource Bandwidth', key: 'client-instances-metrics' },
     { title: 'Snapshot Backups', key: 'client-instances-backups' },
@@ -209,7 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <ul className="sidenav-nav-groups" id="sidenav-nav-groups">
         
         {/* Main View Item */}
-        {(!q || 'dashboard'.includes(q) || 'instances'.includes(q)) && (
+        {(!q || activeNavItems[0].title.toLowerCase().includes(q) || activeNavItems[0].key.includes(q) || 'overview'.includes(q) || 'instances'.includes(q)) && (
           <li className="sidenav-item">
             <div 
               onClick={() => onNavigate(activeNavItems[0].key)}

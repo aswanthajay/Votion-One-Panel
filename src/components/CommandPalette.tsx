@@ -66,22 +66,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     {
       id: 'nav-dash',
       category: 'Navigation',
-      title: 'Go to Cluster Admin Overview',
-      description: 'View compute nodes, guest allocations & capacity',
+      title: 'Go to Overview',
+      description: 'View your infrastructure summary and live capacity',
       shortcut: 'G D',
       action: () => {
-        onNavigate('dashboard');
+        onNavigate('overview');
         onClose();
       },
     },
     {
       id: 'nav-vms',
       category: 'Navigation',
-      title: 'Go to Assigned Instances',
-      description: 'Manage virtual machines, power states & VNC consoles',
+      title: 'Go to All Instances',
+      description: 'Manage virtual machines, containers, power states & consoles',
       shortcut: 'G V',
       action: () => {
-        onNavigate('client-instances');
+        onNavigate('instances');
         onClose();
       },
     },

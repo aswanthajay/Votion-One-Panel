@@ -14,6 +14,7 @@ import { ToastProvider } from './components/ToastContext';
 import { RouteNotFound } from './components/RouteNotFound';
 
 const DashboardContent = lazy(() => import('./components/DashboardContent'));
+const OverviewDashboard = lazy(() => import('./components/OverviewDashboard').then(module => ({ default: module.OverviewDashboard })));
 const ClientPanelContent = lazy(() => import('./components/ClientPanelContent').then(module => ({ default: module.ClientPanelContent })));
 const UserSettingsContent = lazy(() => import('./components/UserSettingsContent').then(module => ({ default: module.UserSettingsContent })));
 const AuthPages = lazy(() => import('./components/AuthPages').then(module => ({ default: module.AuthPages })));
@@ -26,7 +27,11 @@ const AlertRulesModal = lazy(() => import('./components/AlertRulesModal').then(m
 const ClusterAuditLogs = lazy(() => import('./components/ClusterAuditLogs').then(module => ({ default: module.ClusterAuditLogs })));
 
 export type ViewMode =
+  | 'overview'
   | 'dashboard'
+  | 'instances'
+  | 'instances-qemu'
+  | 'instances-lxc'
   | 'client-instances'
   | 'client-instances-qemu'
   | 'client-instances-lxc'
@@ -51,7 +56,11 @@ type AuthMode = 'login' | 'register' | 'forgot-password' | 'recovery';
 type ClientFilter = 'qemu' | 'lxc' | 'vnc' | 'metrics' | 'firewall' | 'backups';
 
 const VIEW_PATHS: Record<ViewMode, string> = {
+  overview: '/overview',
   dashboard: '/dashboard',
+  instances: '/instances',
+  'instances-qemu': '/instances/qemu',
+  'instances-lxc': '/instances/lxc',
   'client-instances': '/client-instances',
   'client-instances-qemu': '/client-instances/qemu',
   'client-instances-lxc': '/client-instances/lxc',
@@ -120,7 +129,7 @@ const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
     <Suspense fallback={<div className="min-h-screen bg-white" aria-busy="true" />}>
       <AuthPages
         initialMode={mode}
-        onNavigateToDashboard={() => startTransition(() => navigate(VIEW_PATHS.dashboard))}
+        onNavigateToDashboard={() => startTransition(() => navigate(VIEW_PATHS.overview))}
         onNavigateToAuth={(nextMode) => startTransition(() => navigate(AUTH_PATHS[nextMode]))}
       />
     </Suspense>
@@ -129,7 +138,7 @@ const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
 
 const RootRedirect: React.FC = () => {
   const hasSession = Boolean(localStorage.getItem('votion_jwt_token'));
-  return <Navigate to={hasSession ? VIEW_PATHS.dashboard : AUTH_PATHS.login} replace />;
+  return <Navigate to={hasSession ? VIEW_PATHS.overview : AUTH_PATHS.login} replace />;
 };
 
 const AppShell: React.FC = () => {
@@ -146,6 +155,8 @@ const AppShell: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [alertRulesOpen, setAlertRulesOpen] = useState(false);
+  const roleQuery = new URLSearchParams(location.search).get('role');
+  const activeRole: UserRole = roleQuery === 'admin' || roleQuery === 'client' ? roleQuery : userRole;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -171,12 +182,10 @@ const AppShell: React.FC = () => {
   const handleNavigate = (view: unknown) => navigateForView(navigate, view);
 
   const handleToggleRole = () => {
-    const nextRole: UserRole = userRole === 'admin' ? 'client' : 'admin';
+    const nextRole: UserRole = activeRole === 'admin' ? 'client' : 'admin';
     setUserRole(nextRole);
     localStorage.setItem('votion_user_role', nextRole);
-    startTransition(() => {
-      navigate(nextRole === 'client' ? VIEW_PATHS['client-instances'] : VIEW_PATHS.dashboard);
-    });
+    startTransition(() => navigate(`${VIEW_PATHS.overview}?role=${nextRole}`));
   };
 
   return (
@@ -186,7 +195,7 @@ const AppShell: React.FC = () => {
         <Header
           currentView={currentView}
           onNavigate={handleNavigate}
-          userRole={userRole}
+          userRole={activeRole}
           onToggleRole={handleToggleRole}
           onOpenModal={(modalName) => setActiveModal(modalName)}
           onOpenAlertRules={() => setAlertRulesOpen(true)}
@@ -200,12 +209,16 @@ const AppShell: React.FC = () => {
             onSearchChange={setSearchQuery}
             currentView={currentView}
             onNavigate={handleNavigate}
-            userRole={userRole}
+            userRole={activeRole}
           />
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
+              <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={(modalName) => setActiveModal(modalName)} />} />
               <Route path={VIEW_PATHS.dashboard} element={<DashboardContent />} />
+              <Route path={VIEW_PATHS.instances} element={<ClientPanelRoute onOpenModal={(modalName) => setActiveModal(modalName)} />} />
+              <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
+              <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
               <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />

@@ -20,7 +20,7 @@ interface StellarNode {
   uptimeDays: number;
 }
 
-export const DashboardContent: React.FC = () => {
+export const DashboardContent: React.FC<{ pageTitle?: string }> = ({ pageTitle = 'Dashboard' }) => {
   const [nodes, setNodes] = useState<StellarNode[]>([]);
   const [vms, setVMs] = useState<ApiVM[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
@@ -214,7 +214,7 @@ export const DashboardContent: React.FC = () => {
       )}
 
       <div className="mb-8">
-        <h1 className="page-heading">Dashboard</h1>
+        <h1 className="page-heading">{pageTitle}</h1>
         <p className="text-sm text-[#656b6b]">Manage compute nodes, guest allocations, and cluster health.</p>
       </div>
 

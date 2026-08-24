@@ -86,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-left">
         {/* VOTION Box Logo */}
         <button 
-          onClick={() => onNavigate('dashboard')}
+          onClick={() => onNavigate('overview')}
           className="brand-logo cursor-pointer" 
           title="Votion One™ Platform"
         >
@@ -166,7 +166,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* ADMIN vs CLIENT ROLE SWITCHER */}
-        {(localStorage.getItem('votion_user_role') === 'admin' || localStorage.getItem('votion_user_role') === 'administrator') && (
+        {userRole === 'admin' && (
           <button 
             onClick={onToggleRole}
             className="px-3 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-2 transition-colors border cursor-pointer bg-[#fbfaf9] text-[#1a1a1a] border-[#dedfdf] hover:bg-[#f1f1f1]"
