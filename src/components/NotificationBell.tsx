@@ -115,27 +115,31 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 w-80 max-w-[92vw] bg-white border border-[#dedfdf] rounded-xl shadow-2xl z-[300] flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between bg-[#fbfaf9] px-4 py-2.5 border-b border-[#dedfdf]">
-            <span className="text-xs font-bold uppercase tracking-widest text-[#1a1a1a]">
-              Alert Notifications{unreadCount > 0 ? ` (${unreadCount} unread)` : ''}
+        <div className="notification-panel">
+          <div className="notification-panel-header">
+            <span className="notification-panel-title">
+              Alert notifications{unreadCount > 0 ? ` · ${unreadCount} unread` : ''}
             </span>
-            <div className="flex items-center gap-1">
+            <div className="notification-panel-actions">
               {unreadCount > 0 && (
-                <button onClick={handleMarkAllRead} className="text-[10px] font-bold uppercase tracking-wide text-[#2563eb] hover:underline cursor-pointer">
+                <button onClick={handleMarkAllRead} className="notification-panel-action notification-panel-action-primary">
                   Mark all read
                 </button>
               )}
-              <button onClick={handleClear} className="text-[10px] font-bold uppercase tracking-wide text-[#dc2626] hover:underline cursor-pointer">
+              <button onClick={handleClear} className="notification-panel-action notification-panel-action-danger">
                 Clear
               </button>
             </div>
           </div>
 
-          <div className="max-h-80 overflow-y-auto divide-y divide-[#dedfdf]">
+          <div className="notification-panel-body">
             {notifications.length === 0 ? (
-              <div className="p-6 text-center text-xs text-[#a7aaaa] font-mono">
-                No notifications yet.<br />Set alert rules in Admin Settings.
+              <div className="notification-empty-state">
+                <span className="notification-empty-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M6 8h12M6 12h8M6 16h12" /></svg>
+                </span>
+                <p className="notification-empty-title">No active notifications</p>
+                <p className="notification-empty-description">Triggered alerts will appear here.</p>
               </div>
             ) : (
               notifications.map(n => (

@@ -1829,3 +1829,124 @@ button {
     gap: 5px;
   }
 }
+
+
+/* Alerts dropdown: compact operational panel with a quiet empty state. */
+.notification-panel {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  z-index: 300;
+  display: flex;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 24px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 8px;
+  background: var(--ink-color-global-surface-background-default);
+  box-shadow: 0 12px 28px rgba(26, 26, 26, 0.12);
+}
+
+.notification-panel-header {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--ink-color-global-border-subtle);
+  background: var(--ink-color-global-brand-gray-10);
+  padding: 0 14px;
+}
+
+.notification-panel-title {
+  color: var(--ink-color-global-text-default);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.notification-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-panel-action {
+  padding: 4px 0;
+  color: var(--ink-color-global-text-subtle);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.notification-panel-action:hover {
+  color: var(--ink-color-global-text-default);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.notification-panel-action-primary {
+  color: var(--ink-color-global-accent-blue, #2563eb);
+}
+
+.notification-panel-action-danger {
+  color: #a33a32;
+}
+
+.notification-panel-body {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.notification-empty-state {
+  display: flex;
+  min-height: 132px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 22px 18px 24px;
+  text-align: center;
+}
+
+.notification-empty-mark {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-color-global-border-subtle);
+  border-radius: 4px;
+  color: var(--ink-color-global-text-subtle);
+}
+
+.notification-empty-mark svg {
+  width: 15px;
+  height: 15px;
+}
+
+.notification-empty-title {
+  margin-top: 12px;
+  color: var(--ink-color-global-text-default);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.notification-empty-description {
+  margin-top: 4px;
+  color: var(--ink-color-global-text-subtle);
+  font-size: 10px;
+}
+
+@media (max-width: 480px) {
+  .notification-panel {
+    right: -8px;
+  }
+
+  .notification-panel-header {
+    padding-inline: 12px;
+  }
+}
