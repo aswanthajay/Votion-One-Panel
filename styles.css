@@ -973,6 +973,61 @@ button {
 /* ==========================================================================
    7. RESPONSIVE BREAKPOINTS
    ========================================================================== */
+#root,
+.app-header,
+.app-body,
+.header-left,
+.header-right,
+.app-content {
+  min-width: 0;
+}
+
+.app-header {
+  gap: 12px;
+}
+
+.header-left {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.header-right {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app-content {
+  min-width: 0;
+}
+
+.responsive-table-container {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.responsive-table-container > table {
+  min-width: 640px;
+}
+
+@media (max-width: 1100px) {
+  .app-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .header-left,
+  .header-right {
+    gap: 6px;
+  }
+
+  .header-right > .header-link {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .app-sidenav {
     position: fixed;

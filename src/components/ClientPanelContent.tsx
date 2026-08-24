@@ -255,7 +255,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
           </div>
         </div>
 
-        <div className="border-t border-[#dedfdf]">
+        <div className="responsive-table-container border-t border-[#dedfdf]">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-[#dedfdf] bg-white">

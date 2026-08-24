@@ -397,3 +397,16 @@ body {
 }
 
 
+
+
+/* Responsive shell safeguards: allow flex children to shrink within the viewport. */
+#root,
+.app-container,
+.main-wrapper,
+.app-header,
+.app-body,
+.header-left,
+.header-right,
+.app-content {
+  min-width: 0;
+}

@@ -222,7 +222,7 @@ export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
         <div className="p-4 border-b border-[#dedfdf]">
           <h2 className="text-sm font-semibold text-[#1a1a1a]">Active Inbound Rules</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left text-xs whitespace-nowrap">
             <thead className="bg-[#fbfaf9] border-b border-[#dedfdf] text-[#656b6b]">
               <tr>

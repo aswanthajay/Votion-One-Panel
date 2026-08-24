@@ -224,8 +224,9 @@ export const UserSettingsContent: React.FC = () => {
                   <h2 className="ink-block-title">Account credentials</h2>
                 </div>
 
-                <table className="ink-table-wrapper">
-                  <tbody>
+                <div className="responsive-table-container">
+                  <table className="ink-table-wrapper">
+                    <tbody>
                     
                     {/* ROW 1: PRIMARY EMAIL */}
                     <tr className="ink-table-row">
@@ -358,7 +359,8 @@ export const UserSettingsContent: React.FC = () => {
                     </tr>
 
                   </tbody>
-                </table>
+                  </table>
+                </div>
               </section>
 
               {/* BLOCK 2: SUPPORT & LIVE REMOTE ASSISTANCE */}
@@ -367,8 +369,9 @@ export const UserSettingsContent: React.FC = () => {
                   <h2 className="ink-block-title">Support and remote access</h2>
                 </div>
 
-                <table className="ink-table-wrapper">
-                  <tbody>
+                <div className="responsive-table-container">
+                  <table className="ink-table-wrapper">
+                    <tbody>
                     
                     {/* ROW 1: SUPPORT PIN */}
                     <tr className="ink-table-row">
@@ -429,7 +432,8 @@ export const UserSettingsContent: React.FC = () => {
                     </tr>
 
                   </tbody>
-                </table>
+                  </table>
+                </div>
               </section>
             </>
           ) : (

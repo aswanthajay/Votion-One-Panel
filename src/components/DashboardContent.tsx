@@ -291,7 +291,7 @@ export const DashboardContent: React.FC = () => {
           </span>
         </div>
         
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-[#dedfdf] bg-white">
@@ -386,7 +386,7 @@ export const DashboardContent: React.FC = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-[#dedfdf] bg-white">

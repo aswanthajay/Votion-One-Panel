@@ -243,7 +243,7 @@ export const ClusterAuditLogs: React.FC = () => {
 
       {/* Table */}
       <div className="bg-white border border-[#dedfdf] rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left text-xs">
             <thead className="bg-[#f5f6f6] border-b border-[#dedfdf] text-[#656b6b] uppercase">
               <tr>

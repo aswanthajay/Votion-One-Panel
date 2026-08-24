@@ -193,7 +193,7 @@ export const UserManagement: React.FC = () => {
       </div>
 
       <div className="bg-ink-card border border-[#dedfdf] rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left text-[11px]">
             <thead className="bg-[#f5f6f6] border-b border-[#dedfdf] text-[#656b6b] uppercase">
               <tr>

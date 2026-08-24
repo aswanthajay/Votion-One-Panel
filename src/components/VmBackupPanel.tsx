@@ -151,7 +151,7 @@ export default function VmBackupPanel({ vmid }: VmBackupPanelProps) {
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="responsive-table-container">
           <table className="w-full text-left text-xs">
             <thead className="bg-[#f5f6f6] border-b border-[#dedfdf] text-[#656b6b] uppercase">
               <tr>
