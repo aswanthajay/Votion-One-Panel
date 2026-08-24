@@ -49,26 +49,30 @@ export const BillingOperationsPanel: React.FC = () => {
   const load = async () => {
     setLoading(true);
     setError(null);
-    try {
-      const results = await Promise.all([
-        apiClient.getBillingSummary(),
-        apiClient.getBillingPlans(),
-        apiClient.getBillingInvoices(),
-        apiClient.getBillingConfig(),
-        apiClient.getBillingCostBases(),
-        apiClient.getVmBillingProfiles(),
-      ]);
-      setSummary(results[0]);
-      setPlans(results[1]);
-      setInvoices(results[2]);
-      setConfig(results[3]);
-      setCostBases(results[4]);
-      setProfiles(results[5]);
-    } catch (loadError: any) {
-      setError(loadError?.message || 'Unable to load billing operations.');
-    } finally {
-      setLoading(false);
+    const sections = ['summary', 'pricing plans', 'invoices', 'billing policy', 'cost bases', 'VM billing assignments'] as const;
+    const requests = [
+      apiClient.getBillingSummary(),
+      apiClient.getBillingPlans(),
+      apiClient.getBillingInvoices(),
+      apiClient.getBillingConfig(),
+      apiClient.getBillingCostBases(),
+      apiClient.getVmBillingProfiles(),
+    ] as const;
+    const results = await Promise.allSettled(requests);
+    const [summaryResult, plansResult, invoicesResult, configResult, costBasesResult, profilesResult] = results;
+    if (summaryResult.status === 'fulfilled') setSummary(summaryResult.value);
+    if (plansResult.status === 'fulfilled') setPlans(plansResult.value);
+    if (invoicesResult.status === 'fulfilled') setInvoices(invoicesResult.value);
+    if (configResult.status === 'fulfilled') setConfig(configResult.value);
+    if (costBasesResult.status === 'fulfilled') setCostBases(costBasesResult.value);
+    if (profilesResult.status === 'fulfilled') setProfiles(profilesResult.value);
+    const failures = results.flatMap((result, index) => result.status === 'rejected' ? [
+      `${sections[index]}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`,
+    ] : []);
+    if (failures.length > 0) {
+      setError(`Some billing data could not be loaded. ${failures.join(' · ')}`);
     }
+    setLoading(false);
   };
 
   useEffect(() => { void load(); }, []);

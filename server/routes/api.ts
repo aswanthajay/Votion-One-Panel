@@ -1480,7 +1480,11 @@ apiRouter.get('/billing/invoices', async (req, res) => {
 
 apiRouter.get('/billing/config', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
-  res.json({ success: true, data: await dbService.getBillingConfig() });
+  try {
+    res.json({ success: true, data: await dbService.getBillingConfig() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 apiRouter.put('/billing/config', async (req, res) => {
@@ -1524,7 +1528,11 @@ apiRouter.patch('/billing/plans/:id', async (req, res) => {
 
 apiRouter.get('/billing/cost-bases', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
-  res.json({ success: true, data: await dbService.getBillingCostBases() });
+  try {
+    res.json({ success: true, data: await dbService.getBillingCostBases() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
 });
 
 apiRouter.post('/billing/cost-bases', async (req, res) => {
@@ -1540,7 +1548,11 @@ apiRouter.post('/billing/cost-bases', async (req, res) => {
 
 apiRouter.get('/billing/vm-profiles', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
-  res.json({ success: true, data: await dbService.getVmBillingProfiles() });
+  try {
+    res.json({ success: true, data: await dbService.getVmBillingProfiles() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
 });
 
 apiRouter.put('/billing/vms/:vmid/profile', async (req, res) => {
@@ -1577,7 +1589,11 @@ apiRouter.post('/billing/invoices/:id/generate', async (req, res) => {
 
 apiRouter.get('/billing/suspension-actions', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
-  res.json({ success: true, data: await dbService.getBillingSuspensionActions(typeof req.query.status === 'string' ? req.query.status : undefined) });
+  try {
+    res.json({ success: true, data: await dbService.getBillingSuspensionActions(typeof req.query.status === 'string' ? req.query.status : undefined) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
 });
 
 apiRouter.post('/billing/suspension-actions/:id/reverse', async (req, res) => {
