@@ -7,12 +7,12 @@ import { clientRouter } from './routes/client.js';
 import { operatorRouter } from './routes/operator.js';
 import { ticketRouter } from './routes/tickets.js';
 import { vncRouter } from './routes/vnc.js';
-import { expiryWorker } from './jobs/expiryWorker.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
+import { billingWorker } from './jobs/billingWorker.js';
 import { checkDbHealth } from './services/databaseHealth.js';
 import { createProxmoxWebSocketTlsOptions, proxmoxFetch } from './services/proxmoxHttp.js';
 import { resolveSessionUser } from './middleware.js';
@@ -156,9 +156,9 @@ const initialConnections = await dbService.getProxmoxConnections();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
 // Start Automated Background Expiry Worker Cron Job
-  expiryWorker.start();
   proxmoxSync.start();
   proxmoxApi.startTelemetryPoller();
+  billingWorker.start();
   console.log('[ALERTS] Telemetry threshold monitor started (15s interval)');
 
 const server = app.listen(PORT, () => {

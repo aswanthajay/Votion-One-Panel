@@ -293,6 +293,112 @@ export async function initializeDatabaseSchema() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS pricing_plans (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+        monthly_price_cents BIGINT NOT NULL DEFAULT 0,
+        vcpu_limit INT NOT NULL DEFAULT 1,
+        ram_gb NUMERIC NOT NULL DEFAULT 1,
+        disk_gb NUMERIC NOT NULL DEFAULT 10,
+        bandwidth_gb NUMERIC,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS vm_billing_profiles (
+        vmid INT PRIMARY KEY REFERENCES vms(vmid) ON DELETE CASCADE,
+        plan_id VARCHAR(100) REFERENCES pricing_plans(id) ON DELETE SET NULL,
+        custom_monthly_price_cents BIGINT,
+        billing_status VARCHAR(30) NOT NULL DEFAULT 'active',
+        billing_cycle_day INT NOT NULL DEFAULT 1,
+        grace_period_days INT,
+        next_due_at TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_invoices (
+        id VARCHAR(100) PRIMARY KEY,
+        account_email VARCHAR(255) NOT NULL,
+        vmid INT NOT NULL REFERENCES vms(vmid) ON DELETE RESTRICT,
+        plan_id VARCHAR(100) REFERENCES pricing_plans(id) ON DELETE SET NULL,
+        period_start DATE NOT NULL,
+        period_end DATE NOT NULL,
+        issued_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        due_at TIMESTAMP NOT NULL,
+        subtotal_cents BIGINT NOT NULL DEFAULT 0,
+        tax_cents BIGINT NOT NULL DEFAULT 0,
+        total_cents BIGINT NOT NULL DEFAULT 0,
+        paid_cents BIGINT NOT NULL DEFAULT 0,
+        currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+        status VARCHAR(30) NOT NULL DEFAULT 'open',
+        paid_at TIMESTAMP,
+        last_reminder_at TIMESTAMP,
+        suspension_eligible_at TIMESTAMP,
+        notes TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (vmid, period_start, period_end)
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_payments (
+        id VARCHAR(100) PRIMARY KEY,
+        invoice_id VARCHAR(100) NOT NULL REFERENCES billing_invoices(id) ON DELETE RESTRICT,
+        account_email VARCHAR(255) NOT NULL,
+        amount_cents BIGINT NOT NULL,
+        currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+        method VARCHAR(50) NOT NULL DEFAULT 'manual',
+        external_reference VARCHAR(255),
+        received_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        recorded_by VARCHAR(255) NOT NULL,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_cost_bases (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        monthly_cost_cents BIGINT NOT NULL DEFAULT 0,
+        allocation_method VARCHAR(30) NOT NULL DEFAULT 'fixed',
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_events (
+        id VARCHAR(100) PRIMARY KEY,
+        invoice_id VARCHAR(100) REFERENCES billing_invoices(id) ON DELETE SET NULL,
+        vmid INT REFERENCES vms(vmid) ON DELETE SET NULL,
+        event_key VARCHAR(100) NOT NULL,
+        period_key VARCHAR(100) NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (invoice_id, event_key, period_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_suspension_actions (
+        id VARCHAR(100) PRIMARY KEY,
+        invoice_id VARCHAR(100) REFERENCES billing_invoices(id) ON DELETE SET NULL,
+        vmid INT NOT NULL REFERENCES vms(vmid) ON DELETE RESTRICT,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending',
+        reason TEXT NOT NULL,
+        requested_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        executed_at TIMESTAMP,
+        reversed_at TIMESTAMP,
+        actor_email VARCHAR(255),
+        error_message TEXT,
+        UNIQUE (vmid, invoice_id, status)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_billing_invoices_account_status_due
+        ON billing_invoices (account_email, status, due_at);
+      CREATE INDEX IF NOT EXISTS idx_billing_invoices_overdue
+        ON billing_invoices (status, suspension_eligible_at);
+      CREATE INDEX IF NOT EXISTS idx_billing_events_invoice_created
+        ON billing_events (invoice_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_billing_suspension_status
+        ON billing_suspension_actions (status, requested_at DESC);
+
       
       CREATE TABLE IF NOT EXISTS secondary_emails (
         id SERIAL PRIMARY KEY,
@@ -389,6 +495,22 @@ export async function initializeDatabaseSchema() {
       VALUES ('smtp_config', '{"enabled": false, "host": "", "port": 587, "user": "", "pass": "", "secure": false, "from": "noreply@votioncloud.org"}')
       ON CONFLICT (setting_key) DO NOTHING
     `);
+    await client.query(`
+      INSERT INTO system_settings (setting_key, setting_value)
+      VALUES ('billing_config', '{"automationEnabled": false, "reminderEmailsEnabled": false, "suspensionExecutionEnabled": false, "daysBeforeDue": 7, "gracePeriodDays": 7, "suspendAfterDaysOverdue": 1, "taxRatePercent": 0, "currency": "USD"}')
+      ON CONFLICT (setting_key) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO pricing_plans (id, name, currency, monthly_price_cents, vcpu_limit, ram_gb, disk_gb, bandwidth_gb, sort_order)
+      VALUES
+        ('plan-starter', 'Proxmox Starter', 'USD', 2900, 2, 4, 50, 2048, 10),
+        ('plan-pro', 'Proxmox Pro Cluster', 'USD', 8900, 8, 16, 200, 10240, 20),
+        ('plan-enterprise', 'Proxmox Dedicated Node', 'USD', 24900, 32, 64, 1000, NULL, 30)
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO billing_cost_bases (id, name, monthly_cost_cents, allocation_method)
+      VALUES ('cost-infrastructure', 'Proxmox infrastructure', 0, 'fixed')
+      ON CONFLICT (id) DO NOTHING;
+    `);
 
     // Optional bootstrap accounts. Credentials must be provisioned outside source control.
     const seedAccountFromEnv = async (prefix: 'BOOTSTRAP_ADMIN' | 'BOOTSTRAP_DEVOPS', role: 'administrator' | 'moderator') => {
@@ -458,16 +580,10 @@ export class DatabaseService {
   }
 
   startBackgroundJobs() {
-    setInterval(async () => {
-      try {
-        const res = await pgPool.query("SELECT * FROM vms WHERE expiry_date < NOW() AND is_suspended = false");
-        for (const vm of res.rows) {
-          await pgPool.query("UPDATE vms SET is_suspended = true, status = 'stopped' WHERE vmid = $1", [vm.vmid]);
-          console.log(`[EXPIRY ENGINE] VMID ${vm.vmid} expired. Auto-suspended VM.`);
-        }
-      } catch (err) {}
-    }, 10000);
-    
+    // Billing lifecycle decisions are handled by the explicit billing worker.
+    // The old expiry-only loop is intentionally removed so an expired date alone
+    // cannot silently suspend a VM outside the configured payment policy.
+
     // Telemetry cleanup job (Runs every hour)
     setInterval(async () => {
       try {
@@ -2135,13 +2251,357 @@ export class DatabaseService {
 
   async updateSystemSetting(key: string, value: any) {
     const res = await pgPool.query(
-      `INSERT INTO system_settings (setting_key, setting_value, updated_at) 
-       VALUES ($1, $2, NOW()) 
+      `INSERT INTO system_settings (setting_key, setting_value, updated_at)
+       VALUES ($1, $2, NOW())
        ON CONFLICT (setting_key) DO UPDATE SET setting_value = $2, updated_at = NOW() RETURNING *`,
       [key, JSON.stringify(value)]
     );
     return res.rows[0].setting_value;
   }
+
+  private mapPricingPlan(row: any) {
+    return {
+      id: row.id,
+      name: row.name,
+      currency: row.currency,
+      monthlyPriceCents: Number(row.monthly_price_cents),
+      vcpuLimit: Number(row.vcpu_limit),
+      ramGb: Number(row.ram_gb),
+      diskGb: Number(row.disk_gb),
+      bandwidthGb: row.bandwidth_gb === null ? null : Number(row.bandwidth_gb),
+      isActive: Boolean(row.is_active),
+      sortOrder: Number(row.sort_order),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private mapBillingInvoice(row: any) {
+    return {
+      id: row.id,
+      accountEmail: row.account_email,
+      vmid: Number(row.vmid),
+      vmName: row.vm_name,
+      planId: row.plan_id,
+      planName: row.plan_name,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      issuedAt: row.issued_at,
+      dueAt: row.due_at,
+      subtotalCents: Number(row.subtotal_cents),
+      taxCents: Number(row.tax_cents),
+      totalCents: Number(row.total_cents),
+      paidCents: Number(row.paid_cents),
+      outstandingCents: Math.max(0, Number(row.total_cents) - Number(row.paid_cents)),
+      currency: row.currency,
+      status: row.status,
+      paidAt: row.paid_at,
+      lastReminderAt: row.last_reminder_at,
+      suspensionEligibleAt: row.suspension_eligible_at,
+      notes: row.notes,
+      createdAt: row.created_at,
+    };
+  }
+
+  async getBillingConfig() {
+    return (await this.getSystemSetting('billing_config')) || {
+      automationEnabled: false,
+      reminderEmailsEnabled: false,
+      suspensionExecutionEnabled: false,
+      daysBeforeDue: 7,
+      gracePeriodDays: 7,
+      suspendAfterDaysOverdue: 1,
+      taxRatePercent: 0,
+      currency: 'USD',
+    };
+  }
+
+  async updateBillingConfig(patch: any) {
+    const current = await this.getBillingConfig();
+    const next = { ...current, ...patch };
+    const integerFields = ['daysBeforeDue', 'gracePeriodDays', 'suspendAfterDaysOverdue'];
+    for (const field of integerFields) {
+      const value = Number(next[field]);
+      if (!Number.isInteger(value) || value < 0 || value > 365) throw new Error(`${field} must be an integer from 0 to 365.`);
+      next[field] = value;
+    }
+    const tax = Number(next.taxRatePercent);
+    if (!Number.isFinite(tax) || tax < 0 || tax > 100) throw new Error('taxRatePercent must be between 0 and 100.');
+    next.taxRatePercent = tax;
+    next.automationEnabled = next.automationEnabled === true;
+    next.reminderEmailsEnabled = next.reminderEmailsEnabled === true;
+    next.suspensionExecutionEnabled = next.suspensionExecutionEnabled === true;
+    next.currency = String(next.currency || 'USD').toUpperCase().slice(0, 3);
+    return await this.updateSystemSetting('billing_config', next);
+  }
+
+  async getPricingPlans(activeOnly = false) {
+    const res = await pgPool.query(`SELECT * FROM pricing_plans ${activeOnly ? 'WHERE is_active = true' : ''} ORDER BY sort_order ASC, name ASC`);
+    return res.rows.map(row => this.mapPricingPlan(row));
+  }
+
+  async upsertPricingPlan(plan: any) {
+    const id = String(plan.id || `plan-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`).trim().toLowerCase();
+    const name = String(plan.name || '').trim().slice(0, 150);
+    const currency = String(plan.currency || 'USD').trim().toUpperCase().slice(0, 3);
+    const monthlyPriceCents = Math.round(Number(plan.monthlyPriceCents));
+    const vcpuLimit = Math.round(Number(plan.vcpuLimit));
+    const ramGb = Number(plan.ramGb);
+    const diskGb = Number(plan.diskGb);
+    const bandwidthGb = plan.bandwidthGb === null || plan.bandwidthGb === '' || plan.bandwidthGb === undefined ? null : Number(plan.bandwidthGb);
+    if (!id || !name || !/^[A-Z]{3}$/.test(currency) || !Number.isInteger(monthlyPriceCents) || monthlyPriceCents < 0 || !Number.isInteger(vcpuLimit) || vcpuLimit < 1 || !Number.isFinite(ramGb) || ramGb <= 0 || !Number.isFinite(diskGb) || diskGb <= 0 || (bandwidthGb !== null && (!Number.isFinite(bandwidthGb) || bandwidthGb < 0))) {
+      throw new Error('Pricing plan values are invalid.');
+    }
+    const res = await pgPool.query(
+      `INSERT INTO pricing_plans (id, name, currency, monthly_price_cents, vcpu_limit, ram_gb, disk_gb, bandwidth_gb, is_active, sort_order, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+       ON CONFLICT (id) DO UPDATE SET name = $2, currency = $3, monthly_price_cents = $4, vcpu_limit = $5, ram_gb = $6, disk_gb = $7, bandwidth_gb = $8, is_active = $9, sort_order = $10, updated_at = NOW()
+       RETURNING *`,
+      [id, name, currency, monthlyPriceCents, vcpuLimit, ramGb, diskGb, bandwidthGb, plan.isActive !== false, Math.max(0, Math.round(Number(plan.sortOrder) || 0))]
+    );
+    return this.mapPricingPlan(res.rows[0]);
+  }
+
+  async setPricingPlanActive(id: string, active: boolean) {
+    const res = await pgPool.query('UPDATE pricing_plans SET is_active = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [active, id]);
+    return res.rows[0] ? this.mapPricingPlan(res.rows[0]) : null;
+  }
+
+  async getBillingCostBases(activeOnly = false) {
+    const res = await pgPool.query(`SELECT * FROM billing_cost_bases ${activeOnly ? 'WHERE is_active = true' : ''} ORDER BY name ASC`);
+    return res.rows.map(row => ({ id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+
+  async upsertBillingCostBase(cost: any) {
+    const id = String(cost.id || `cost-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`).trim().toLowerCase();
+    const name = String(cost.name || '').trim().slice(0, 150);
+    const monthlyCostCents = Math.round(Number(cost.monthlyCostCents));
+    const allocationMethod = ['fixed', 'per_vm', 'per_vcpu', 'per_gb_ram', 'per_gb_disk'].includes(cost.allocationMethod) ? cost.allocationMethod : 'fixed';
+    if (!id || !name || !Number.isInteger(monthlyCostCents) || monthlyCostCents < 0) throw new Error('Cost basis values are invalid.');
+    const res = await pgPool.query(
+      `INSERT INTO billing_cost_bases (id, name, monthly_cost_cents, allocation_method, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (id) DO UPDATE SET name = $2, monthly_cost_cents = $3, allocation_method = $4, is_active = $5, updated_at = NOW()
+       RETURNING *`,
+      [id, name, monthlyCostCents, allocationMethod, cost.isActive !== false]
+    );
+    const row = res.rows[0];
+    return { id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  async getVmBillingProfiles(vmid?: number) {
+    const params: any[] = [];
+    let where = '';
+    if (vmid !== undefined) { params.push(vmid); where = 'WHERE p.vmid = $1'; }
+    const res = await pgPool.query(
+      `SELECT p.*, v.vm_name, v.owner_email, v.expiry_date, pl.name AS plan_name, pl.currency, pl.monthly_price_cents
+       FROM vm_billing_profiles p JOIN vms v ON v.vmid = p.vmid LEFT JOIN pricing_plans pl ON pl.id = p.plan_id ${where} ORDER BY p.vmid ASC`,
+      params
+    );
+    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name, customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents), billingStatus: row.billing_status, billingCycleDay: Number(row.billing_cycle_day), gracePeriodDays: row.grace_period_days === null ? null : Number(row.grace_period_days), nextDueAt: row.next_due_at || row.expiry_date, updatedAt: row.updated_at }));
+  }
+
+  async upsertVmBillingProfile(vmid: number, profile: any, actorEmail: string) {
+    const vm = await this.getVMByVMID(vmid);
+    if (!vm) return null;
+    const planId = profile.planId ? String(profile.planId) : null;
+    if (planId) {
+      const plan = await pgPool.query('SELECT id FROM pricing_plans WHERE id = $1', [planId]);
+      if (!plan.rows[0]) throw new Error('Pricing plan not found.');
+    }
+    const customPrice = profile.customMonthlyPriceCents === null || profile.customMonthlyPriceCents === '' || profile.customMonthlyPriceCents === undefined ? null : Math.round(Number(profile.customMonthlyPriceCents));
+    if (customPrice !== null && (!Number.isInteger(customPrice) || customPrice < 0)) throw new Error('Custom monthly price is invalid.');
+    const billingStatus = ['active', 'grace', 'suspended', 'waived', 'closed'].includes(profile.billingStatus) ? profile.billingStatus : 'active';
+    const cycleDay = Math.min(28, Math.max(1, Math.round(Number(profile.billingCycleDay) || 1)));
+    const grace = profile.gracePeriodDays === null || profile.gracePeriodDays === '' || profile.gracePeriodDays === undefined ? null : Math.min(365, Math.max(0, Math.round(Number(profile.gracePeriodDays))));
+    const nextDueAt = profile.nextDueAt || vm.expiryDate || null;
+    const res = await pgPool.query(
+      `INSERT INTO vm_billing_profiles (vmid, plan_id, custom_monthly_price_cents, billing_status, billing_cycle_day, grace_period_days, next_due_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       ON CONFLICT (vmid) DO UPDATE SET plan_id = $2, custom_monthly_price_cents = $3, billing_status = $4, billing_cycle_day = $5, grace_period_days = $6, next_due_at = $7, updated_at = NOW()
+       RETURNING *`,
+      [vmid, planId, customPrice, billingStatus, cycleDay, grace, nextDueAt]
+    );
+    await this.logAudit(actorEmail, 'UPDATE_VM_BILLING_PROFILE', `VMID ${vmid}`, `Updated plan ${planId || 'custom'} and billing status ${billingStatus}`);
+    return (await this.getVmBillingProfiles(vmid))[0] || res.rows[0];
+  }
+
+  async getBillingInvoices(accountEmail?: string, status?: string, limit = 100) {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (accountEmail) { params.push(accountEmail.toLowerCase().trim()); conditions.push(`i.account_email = $${params.length}`); }
+    if (status) { params.push(status); conditions.push(`i.status = $${params.length}`); }
+    params.push(Math.min(500, Math.max(1, limit)));
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const res = await pgPool.query(
+      `SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i JOIN vms v ON v.vmid = i.vmid LEFT JOIN pricing_plans p ON p.id = i.plan_id ${where} ORDER BY i.due_at ASC, i.created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    return res.rows.map(row => this.mapBillingInvoice(row));
+  }
+
+  async getBillingSummary(accountEmail?: string) {
+    const where = accountEmail ? 'WHERE account_email = $1' : '';
+    const params = accountEmail ? [accountEmail.toLowerCase().trim()] : [];
+    const invoice = await pgPool.query(
+      `SELECT COUNT(*)::int AS invoice_count,
+              COALESCE(SUM(total_cents), 0)::bigint AS billed_cents,
+              COALESCE(SUM(paid_cents), 0)::bigint AS collected_cents,
+              COALESCE(SUM(GREATEST(total_cents - paid_cents, 0)), 0)::bigint AS outstanding_cents,
+              COUNT(*) FILTER (WHERE status = 'overdue')::int AS overdue_count,
+              COALESCE(SUM(GREATEST(total_cents - paid_cents, 0)) FILTER (WHERE status = 'overdue'), 0)::bigint AS overdue_cents,
+              COUNT(*) FILTER (WHERE status = 'suspended')::int AS suspended_invoice_count
+       FROM billing_invoices ${where}`,
+      params,
+    );
+    const vmWhere = accountEmail ? 'WHERE owner_email = $1 AND owner_email NOT LIKE \'unassigned@%\'' : "WHERE owner_email NOT LIKE 'unassigned@%'";
+    const vm = await pgPool.query(`SELECT COUNT(*)::int AS vm_count FROM vms ${vmWhere}`, params);
+    const cost = await pgPool.query("SELECT COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true");
+    const row = invoice.rows[0];
+    const billed = Number(row.billed_cents);
+    const collected = Number(row.collected_cents);
+    const monthlyCost = Number(cost.rows[0].monthly_cost_cents);
+    return { invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: monthlyCost, estimatedGrossProfitCents: billed - monthlyCost, collectedGrossProfitCents: collected - monthlyCost, estimatedMarginPercent: billed > 0 ? Math.round(((billed - monthlyCost) / billed) * 10000) / 100 : 0 };
+  }
+
+  async createInvoiceForVm(vmid: number, issuedAt = new Date()) {
+    const profiles = await this.getVmBillingProfiles(vmid);
+    const profile = profiles[0];
+    if (!profile || profile.billingStatus === 'closed' || profile.billingStatus === 'waived') return null;
+    const periodStart = new Date(issuedAt.getFullYear(), issuedAt.getMonth(), 1);
+    const periodEnd = new Date(issuedAt.getFullYear(), issuedAt.getMonth() + 1, 1);
+    const config = await this.getBillingConfig();
+    const subtotal = Math.max(0, Math.round(Number(profile.monthlyPriceCents) || 0));
+    const tax = Math.round(subtotal * (Number(config.taxRatePercent) / 100));
+    const dueAt = profile.nextDueAt ? new Date(profile.nextDueAt) : new Date(issuedAt.getTime() + Number(config.daysBeforeDue || 7) * 86400000);
+    const invoiceId = `inv-${issuedAt.getTime()}-${vmid}-${crypto.randomBytes(3).toString('hex')}`;
+    const res = await pgPool.query(
+      `INSERT INTO billing_invoices (id, account_email, vmid, plan_id, period_start, period_end, issued_at, due_at, subtotal_cents, tax_cents, total_cents, paid_cents, currency, status, suspension_eligible_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'open', $13)
+       ON CONFLICT (vmid, period_start, period_end) DO UPDATE SET due_at = EXCLUDED.due_at, suspension_eligible_at = EXCLUDED.suspension_eligible_at
+       RETURNING *`,
+      [invoiceId, profile.ownerEmail, vmid, profile.planId, periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), issuedAt, dueAt, subtotal, tax, subtotal + tax, config.currency || 'USD', new Date(dueAt.getTime() + Number(profile.gracePeriodDays ?? config.gracePeriodDays ?? 7) * 86400000)]
+    );
+    return this.mapBillingInvoice((await pgPool.query('SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i JOIN vms v ON v.vmid = i.vmid LEFT JOIN pricing_plans p ON p.id = i.plan_id WHERE i.id = $1', [res.rows[0].id])).rows[0]);
+  }
+
+  async markOverdueInvoices() {
+    const res = await pgPool.query(`UPDATE billing_invoices SET status = CASE WHEN paid_cents > 0 THEN 'partially_paid' ELSE 'overdue' END WHERE status IN ('open', 'partially_paid') AND due_at < NOW() AND paid_cents < total_cents RETURNING id`);
+    return res.rowCount;
+  }
+
+  async recordBillingEvent(event: { invoiceId?: string; vmid?: number; eventKey: string; periodKey: string; payload?: any }) {
+    const id = `be-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    const res = await pgPool.query(
+      `INSERT INTO billing_events (id, invoice_id, vmid, event_key, period_key, payload) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (invoice_id, event_key, period_key) DO NOTHING RETURNING id`,
+      [id, event.invoiceId || null, event.vmid || null, event.eventKey, event.periodKey, JSON.stringify(event.payload || {})]
+    );
+    return Boolean(res.rows[0]);
+  }
+
+  async recordBillingPayment(invoiceId: string, amountCents: number, method: string, externalReference: string | undefined, notes: string | undefined, recordedBy: string) {
+    const amount = Math.round(Number(amountCents));
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error('Payment amount must be a positive integer number of cents.');
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const invoice = await client.query('SELECT * FROM billing_invoices WHERE id = $1 FOR UPDATE', [invoiceId]);
+      if (!invoice.rows[0]) throw new Error('Invoice not found.');
+      const row = invoice.rows[0];
+      const outstanding = Math.max(0, Number(row.total_cents) - Number(row.paid_cents));
+      if (amount > outstanding) throw new Error('Payment cannot exceed the invoice outstanding balance.');
+      const paymentId = `pay-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      await client.query('INSERT INTO billing_payments (id, invoice_id, account_email, amount_cents, currency, method, external_reference, recorded_by, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)', [paymentId, invoiceId, row.account_email, amount, row.currency, String(method || 'manual').slice(0, 50), externalReference || null, recordedBy, notes || null]);
+      const paid = Number(row.paid_cents) + amount;
+      const status = paid >= Number(row.total_cents) ? 'paid' : 'partially_paid';
+      await client.query('UPDATE billing_invoices SET paid_cents = $1, status = $2, paid_at = CASE WHEN $2 = \'paid\' THEN NOW() ELSE paid_at END WHERE id = $3', [paid, status, invoiceId]);
+      await client.query('COMMIT');
+      await this.logAudit(recordedBy, 'RECORD_BILLING_PAYMENT', invoiceId, `Recorded ${amount} cents by ${method || 'manual'}`);
+      const rows = await this.getBillingInvoices(undefined, undefined, 500);
+      return rows.find(item => item.id === invoiceId) || null;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  async getBillableVmBillingProfiles() {
+    const res = await pgPool.query(
+      `SELECT p.*, v.vm_name, v.owner_email, v.expiry_date, v.node, v.type,
+              pl.name AS plan_name, pl.currency, pl.monthly_price_cents
+       FROM vm_billing_profiles p
+       JOIN vms v ON v.vmid = p.vmid
+       LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
+       WHERE v.owner_email NOT LIKE 'unassigned@%'
+         AND p.billing_status NOT IN ('closed', 'waived')
+       ORDER BY p.vmid ASC`
+    );
+    return res.rows.map(row => ({
+      vmid: Number(row.vmid),
+      vmName: row.vm_name,
+      ownerEmail: row.owner_email,
+      node: row.node,
+      type: row.type,
+      planId: row.plan_id,
+      planName: row.plan_name,
+      customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents),
+      monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents),
+      billingStatus: row.billing_status,
+      nextDueAt: row.next_due_at || row.expiry_date,
+    }));
+  }
+
+  async getBillingInvoiceById(invoiceId: string) {
+    const rows = await this.getBillingInvoices(undefined, undefined, 500);
+    return rows.find(invoice => invoice.id === invoiceId) || null;
+  }
+
+  async createBillingSuspensionAction(invoiceId: string, vmid: number, reason: string) {
+    const id = `susp-${Date.now()}-${vmid}-${crypto.randomBytes(3).toString('hex')}`;
+    const res = await pgPool.query(
+      `INSERT INTO billing_suspension_actions (id, invoice_id, vmid, status, reason)
+       VALUES ($1, $2, $3, 'pending', $4)
+       ON CONFLICT (vmid, invoice_id, status) DO NOTHING
+       RETURNING *`,
+      [id, invoiceId, vmid, reason.slice(0, 1000)]
+    );
+    if (res.rows[0]) return res.rows[0];
+    const existing = await pgPool.query('SELECT * FROM billing_suspension_actions WHERE vmid = $1 AND invoice_id = $2 AND status = \'pending\' LIMIT 1', [vmid, invoiceId]);
+    return existing.rows[0] || null;
+  }
+
+  async updateBillingSuspensionAction(id: string, status: 'pending' | 'executed' | 'reversed' | 'failed', actorEmail?: string, errorMessage?: string) {
+    const timestampColumn = status === 'executed' ? 'executed_at' : status === 'reversed' ? 'reversed_at' : 'NULL';
+    const res = await pgPool.query(
+      `UPDATE billing_suspension_actions
+       SET status = $1,
+           actor_email = COALESCE($2, actor_email),
+           error_message = $3,
+           ${timestampColumn === 'NULL' ? 'executed_at = executed_at' : `${timestampColumn} = NOW()`}
+       WHERE id = $4
+       RETURNING *`,
+      [status, actorEmail || null, errorMessage || null, id]
+    );
+    return res.rows[0] || null;
+  }
+
+  async getBillingSuspensionActions(status?: string) {
+    const params: any[] = [];
+    let where = '';
+    if (status) { params.push(status); where = 'WHERE a.status = $1'; }
+    const res = await pgPool.query(
+      `SELECT a.*, i.account_email, i.total_cents, i.paid_cents, v.vm_name
+       FROM billing_suspension_actions a
+       LEFT JOIN billing_invoices i ON i.id = a.invoice_id
+       JOIN vms v ON v.vmid = a.vmid
+       ${where}
+       ORDER BY a.requested_at DESC LIMIT 500`,
+      params
+    );
+    return res.rows;
+  }
+
 }
 
 export const dbService = new DatabaseService();

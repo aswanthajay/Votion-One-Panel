@@ -1441,6 +1441,140 @@ apiRouter.post('/admin/settings/smtp/test', async (req, res) => {
   }
 });
 
+// BILLING CONTROL PLANE
+const isBillingAdmin = (req: any) => ['admin', 'administrator'].includes(String(req.authUser?.role || '').toLowerCase());
+const billingActor = (req: any) => String(req.authUser?.email || '').toLowerCase().trim();
+
+apiRouter.get('/billing/plans', async (req, res) => {
+  try {
+    const data = await dbService.getPricingPlans(!isBillingAdmin(req));
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+apiRouter.get('/billing/summary', async (req, res) => {
+  try {
+    const data = await dbService.getBillingSummary(isBillingAdmin(req) ? undefined : billingActor(req));
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/billing/invoices', async (req, res) => {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const data = await dbService.getBillingInvoices(isBillingAdmin(req) ? undefined : billingActor(req), status, 500);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+apiRouter.get('/billing/config', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  res.json({ success: true, data: await dbService.getBillingConfig() });
+});
+
+apiRouter.put('/billing/config', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const patch = req.body || {};
+    if (patch.suspensionExecutionEnabled === true && patch.confirmation !== 'ENABLE_REVERSIBLE_SUSPENSION_AUTOMATION') {
+      return res.status(409).json({ success: false, error: 'Enabling automatic suspension requires the explicit confirmation phrase ENABLE_REVERSIBLE_SUSPENSION_AUTOMATION.' });
+    }
+    delete patch.confirmation;
+    const data = await dbService.updateBillingConfig(patch);
+    await dbService.logAudit(billingActor(req), 'UPDATE_BILLING_POLICY', 'billing_config', `Updated billing policy; automation=${data.automationEnabled}, reminders=${data.reminderEmailsEnabled}, suspension=${data.suspensionExecutionEnabled}`);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/billing/plans', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.upsertPricingPlan(req.body || {});
+    await dbService.logAudit(billingActor(req), 'UPSERT_PRICING_PLAN', data.id, `Saved ${data.name} at ${data.monthlyPriceCents} cents per month`);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.patch('/billing/plans/:id', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.setPricingPlanActive(req.params.id, req.body?.isActive === true);
+    if (!data) return res.status(404).json({ success: false, error: 'Pricing plan not found.' });
+    await dbService.logAudit(billingActor(req), 'TOGGLE_PRICING_PLAN', data.id, `Pricing plan ${data.isActive ? 'enabled' : 'disabled'}`);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/billing/cost-bases', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  res.json({ success: true, data: await dbService.getBillingCostBases() });
+});
+
+apiRouter.post('/billing/cost-bases', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.upsertBillingCostBase(req.body || {});
+    await dbService.logAudit(billingActor(req), 'UPSERT_BILLING_COST_BASIS', data.id, `Saved ${data.name} at ${data.monthlyCostCents} cents per month`);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/billing/vm-profiles', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  res.json({ success: true, data: await dbService.getVmBillingProfiles() });
+});
+
+apiRouter.put('/billing/vms/:vmid/profile', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.upsertVmBillingProfile(Number(req.params.vmid), req.body || {}, billingActor(req));
+    if (!data) return res.status(404).json({ success: false, error: 'VM not found.' });
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/billing/invoices/:id/payment', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.recordBillingPayment(req.params.id, Number(req.body?.amountCents), String(req.body?.method || 'manual'), typeof req.body?.externalReference === 'string' ? req.body.externalReference.slice(0, 255) : undefined, typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 1000) : undefined, billingActor(req));
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/billing/invoices/:id/generate', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const invoice = await dbService.getBillingInvoiceById(req.params.id);
+    if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found.' });
+    res.json({ success: true, data: invoice });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/billing/suspension-actions', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  res.json({ success: true, data: await dbService.getBillingSuspensionActions(typeof req.query.status === 'string' ? req.query.status : undefined) });
+});
+
 // BILLING - Upgrade plan request
 apiRouter.post('/billing/upgrade', async (req, res) => {
   const userEmail = req.authUser?.email;
