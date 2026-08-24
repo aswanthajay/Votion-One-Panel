@@ -113,7 +113,19 @@ const navigateForView = (navigate: ReturnType<typeof useNavigate>, view: unknown
   startTransition(() => navigate(path));
 };
 
-const RouteLoading = () => <div className="app-content" aria-busy="true" />;
+const RouteLoading = () => (
+  <div className="app-content flex items-center justify-center" aria-busy="true">
+    <div className="text-sm text-[#656b6b]" role="status">Loading view…</div>
+  </div>
+);
+
+const OverlayLoading = () => (
+  <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/20" aria-busy="true">
+    <div className="rounded-lg border border-[#dedfdf] bg-white px-4 py-3 text-sm text-[#656b6b] shadow-lg" role="status">
+      Loading…
+    </div>
+  </div>
+);
 
 const ClientPanelRoute: React.FC<{
   filter?: ClientFilter;
@@ -162,7 +174,7 @@ const AppShell: React.FC = () => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setIsCmdOpen(previous => !previous);
+        startTransition(() => setIsCmdOpen(previous => !previous));
       }
     };
 
@@ -175,17 +187,25 @@ const AppShell: React.FC = () => {
   }, [location.pathname]);
 
   const handleOpenCmdModal = (query = '') => {
-    setCmdInitialQuery(query);
-    setIsCmdOpen(true);
+    startTransition(() => {
+      setCmdInitialQuery(query);
+      setIsCmdOpen(true);
+    });
+  };
+
+  const handleOpenModal = (modalName: string) => {
+    startTransition(() => setActiveModal(modalName));
   };
 
   const handleNavigate = (view: unknown) => navigateForView(navigate, view);
 
   const handleToggleRole = () => {
     const nextRole: UserRole = activeRole === 'admin' ? 'client' : 'admin';
-    setUserRole(nextRole);
     localStorage.setItem('votion_user_role', nextRole);
-    startTransition(() => navigate(`${VIEW_PATHS.overview}?role=${nextRole}`));
+    startTransition(() => {
+      setUserRole(nextRole);
+      navigate(`${VIEW_PATHS.overview}?role=${nextRole}`);
+    });
   };
 
   return (
@@ -197,8 +217,8 @@ const AppShell: React.FC = () => {
           onNavigate={handleNavigate}
           userRole={activeRole}
           onToggleRole={handleToggleRole}
-          onOpenModal={(modalName) => setActiveModal(modalName)}
-          onOpenAlertRules={() => setAlertRulesOpen(true)}
+          onOpenModal={handleOpenModal}
+          onOpenAlertRules={() => startTransition(() => setAlertRulesOpen(true))}
         />
         <div className="app-body">
           <Sidebar
@@ -214,46 +234,52 @@ const AppShell: React.FC = () => {
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={(modalName) => setActiveModal(modalName)} />} />
+              <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS.dashboard} element={<DashboardContent />} />
-              <Route path={VIEW_PATHS.instances} element={<ClientPanelRoute onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
+              <Route path={VIEW_PATHS.instances} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />
               <Route path={VIEW_PATHS['user-management']} element={<UserManagement />} />
               <Route path={VIEW_PATHS['proxmox-connections']} element={<ProxmoxConnections />} />
-              <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-vnc']} element={<ClientPanelRoute filter="vnc" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-metrics']} element={<ClientPanelRoute filter="metrics" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-firewall']} element={<ClientPanelRoute filter="firewall" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
-              <Route path={VIEW_PATHS['client-instances-backups']} element={<ClientPanelRoute filter="backups" onOpenModal={(modalName) => setActiveModal(modalName)} />} />
+              <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-vnc']} element={<ClientPanelRoute filter="vnc" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-metrics']} element={<ClientPanelRoute filter="metrics" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-firewall']} element={<ClientPanelRoute filter="firewall" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances-backups']} element={<ClientPanelRoute filter="backups" onOpenModal={handleOpenModal} />} />
               <Route path="*" element={<RouteNotFound />} />
             </Routes>
           </Suspense>
         </div>
 
         {isCmdOpen && (
-          <CommandPalette
-            isOpen={isCmdOpen}
-            onClose={() => setIsCmdOpen(false)}
-            initialQuery={cmdInitialQuery}
-            onNavigate={handleNavigate}
-          />
+          <Suspense fallback={<OverlayLoading />}>
+            <CommandPalette
+              isOpen={isCmdOpen}
+              onClose={() => startTransition(() => setIsCmdOpen(false))}
+              initialQuery={cmdInitialQuery}
+              onNavigate={handleNavigate}
+            />
+          </Suspense>
         )}
 
         {activeModal && (
-          <InteractiveModals
-            activeModal={activeModal}
-            onClose={() => setActiveModal(null)}
-          />
+          <Suspense fallback={<OverlayLoading />}>
+            <InteractiveModals
+              activeModal={activeModal}
+              onClose={() => startTransition(() => setActiveModal(null))}
+            />
+          </Suspense>
         )}
 
         {alertRulesOpen && (
-          <AlertRulesModal onClose={() => setAlertRulesOpen(false)} />
+          <Suspense fallback={<OverlayLoading />}>
+            <AlertRulesModal onClose={() => startTransition(() => setAlertRulesOpen(false))} />
+          </Suspense>
         )}
       </div>
     </ToastProvider>
