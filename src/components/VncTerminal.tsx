@@ -41,6 +41,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
   const [showDotCursor, setShowDotCursor] = useState(true);
   const [quality, setQuality] = useState<QualityPreset>('balanced');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showCtrlAltDelConfirm, setShowCtrlAltDelConfirm] = useState(false);
   const [remoteClipboard, setRemoteClipboard] = useState('');
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
 
@@ -88,7 +89,14 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
     if (activeRfbRef.current && isConnected) {
       activeRfbRef.current.sendCtrlAltDel();
     }
+    setShowCtrlAltDelConfirm(false);
   }, [isConnected]);
+
+  const requestCtrlAltDel = useCallback(() => {
+    if (activeRfbRef.current && isConnected && !viewOnly) {
+      setShowCtrlAltDelConfirm(true);
+    }
+  }, [isConnected, viewOnly]);
 
   const pasteClipboard = useCallback(async () => {
     if (!activeRfbRef.current || !isConnected) return;
@@ -291,7 +299,20 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
   }
 
   return (
-    <div ref={shellRef} className="w-full h-full min-h-[340px] flex flex-col relative bg-[#1a1a1a] border border-[#333333] rounded-xl overflow-hidden">
+      <div ref={shellRef} className="w-full h-full min-h-[340px] flex flex-col relative bg-[#1a1a1a] border border-[#333333] rounded-xl overflow-hidden">
+        {showCtrlAltDelConfirm && (
+          <div className="vnc-confirm-backdrop" role="presentation">
+            <div className="vnc-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ctrl-alt-del-title" aria-describedby="ctrl-alt-del-description">
+              <div className="vnc-confirm-eyebrow">Guest control</div>
+              <h2 id="ctrl-alt-del-title">Send Ctrl+Alt+Del?</h2>
+              <p id="ctrl-alt-del-description">Linux guests may interpret this command as a reboot, shutdown, or secure-attention request depending on their system configuration. Continue only if you intend to interrupt VM-{vmid}.</p>
+              <div className="vnc-confirm-actions">
+                <button type="button" className="vnc-confirm-cancel" onClick={() => setShowCtrlAltDelConfirm(false)}>Cancel</button>
+                <button type="button" className="vnc-confirm-proceed" onClick={sendCtrlAltDel}>Send command</button>
+              </div>
+            </div>
+          </div>
+        )}
       <div className="vnc-console-header">
         <div className="vnc-session-status" role="status" aria-live="polite">
           <span className={`vnc-status-indicator ${isConnected ? 'is-connected' : status.includes('failed') ? 'is-failed' : 'is-pending'}`} aria-hidden="true" />
@@ -300,7 +321,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
         </div>
         <span className="vnc-session-context">VM-{vmid} · {type.toUpperCase()}</span>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
-          <button onClick={sendCtrlAltDel} disabled={!isConnected || viewOnly} title="Send Ctrl+Alt+Del to the guest" className="vnc-toolbar-button" type="button">Ctrl+Alt+Del</button>
+          <button onClick={requestCtrlAltDel} disabled={!isConnected || viewOnly} title="Send Ctrl+Alt+Del to the guest (may reboot or shut down Linux guests)" className="vnc-toolbar-button vnc-toolbar-button-danger" type="button">Ctrl+Alt+Del</button>
           <button onClick={pasteClipboard} disabled={!isConnected || viewOnly} title="Paste the local clipboard into the guest" className="vnc-toolbar-button" type="button">Paste</button>
           <button onClick={() => setShowShortcuts(value => !value)} title="Show keyboard shortcuts" className="vnc-toolbar-button" type="button">Shortcuts</button>
           <button onClick={() => void toggleFullscreen()} title="Toggle fullscreen (Ctrl+F)" className="vnc-toolbar-button" type="button">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
