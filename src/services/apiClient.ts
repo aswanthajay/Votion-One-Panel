@@ -389,7 +389,7 @@ class ApiClient {
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms`, {
       headers: this.getHeaders(),
     });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load client virtual machines.');
     return data.data || [];
   }
 
@@ -663,13 +663,13 @@ class ApiClient {
    */
   async getAdminNodes(): Promise<ApiNode[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/nodes`, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load cluster nodes.');
     return data.data || [];
   }
 
   async getClusterOverview(): Promise<ApiClusterOverview | null> {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/cluster/overview`, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load cluster overview.');
     return data.data || null;
   }
 
@@ -860,7 +860,7 @@ class ApiClient {
    */
   async getAccounts(): Promise<ApiAccount[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/accounts`, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load accounts.');
     return data.data || [];
   }
 
@@ -892,7 +892,7 @@ class ApiClient {
       ? `${API_BASE_URL}/vms?ownerEmail=${encodeURIComponent(ownerEmail)}` 
       : `${API_BASE_URL}/vms`;
     const res = await this.apiFetch(url, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load virtual machines.');
     return data.data || [];
   }
 
