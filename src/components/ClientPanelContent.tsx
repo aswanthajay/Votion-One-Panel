@@ -413,13 +413,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       )}
 
       {/* INSTANCE MANAGEMENT PANEL */}
-      <section className="flex flex-col gap-6 mb-10 h-auto">
-        <div className="flex-1 flex flex-col border border-[#dedfdf] rounded-xl bg-white overflow-hidden shadow-sm min-w-0">
+      <section className="vm-instance-shell">
+        <div className="vm-instance-card">
           {selectedVm ? (
-              <div className="flex flex-col h-full overflow-y-auto p-4 sm:p-6 gap-4 sm:gap-5">
+              <div className="vm-instance-card-body">
               
               {/* PANEL HEADER & POWER CONTROLS */}
-              <div className="flex flex-wrap items-end justify-between gap-4 pb-2 border-b border-[#dedfdf]">
+              <div className="vm-instance-header">
                 <div>
                   <div className="flex items-baseline gap-2">
                     <span className="font-mono font-bold text-xs text-[#656b6b]">
@@ -473,7 +473,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               </div>
 
               {/* LIVE RESOURCE USAGE BARS (Selected VM) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8 mb-4">
+              <div className="vm-usage-grid">
                  {/* CPU */}
                  <div>
                    <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
