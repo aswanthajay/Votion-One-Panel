@@ -2391,14 +2391,24 @@ export class DatabaseService {
 
   async getVmBillingProfiles(vmid?: number) {
     const params: any[] = [];
-    let where = '';
-    if (vmid !== undefined) { params.push(vmid); where = 'WHERE p.vmid = $1'; }
+    if (vmid !== undefined) { params.push(vmid); }
     const res = await pgPool.query(
-      `SELECT p.*, v.vm_name, v.owner_email, v.expiry_date, pl.name AS plan_name, pl.currency, pl.monthly_price_cents
-       FROM vm_billing_profiles p JOIN vms v ON v.vmid = p.vmid LEFT JOIN pricing_plans pl ON pl.id = p.plan_id ${where} ORDER BY p.vmid ASC`,
+      `SELECT v.vmid, v.vm_name, v.owner_email, v.expiry_date,
+              p.plan_id, p.custom_monthly_price_cents, p.billing_status,
+              p.billing_cycle_day, p.grace_period_days, p.next_due_at, p.updated_at,
+              pl.name AS plan_name, pl.currency, pl.monthly_price_cents
+       FROM vms v
+       LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+       LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
+       WHERE v.owner_email NOT LIKE 'unassigned@%'
+       ${vmid !== undefined ? 'AND v.vmid = $1' : ''}
+       ORDER BY v.vmid ASC`,
       params
     );
-    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name, customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents), billingStatus: row.billing_status, billingCycleDay: Number(row.billing_cycle_day), gracePeriodDays: row.grace_period_days === null ? null : Number(row.grace_period_days), nextDueAt: row.next_due_at || row.expiry_date, updatedAt: row.updated_at }));
+    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name, customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents),       billingStatus: row.billing_status || 'active',
+      billingCycleDay: Number(row.billing_cycle_day || 1),
+      gracePeriodDays: row.grace_period_days === null || row.grace_period_days === undefined ? null : Number(row.grace_period_days),
+      nextDueAt: row.next_due_at || row.expiry_date, updatedAt: row.updated_at }));
   }
 
   async upsertVmBillingProfile(vmid: number, profile: any, actorEmail: string) {
@@ -2584,6 +2594,21 @@ export class DatabaseService {
       [status, actorEmail || null, errorMessage || null, id]
     );
     return res.rows[0] || null;
+  }
+
+  async setBillingInvoiceStatus(invoiceId: string, status: 'open' | 'partially_paid' | 'overdue' | 'suspended' | 'paid' | 'void') {
+    const res = await pgPool.query('UPDATE billing_invoices SET status = $1 WHERE id = $2 RETURNING id, status', [status, invoiceId]);
+    return res.rows[0] || null;
+  }
+
+  async setVmBillingStatus(vmid: number, billingStatus: 'active' | 'grace' | 'suspended' | 'waived' | 'closed') {
+    const res = await pgPool.query('UPDATE vm_billing_profiles SET billing_status = $1, updated_at = NOW() WHERE vmid = $2 RETURNING vmid, billing_status', [billingStatus, vmid]);
+    return res.rows[0] || null;
+  }
+
+  async getBillingSuspensionActionById(id: string) {
+    const rows = await this.getBillingSuspensionActions();
+    return rows.find(action => action.id === id) || null;
   }
 
   async getBillingSuspensionActions(status?: string) {

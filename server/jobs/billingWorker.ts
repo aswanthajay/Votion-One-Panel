@@ -131,6 +131,8 @@ export class BillingLifecycleWorker {
             await dbService.suspendVM(vm.vmid, true, 'billing-worker@votioncloud.org');
           }
           await dbService.updateBillingSuspensionAction(action.id, 'executed', 'billing-worker@votioncloud.org');
+          await dbService.setBillingInvoiceStatus(invoice.id, 'suspended');
+          await dbService.setVmBillingStatus(vm.vmid, 'suspended');
           await dbService.logAudit('billing-worker@votioncloud.org', 'AUTO_BILLING_SUSPEND', `VMID ${vm.vmid}`, `Reversibly suspended after unpaid invoice ${invoice.id}; VM and disks retained.`);
         } catch (error: any) {
           await dbService.updateBillingSuspensionAction(action.id, 'failed', 'billing-worker@votioncloud.org', String(error?.message || error).slice(0, 500));

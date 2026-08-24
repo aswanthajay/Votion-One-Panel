@@ -1580,6 +1580,32 @@ apiRouter.get('/billing/suspension-actions', async (req, res) => {
   res.json({ success: true, data: await dbService.getBillingSuspensionActions(typeof req.query.status === 'string' ? req.query.status : undefined) });
 });
 
+apiRouter.post('/billing/suspension-actions/:id/reverse', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  if (req.body?.confirmation !== 'RESTORE_PAID_SERVICE') {
+    return res.status(409).json({ success: false, error: 'Recovery requires the explicit confirmation phrase RESTORE_PAID_SERVICE.' });
+  }
+  try {
+    const action = await dbService.getBillingSuspensionActionById(req.params.id);
+    if (!action || action.status !== 'executed') return res.status(409).json({ success: false, error: 'Only an executed suspension can be reversed.' });
+    const invoice = action.invoice_id ? await dbService.getBillingInvoiceById(action.invoice_id) : null;
+    if (!invoice || invoice.status !== 'paid') return res.status(409).json({ success: false, error: 'The linked invoice must be fully paid before service recovery.' });
+    const vm = await dbService.getVMByVMID(Number(action.vmid));
+    if (!vm) return res.status(404).json({ success: false, error: 'VM not found.' });
+    if (vm.isSuspended) {
+      await proxmoxService.executePowerAction(vm.node, vm.vmid, 'start', billingActor(req));
+      await dbService.suspendVM(vm.vmid, false, billingActor(req));
+    }
+    await dbService.setBillingInvoiceStatus(invoice.id, 'paid');
+    await dbService.setVmBillingStatus(vm.vmid, 'active');
+    await dbService.updateBillingSuspensionAction(action.id, 'reversed', billingActor(req));
+    await dbService.logAudit(billingActor(req), 'REVERSE_BILLING_SUSPENSION', `VMID ${vm.vmid}`, `Restored paid service for invoice ${invoice.id}; VM and disks retained.`);
+    res.json({ success: true, data: await dbService.getVMByVMID(vm.vmid), message: 'Paid service restored. The VM and disks were retained.' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 // BILLING - Upgrade plan request
 apiRouter.post('/billing/upgrade', async (req, res) => {
   const userEmail = req.authUser?.email;
