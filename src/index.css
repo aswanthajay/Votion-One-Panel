@@ -410,3 +410,135 @@ body {
 .app-content {
   min-width: 0;
 }
+
+/* Mobile header containment overrides load after utility classes by design. */
+@media (max-width: 600px) {
+  html,
+  body,
+  #root,
+  .app-body,
+  .overview-dashboard {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .header-workspace-control,
+  .header-role-switcher,
+  .header-task-control,
+  .header-secondary-control {
+    display: none !important;
+  }
+
+  .header-right {
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .header-referral-control {
+    display: inline-flex !important;
+    flex: 0 1 auto;
+    max-width: 112px;
+    overflow: hidden;
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .header-user-menu-wrap {
+    position: relative;
+  }
+
+  .header-user-trigger {
+    max-width: 124px;
+    padding-left: 8px;
+    padding-right: 8px;
+    font-size: 13px;
+  }
+
+  .header-user-trigger > span:first-child {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-user-menu {
+    top: calc(100% + 8px) !important;
+    right: 0 !important;
+    left: auto !important;
+    width: min(280px, calc(100vw - 16px)) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - var(--app-switcher-height) - var(--ink-header-size-height) - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .overview-dashboard .overview-header {
+    width: 100%;
+    max-width: 100%;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .overview-dashboard .overview-header > div:first-child,
+  .overview-dashboard .overview-header > div:last-child,
+  .overview-dashboard .overview-telemetry-table,
+  .overview-dashboard .overview-telemetry-table .ink-table-td {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .overview-dashboard .overview-header .btn-secondary {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .overview-dashboard .overview-telemetry-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-th {
+    width: 32% !important;
+    max-width: 32%;
+    padding-left: 12px !important;
+    padding-right: 6px !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-td {
+    max-width: 68%;
+    padding-left: 6px !important;
+    padding-right: 12px !important;
+    overflow: hidden;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div,
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div > span {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .overview-dashboard .overview-telemetry-table .ink-table-td > div > span {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Keep the account menu independent from narrow flex layout and page scroll width. */
+@media (max-width: 600px) {
+  .header-user-menu {
+    position: fixed !important;
+    top: calc(var(--app-switcher-height) + var(--ink-header-size-height) + 8px) !important;
+    right: 8px !important;
+    left: auto !important;
+    width: min(280px, calc(100vw - 16px)) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - var(--app-switcher-height) - var(--ink-header-size-height) - 16px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}

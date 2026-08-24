@@ -389,10 +389,10 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
 
   /* ---------------- render ---------------- */
   return (
-    <div className="flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] overflow-hidden font-sans w-full">
+    <div className="overview-dashboard flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] overflow-hidden font-sans w-full">
       {/* ================= TOP BAR (house app-header style) ================= */}
-      <header className="app-header !px-5 sm:!px-7" style={{ height: '56px' }}>
-        <div className="flex items-baseline gap-5 min-w-0 overflow-hidden">
+      <header className="overview-header app-header !px-5 sm:!px-7 min-w-0 overflow-hidden" style={{ height: '56px' }}>
+        <div className="flex-1 min-w-0 flex items-baseline gap-5 overflow-hidden">
           <h1 className="page-heading !text-[22px] !mb-0 !leading-none truncate">Overview</h1>
           <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate">
             {loadDone
@@ -400,7 +400,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
               : 'Synchronizing with the Stellar Engine…'}
           </p>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0 max-w-full">
           <button
             onClick={() => onOpenModal('support')}
             className="btn-secondary !px-3 !py-1.5 !text-[12px] relative cursor-pointer"
@@ -423,7 +423,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
       </header>
 
           {/* ================= MAIN HORIZONTAL SPLIT ================= */}
-      <div className="flex flex-1 min-h-0 min-w-0">
+      <div className="flex flex-1 min-h-0 min-w-0 overflow-x-hidden">
         
         {/* ---------- CENTER: FLEET TELEMETRY INSTRUMENT PANEL ---------- */}
         <section className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -446,7 +446,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7 py-4">
+          <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-5 sm:px-7 py-4">
             {fleetLoading ? (
               <div className="px-4 py-10">
                 <div className="h-2 bg-[#f1f1f1] rounded animate-pulse mb-3 w-2/3" />
@@ -472,7 +472,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                     <span className="ink-block-title !text-[12px]">Aggregated Fleet Telemetry</span>
                     <span className="text-[10px] text-[#a0a1a2] font-mono">LIVE</span>
                   </div>
-                  <table className="w-full border-collapse">
+                  <table className="overview-telemetry-table w-full border-collapse table-fixed">
                     <tbody>
                       <tr className="ink-table-row hover:bg-[#fbfaf9]">
                         <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px] !w-24">Cluster CPU</td>
@@ -482,7 +482,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                               {liveCpuPct.toFixed(1)}%
                               <span className="text-[#a0a1a2] text-[11px] ml-1.5">of {acctCpus} core{acctCpus === 1 ? '' : 's'}</span>
                             </span>
-                            <Sparkline values={aggCpuSeries.slice(-30)} stroke="#1a1a1a" height={22} />
+                            <div className="hidden sm:block shrink-0"><Sparkline values={aggCpuSeries.slice(-30)} stroke="#1a1a1a" height={22} /></div>
                           </div>
                         </td>
                       </tr>
@@ -494,7 +494,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                               {(liveTotalRam / GB).toFixed(2)} GB
                               <span className="text-[#a0a1a2] text-[11px] ml-1.5">{liveRamPct.toFixed(0)}% of {(acctMaxmem / GB).toFixed(0)} GB</span>
                             </span>
-                            <Sparkline values={aggRamSeries.slice(-30)} stroke="#656b6b" height={22} />
+                            <div className="hidden sm:block shrink-0"><Sparkline values={aggRamSeries.slice(-30)} stroke="#656b6b" height={22} /></div>
                           </div>
                         </td>
                       </tr>
@@ -506,7 +506,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                               {liveDiskPct.toFixed(0)}% used
                               <span className="text-[#a0a1a2] text-[11px] ml-1.5">{gb(liveTotalDiskUsed)} GB of {gb(acctMaxdisk)} GB</span>
                             </span>
-                            <div className="w-[110px] shrink-0 h-[3px] bg-[#f1f1f1] mt-1">
+                            <div className="hidden sm:block w-[110px] shrink-0 h-[3px] bg-[#f1f1f1] mt-1">
                               <div className="h-full bg-[#1a1a1a]" style={{ width: `${liveDiskPct}%` }} />
                             </div>
                           </div>
@@ -520,7 +520,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                               <span className="text-[#1a1a1a]">{aggNetInSeries.length ? aggNetInSeries[aggNetInSeries.length - 1].toFixed(1) : '—'} MB/s in</span>
                               <span className="text-[#a0a1a2] text-[11px] ml-1.5">· {aggNetOutSeries.length ? aggNetOutSeries[aggNetOutSeries.length - 1].toFixed(1) : '—'} MB/s out</span>
                             </span>
-                            <Sparkline values={aggNetInSeries.slice(-30)} stroke="#656b6b" height={22} />
+                            <div className="hidden sm:block shrink-0"><Sparkline values={aggNetInSeries.slice(-30)} stroke="#656b6b" height={22} /></div>
                           </div>
                         </td>
                       </tr>
