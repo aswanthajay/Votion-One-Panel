@@ -292,12 +292,13 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
 
   return (
     <div ref={shellRef} className="w-full h-full min-h-[340px] flex flex-col relative bg-[#1a1a1a] border border-[#333333] rounded-xl overflow-hidden">
-      <div className="min-h-11 bg-[#fbfaf9] border-b border-[#dedfdf] flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${isConnected ? 'bg-[#15803d] shadow-[0_0_8px_#16a34a]' : status.includes('failed') ? 'bg-[#dc2626]' : 'bg-[#eab308]'}`} />
-          <span className="text-xs font-mono text-[#1a1a1a] font-semibold truncate">{status}</span>
-          <span className="hidden md:inline text-[10px] font-mono text-[#656b6b]">VM-{vmid} · {type.toUpperCase()}</span>
+      <div className="vnc-console-header">
+        <div className="vnc-session-status" role="status" aria-live="polite">
+          <span className={`vnc-status-indicator ${isConnected ? 'is-connected' : status.includes('failed') ? 'is-failed' : 'is-pending'}`} aria-hidden="true" />
+          <span className="vnc-status-label">Console session</span>
+          <span className="vnc-status-value">{status}</span>
         </div>
+        <span className="vnc-session-context">VM-{vmid} · {type.toUpperCase()}</span>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
           <button onClick={sendCtrlAltDel} disabled={!isConnected || viewOnly} title="Send Ctrl+Alt+Del to the guest" className="vnc-toolbar-button" type="button">Ctrl+Alt+Del</button>
           <button onClick={pasteClipboard} disabled={!isConnected || viewOnly} title="Paste the local clipboard into the guest" className="vnc-toolbar-button" type="button">Paste</button>
