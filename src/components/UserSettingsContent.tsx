@@ -16,6 +16,7 @@ export const UserSettingsContent: React.FC = () => {
   const [lastName, setLastName] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
   const [supportPin, setSupportPin] = useState('');
+  const [isSupportPinVisible, setIsSupportPinVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -161,7 +162,8 @@ export const UserSettingsContent: React.FC = () => {
     const res = await apiClient.regenerateSupportPin();
     if (res.success && res.supportPin) {
       setSupportPin(res.supportPin);
-      showToast(`Regenerated and saved new 6-digit Support PIN in PostgreSQL: ${res.supportPin}`);
+      setIsSupportPinVisible(false);
+      showToast('Support PIN regenerated and saved securely. Reveal it when needed.');
     }
   };
 
@@ -378,10 +380,22 @@ export const UserSettingsContent: React.FC = () => {
                       <th className="ink-table-th">Support PIN</th>
                       <td className="ink-table-td">
                         <div className="flex items-center gap-3">
-                          <span className="font-mono text-base font-bold text-[#1a1a1a] bg-[#f1f1f1] px-2.5 py-1 rounded border border-[#dedfdf]">
-                            {supportPin}
+                          <span
+                            className="font-mono text-base font-bold text-[#1a1a1a] bg-[#f1f1f1] px-2.5 py-1 rounded border border-[#dedfdf]"
+                            aria-label={isSupportPinVisible ? 'Support PIN visible' : 'Support PIN masked'}
+                          >
+                            {supportPin ? (isSupportPinVisible ? supportPin : '••••••') : 'Not available'}
                           </span>
-                          <button 
+                          <button
+                            type="button"
+                            onClick={() => setIsSupportPinVisible((visible) => !visible)}
+                            className="text-xs text-[#2563eb] hover:underline font-semibold cursor-pointer"
+                            aria-pressed={isSupportPinVisible}
+                          >
+                            {isSupportPinVisible ? 'Hide pin' : 'Reveal pin'}
+                          </button>
+                          <button
+                            type="button"
                             onClick={handleGenerateNewPin}
                             className="text-xs text-[#2563eb] hover:underline font-semibold cursor-pointer"
                           >

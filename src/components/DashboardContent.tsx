@@ -287,7 +287,7 @@ export const DashboardContent: React.FC = () => {
             <p className="text-xs text-[#656b6b] mt-1">Physical hypervisors attached to this cluster.</p>
           </div>
           <span className="text-xs font-bold text-[#656b6b] bg-white border border-[#dedfdf] px-2 py-1 rounded shadow-sm">
-            {nodes.length} Nodes
+            {isLoading ? <span className="inline-block h-3.5 w-16 animate-pulse rounded bg-[#f1f1f1]" aria-label="Loading node count" /> : `${nodes.length} Nodes`}
           </span>
         </div>
         
@@ -378,7 +378,7 @@ export const DashboardContent: React.FC = () => {
           </div>
           <div className="flex gap-3">
             <span className="text-xs font-bold text-[#656b6b] bg-white border border-[#dedfdf] px-2 py-1.5 rounded shadow-sm flex items-center">
-              {vms.length} Instances
+              {isLoading ? <span className="inline-block h-3.5 w-20 animate-pulse rounded bg-[#f1f1f1]" aria-label="Loading instance count" /> : `${vms.length} Instances`}
             </span>
             <button onClick={() => setModalType('provision-vm')} className="btn-primary py-1.5 px-4 text-xs shadow-sm">
               + Provision VM
@@ -398,7 +398,16 @@ export const DashboardContent: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {vms.map(vm => (
+              {isLoading && vms.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-[#656b6b]" aria-busy="true">
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-3 w-3 animate-pulse rounded-full bg-[#a7aaaa]" />
+                      Loading instance data...
+                    </span>
+                  </td>
+                </tr>
+              ) : vms.map(vm => (
                 <tr key={vm.vmid} className={`border-b border-[#dedfdf] last:border-0 hover:bg-[#fbfaf9] transition-colors ${vm.isSuspended ? 'opacity-70 bg-[#f9f8f6]' : ''}`}>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">

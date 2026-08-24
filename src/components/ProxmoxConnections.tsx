@@ -283,6 +283,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Cluster / Connection Name</label>
                 <input 
                   type="text" 
+                  autoComplete="off"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="e.g. Primary US-East Cluster"
@@ -296,6 +297,7 @@ export const ProxmoxConnections: React.FC = () => {
                   <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Host IP / FQDN</label>
                   <input 
                     type="text" 
+                    autoComplete="off"
                     value={newHostIp}
                     onChange={(e) => setNewHostIp(e.target.value)}
                     placeholder="10.0.10.1"
@@ -306,8 +308,9 @@ export const ProxmoxConnections: React.FC = () => {
                 <div>
                   <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Port</label>
                   <input 
-                    type="number" 
-                    value={newPort}
+                  type="number" 
+                  autoComplete="off"
+                  value={newPort}
                     onChange={(e) => setNewPort(parseInt(e.target.value, 10))}
                     className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                     required
@@ -325,6 +328,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">API Token ID</label>
                 <input 
                   type="text" 
+                  autoComplete="off"
                   value={newTokenId}
                   onChange={(e) => setNewTokenId(e.target.value)}
                   placeholder="root@pam!votion_token"
@@ -337,6 +341,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">API Token Secret</label>
                 <input 
                   type="password" 
+                  autoComplete="new-password"
                   value={newTokenSecret}
                   onChange={(e) => setNewTokenSecret(e.target.value)}
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -350,6 +355,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
                 <input 
                   type="text" 
+                  autoComplete="off"
                   value={newSslFingerprint}
                   onChange={(e) => setNewSslFingerprint(e.target.value)}
                   placeholder="SHA256:7B:44:91..."
@@ -390,8 +396,9 @@ export const ProxmoxConnections: React.FC = () => {
               <div>
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Cluster / Connection Name</label>
                 <input
-                  type="text"
-                  value={editName}
+                    type="text"
+                    autoComplete="off"
+                    value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
                   required
@@ -403,6 +410,7 @@ export const ProxmoxConnections: React.FC = () => {
                   <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Host IP / FQDN</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     value={editHostIp}
                     onChange={(e) => setEditHostIp(e.target.value)}
                     className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
@@ -413,6 +421,7 @@ export const ProxmoxConnections: React.FC = () => {
                   <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Port</label>
                   <input
                     type="number"
+                    autoComplete="off"
                     value={editPort}
                     onChange={(e) => setEditPort(parseInt(e.target.value, 10))}
                     className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
@@ -425,6 +434,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">API Token ID</label>
                 <input
                   type="text"
+                  autoComplete="off"
                   value={editTokenId}
                   onChange={(e) => setEditTokenId(e.target.value)}
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
@@ -436,6 +446,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">API Token Secret (leave blank to keep)</label>
                 <input
                   type="password"
+                  autoComplete="new-password"
                   value={editTokenSecret}
                   onChange={(e) => setEditTokenSecret(e.target.value)}
                   placeholder="••••••••••••"
@@ -448,6 +459,7 @@ export const ProxmoxConnections: React.FC = () => {
                 <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
                 <input
                   type="text"
+                  autoComplete="off"
                   value={editSslFingerprint}
                   onChange={(e) => setEditSslFingerprint(e.target.value)}
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"

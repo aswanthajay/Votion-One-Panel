@@ -19,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAlertRules,
 }) => {
   const [tasksOpen, setTasksOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState('Global');
@@ -99,6 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
               setWorkspaceMenuOpen(!workspaceMenuOpen);
               setUserMenuOpen(false);
               setTasksOpen(false);
+              setNotificationsOpen(false);
             }}
             className="flex items-center gap-2 border border-[#1a1a1a] rounded-lg px-3 py-1 bg-white hover:bg-[#f1f1f1] transition-all cursor-pointer font-semibold text-sm text-[#1a1a1a]"
             title="Select Workspace or Company"
@@ -197,12 +199,22 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {/* NOTIFICATION BELL — live unread count from PostgreSQL */}
-        <NotificationBell />
+        <NotificationBell
+          open={notificationsOpen}
+          onToggle={() => {
+            setNotificationsOpen(previous => !previous);
+            setTasksOpen(false);
+            setUserMenuOpen(false);
+            setWorkspaceMenuOpen(false);
+          }}
+          onClose={() => setNotificationsOpen(false)}
+        />
 
         {/* TASKS BUTTON — Live data from /api/v1/tasks */}
         <button 
           onClick={() => {
             setTasksOpen(!tasksOpen);
+            setNotificationsOpen(false);
             setUserMenuOpen(false);
             setWorkspaceMenuOpen(false);
           }}
@@ -289,6 +301,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => {
               setUserMenuOpen(!userMenuOpen);
               setTasksOpen(false);
+              setNotificationsOpen(false);
               setWorkspaceMenuOpen(false);
             }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all cursor-pointer ${

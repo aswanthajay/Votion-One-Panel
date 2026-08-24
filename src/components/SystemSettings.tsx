@@ -258,6 +258,7 @@ export const SystemSettings: React.FC = () => {
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">SMTP Host</label>
               <input
                 type="text"
+                autoComplete="off"
                 value={config.host}
                 onChange={(e) => setConfig({ ...config, host: e.target.value })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
@@ -269,6 +270,7 @@ export const SystemSettings: React.FC = () => {
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Port</label>
               <input
                 type="number"
+                autoComplete="off"
                 value={config.port}
                 onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 587 })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
@@ -279,6 +281,7 @@ export const SystemSettings: React.FC = () => {
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Username</label>
               <input
                 type="text"
+                autoComplete="off"
                 value={config.user}
                 onChange={(e) => setConfig({ ...config, user: e.target.value })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
@@ -290,6 +293,7 @@ export const SystemSettings: React.FC = () => {
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Password</label>
               <input
                 type="password"
+                autoComplete="new-password"
                 value={config.pass}
                 onChange={(e) => setConfig({ ...config, pass: e.target.value })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
@@ -301,6 +305,7 @@ export const SystemSettings: React.FC = () => {
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Sender Address (From)</label>
               <input
                 type="email"
+                autoComplete="off"
                 value={config.from}
                 onChange={(e) => setConfig({ ...config, from: e.target.value })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
@@ -325,6 +330,7 @@ export const SystemSettings: React.FC = () => {
             <div className="flex items-center gap-2">
               <input
                 type="email"
+                autoComplete="off"
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 placeholder="Test email address..."
@@ -427,6 +433,7 @@ export const SystemSettings: React.FC = () => {
                   <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Alert Recipients (comma-separated emails)</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     value={notifs.alert_emails || ''}
                     onChange={(e) => setNotifs({ ...notifs, alert_emails: e.target.value })}
                     placeholder="admin@votioncloud.org"
@@ -451,6 +458,7 @@ export const SystemSettings: React.FC = () => {
                   <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Expiry Warning Recipients</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     value={notifs.expiry_warning_emails || ''}
                     onChange={(e) => setNotifs({ ...notifs, expiry_warning_emails: e.target.value })}
                     placeholder="admin@votioncloud.org"
@@ -475,6 +483,7 @@ export const SystemSettings: React.FC = () => {
                   <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Welcome CC Recipients</label>
                   <input
                     type="text"
+                    autoComplete="off"
                     value={notifs.welcome_emails || ''}
                     onChange={(e) => setNotifs({ ...notifs, welcome_emails: e.target.value })}
                     placeholder="admin@votioncloud.org"
@@ -508,6 +517,7 @@ export const SystemSettings: React.FC = () => {
                 <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Subject Line</label>
                 <input
                   type="text"
+                  autoComplete="off"
                   value={editSubject}
                   onChange={(e) => setEditSubject(e.target.value)}
                   className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a]"

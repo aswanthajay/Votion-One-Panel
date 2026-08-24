@@ -10,8 +10,13 @@ interface Notification {
   createdAt: string;
 }
 
-export const NotificationBell: React.FC = () => {
-  const [open, setOpen] = useState(false);
+interface NotificationBellProps {
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}
+
+export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onToggle, onClose }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
@@ -37,12 +42,12 @@ export const NotificationBell: React.FC = () => {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
+        onClose();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [onClose]);
 
   const handleMarkAllRead = async () => {
     try {
@@ -92,7 +97,7 @@ export const NotificationBell: React.FC = () => {
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         className="header-link relative cursor-pointer flex items-center gap-1"
         title="Alert notifications"
         aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}

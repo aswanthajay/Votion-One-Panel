@@ -160,7 +160,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
       <div className="hidden bg-zinc-500 text-zinc-500 fill-zinc-500 stroke-zinc-500 bg-stone-500 text-stone-500 fill-stone-500 stroke-stone-500 bg-neutral-500 text-neutral-500 fill-neutral-500 stroke-neutral-500 bg-red-500 text-red-500 fill-red-500 stroke-red-500 bg-yellow-500 text-yellow-500 fill-yellow-500 stroke-yellow-500 bg-emerald-500 text-emerald-500 fill-emerald-500 stroke-emerald-500 bg-blue-500 text-blue-500 fill-blue-500 stroke-blue-500 text-zinc-100 text-zinc-200 text-zinc-300 text-stone-100 text-stone-200 text-stone-300 fill-zinc-100 fill-zinc-200 fill-zinc-300 fill-stone-100 fill-stone-200 fill-stone-300"></div>
 
       <div className="flex items-end justify-between gap-2 border-b border-[#1a1a1a] pb-2">
-        <h3 className="text-[#1a1a1a] font-bold text-sm tracking-wide uppercase">Live Node Telemetry</h3>
+        <h3 className="text-[#1a1a1a] font-bold text-sm tracking-wide uppercase">Guest VM Telemetry</h3>
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-1">
             <button

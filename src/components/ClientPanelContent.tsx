@@ -198,7 +198,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               <a href="#" className="text-[#2563eb] hover:underline" onClick={(e) => { e.preventDefault(); loadClientVMs(); }}>Refresh sync</a>
             </div>
             <div className="flex flex-col items-end">
-              <div className="text-black">{clientVMs.length} total allocated</div>
+              <div className="text-black" aria-live="polite">
+                {isLoading && clientVMs.length === 0 ? (
+                  <span className="inline-block h-4 w-24 animate-pulse rounded bg-[#f1f1f1]" aria-label="Loading allocated instance count" />
+                ) : (
+                  `${clientVMs.length} total allocated`
+                )}
+              </div>
               <a href="#" className="text-[#2563eb] hover:underline" onClick={(e) => { e.preventDefault(); onOpenModal('support'); }}>Request quota</a>
             </div>
           </div>
@@ -289,11 +295,26 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                   {visibleColumns.ip && <td className="py-3 px-4 text-[13px] text-[#1a1a1a] text-right">{vm.ipAddress || 'Pending'}</td>}
                 </tr>
               ))}
-              {displayVMs.length === 0 && (
+              {isLoading && clientVMs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-[13px] text-[#656b6b]">No instances found.</td>
+                  <td colSpan={7} className="py-8 text-center text-[13px] text-[#656b6b]" aria-busy="true">
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-3 w-3 animate-pulse rounded-full bg-[#a7aaaa]" />
+                      Loading assigned instances...
+                    </span>
+                  </td>
                 </tr>
-              )}
+              ) : displayVMs.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-[13px] text-[#656b6b]">
+                    {localFilter === 'lxc'
+                      ? 'No assigned LXC containers found'
+                      : searchQuery.trim()
+                        ? 'No instances match the current search'
+                        : 'No assigned instances found'}
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
