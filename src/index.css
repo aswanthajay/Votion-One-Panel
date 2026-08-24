@@ -21,7 +21,8 @@
   --color-text-subtle: #656b6b;
   --color-tile-bg: #f9f8f6;
   --color-accent-blue: #2563eb;
-  
+  --color-status-critical: #dc2626;
+
   /* Dimensions & Spacing */
   --sidebar-width-expanded: 240px;
   --sidebar-width-collapsed: 60px;
@@ -97,6 +98,105 @@ body {
   position: sticky;
   top: 0;
   z-index: 40;
+}
+
+.header-left,
+.header-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.header-left {
+  gap: 8px;
+}
+
+.header-right {
+  gap: 6px;
+}
+
+.header-alert-control,
+.header-notification-control,
+.header-task-control {
+  position: relative;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-subtle);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1), transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.header-alert-control:hover,
+.header-task-control:hover {
+  color: var(--color-dark-ink);
+  background: var(--color-light-gray);
+  border-color: var(--color-subtle-gray);
+}
+
+.header-notification-control {
+  border-color: var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+  background: #ffffff;
+}
+
+.header-notification-control:hover,
+.header-notification-control.is-open {
+  border-color: var(--color-dark-ink);
+  color: var(--color-dark-ink);
+  background: var(--color-light-gray);
+}
+
+.header-alert-control:focus-visible,
+.header-notification-control:focus-visible,
+.header-task-control:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 2px;
+}
+
+.header-alert-control:active,
+.header-notification-control:active,
+.header-task-control:active {
+  transform: scale(0.98);
+}
+
+.notification-count,
+.task-count {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.notification-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  border: 2px solid #ffffff;
+  color: #ffffff;
+  background: var(--color-status-critical);
+  box-shadow: 0 1px 3px rgba(26, 26, 26, 0.18);
+}
+
+.task-count {
+  color: #ffffff;
+  background: var(--color-dark-ink);
 }
 
 .app-content {
@@ -755,6 +855,30 @@ body {
   min-height: 36px;
   padding: 8px 14px !important;
   font-size: 12px;
+}
+
+.notification-dismiss {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text-subtle);
+  transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.notification-dismiss:hover {
+  border-color: var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+  background: var(--color-light-gray);
+}
+
+.notification-dismiss:focus-visible {
+  outline: 2px solid var(--color-accent-blue);
+  outline-offset: 1px;
 }
 
 @media (max-width: 700px) {

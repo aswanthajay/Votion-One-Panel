@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { apiClient, ApiTask, ApiProxmoxConnection } from '../services/apiClient';
 import { NotificationBell } from './NotificationBell';
 
@@ -106,10 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Select Workspace or Company"
           >
             <span>{selectedWorkspace}</span>
-            <svg aria-label="open dropdown" height="12" role="img" viewBox="0 0 22 22" width="12" fill="currentColor">
-              <title>open dropdown</title>
-              <path clipRule="evenodd" d="m10 16.1-9-8L3 6l8 7 8-7L21 8l-9 8c-.6.5-1.4.5-2 0Z" fillRule="evenodd"></path>
-            </svg>
+            <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
 
           {workspaceMenuOpen && (
@@ -188,12 +186,11 @@ export const Header: React.FC<HeaderProps> = ({
         {onOpenAlertRules && (
           <button 
             onClick={onOpenAlertRules}
-            className="header-link cursor-pointer hidden md:inline-flex items-center gap-1"
+            className="header-alert-control cursor-pointer hidden md:inline-flex"
             title="Manage alert thresholds and notification rules"
+            aria-label="Manage alert rules"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 15v-2m0-6v.01M5 20h14a2 2 0 0 0 1.84-2.75L13.74 4a2 2 0 0 0-3.5 0L3.15 17.25A2 2 0 0 0 5 20z" />
-            </svg>
+            <SlidersHorizontal size={15} strokeWidth={1.8} aria-hidden="true" />
             <span>Alert Rules</span>
           </button>
         )}
@@ -207,8 +204,8 @@ export const Header: React.FC<HeaderProps> = ({
             setUserMenuOpen(false);
             setWorkspaceMenuOpen(false);
           }}
-          onClose={() => setNotificationsOpen(false)}
-        />
+            onClose={() => setNotificationsOpen(false)}
+          />
 
         {/* TASKS BUTTON — Live data from /api/v1/tasks */}
         <div className="header-task-menu-wrap">
@@ -222,11 +219,8 @@ export const Header: React.FC<HeaderProps> = ({
             className="header-task-control header-btn relative cursor-pointer"
           >
             <span>Tasks</span>
-            {activeBadgeCount > 0 && <span className="badge-dot"></span>}
-            <svg aria-label="open dropdown" height="14" role="img" viewBox="0 0 22 22" width="14" fill="currentColor">
-              <title>open dropdown</title>
-              <path clipRule="evenodd" d="m10 16.1-9-8L3 6l8 7 8-7L21 8l-9 8c-.6.5-1.4.5-2 0Z" fillRule="evenodd"></path>
-            </svg>
+            {activeBadgeCount > 0 && <span className="task-count" aria-label={`${activeBadgeCount} active tasks`}>{activeBadgeCount > 9 ? '9+' : activeBadgeCount}</span>}
+            <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
 
           {/* Tasks Dropdown Drawer — Live tasks from PostgreSQL */}
@@ -315,10 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <span>{currentUserName || apiClient.getUserEmail().split('@')[0]}</span>
-            <svg aria-label="open dropdown" height="14" role="img" viewBox="0 0 22 22" width="14" fill="currentColor">
-              <title>open dropdown</title>
-              <path clipRule="evenodd" d="m10 16.1-9-8L3 6l8 7 8-7L21 8l-9 8c-.6.5-1.4.5-2 0Z" fillRule="evenodd"></path>
-            </svg>
+            <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
 
           {userMenuOpen && (
