@@ -155,7 +155,7 @@ console.log(`[POSTGRES] Startup health check passed (${dbHealth.latencyMs}ms)`);
 const initialConnections = await dbService.getProxmoxConnections();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
-// Start Automated Background Expiry Worker Cron Job
+// Start idempotent telemetry and policy-controlled billing workers
   proxmoxSync.start();
   proxmoxApi.startTelemetryPoller();
   billingWorker.start();
@@ -166,9 +166,9 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Votion One™ Platform Backend Server running on port ${PORT}`);
   console.log(`👉 API Endpoint: http://localhost:${PORT}/api/v1/health`);
   console.log(`🗄️ Database: PostgreSQL + TimescaleDB (TSDB) Telemetry Layer`);
-  console.log(`🔐 Proxmox API Auth: PVEAPIToken=root@pam!votion_token`);
+  console.log(`🔐 Proxmox API Auth: configured; strict TLS fingerprint pinning enforced`);
   console.log(`🎫 Support Ticket Router: Active (/api/tickets)`);
-  console.log(`⏰ Expiry Worker: Active (10s interval sweep)`);
+  console.log(`Billing lifecycle worker: registered (5m interval; policy-controlled; disabled by default)`);
   console.log(`================================================================`);
 });
 
