@@ -15,13 +15,6 @@ const formatMemory = (memoryMb: number | null) => {
   return `${memoryMb} MB`;
 };
 
-const sourceLabel = (source: ApiVmMetadata['network']['source']) => {
-  if (source === 'cloud-init') return 'Cloud-Init';
-  if (source === 'guest-agent') return 'Guest agent';
-  if (source === 'proxmox-config') return 'Proxmox configuration';
-  return 'Unavailable';
-};
-
 const DataPoint: React.FC<{ label: string; value: React.ReactNode; mono?: boolean }> = ({ label, value, mono }) => (
   <div className="min-w-0">
     <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#656b6b]">{label}</dt>
@@ -61,7 +54,6 @@ export const VmMetadataPanel: React.FC<VmMetadataPanelProps> = ({ metadata, isLo
           <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <h5 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#1a1a1a]">Network identity</h5>
-              <span className="text-[10px] text-[#656b6b]">Source: {sourceLabel(metadata.network.source)}</span>
             </div>
             <dl className="grid grid-cols-2 gap-x-5 gap-y-4">
               <DataPoint label="Primary IP" value={valueOrUnavailable(metadata.network.primaryIp)} mono />
