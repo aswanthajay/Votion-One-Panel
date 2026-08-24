@@ -102,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
               setTasksOpen(false);
               setNotificationsOpen(false);
             }}
-            className="flex items-center gap-2 border border-[#1a1a1a] rounded-lg px-3 py-1 bg-white hover:bg-[#f1f1f1] transition-all cursor-pointer font-semibold text-sm text-[#1a1a1a]"
+            className="header-workspace-control flex items-center gap-2 border border-[#1a1a1a] rounded-lg px-3 py-1 bg-white hover:bg-[#f1f1f1] transition-all cursor-pointer font-semibold text-sm text-[#1a1a1a]"
             title="Select Workspace or Company"
           >
             <span>{selectedWorkspace}</span>
@@ -169,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
         {userRole === 'admin' && (
           <button 
             onClick={onToggleRole}
-            className="px-3 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-2 transition-colors border cursor-pointer bg-[#fbfaf9] text-[#1a1a1a] border-[#dedfdf] hover:bg-[#f1f1f1]"
+            className="header-role-switcher px-3 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-2 transition-colors border cursor-pointer bg-[#fbfaf9] text-[#1a1a1a] border-[#dedfdf] hover:bg-[#f1f1f1]"
             title="Toggle between Admin & Client Panels"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -218,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
             setUserMenuOpen(false);
             setWorkspaceMenuOpen(false);
           }}
-          className="header-btn relative cursor-pointer"
+          className="header-task-control header-btn relative cursor-pointer"
         >
           <span>Tasks</span>
           {activeBadgeCount > 0 && <span className="badge-dot"></span>}
@@ -274,7 +274,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* DOWNLOADS BUTTON */}
         <button 
           onClick={() => onOpenModal('downloads')}
-          className="header-link cursor-pointer"
+          className="header-secondary-control header-link cursor-pointer"
         >
           <span>Downloads</span>
         </button>
@@ -282,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* UPGRADE LINK */}
         <button 
           onClick={() => onOpenModal('upgrade')}
-          className="header-link cursor-pointer"
+          className="header-secondary-control header-link cursor-pointer"
         >
           <span>Upgrade</span>
         </button>
@@ -290,13 +290,13 @@ export const Header: React.FC<HeaderProps> = ({
         {/* REFER A FRIEND LINK */}
         <button 
           onClick={() => onOpenModal('refer')}
-          className="header-link cursor-pointer"
+          className="header-referral-control header-link cursor-pointer"
         >
           <span>Refer a friend</span>
         </button>
 
         {/* USER PROFILE BUTTON — Live user name from PostgreSQL */}
-        <div className="relative">
+        <div className="header-user-menu-wrap relative">
           <button 
             onClick={() => {
               setUserMenuOpen(!userMenuOpen);
@@ -304,7 +304,7 @@ export const Header: React.FC<HeaderProps> = ({
               setNotificationsOpen(false);
               setWorkspaceMenuOpen(false);
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
+            className={`header-user-trigger flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-all cursor-pointer ${
               userMenuOpen 
                 ? 'border-[#1a1a1a] bg-[#f1f1f1] text-[#1a1a1a]' 
                 : 'border-transparent text-[#1a1a1a] hover:bg-[#f1f1f1]'
@@ -318,7 +318,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {userMenuOpen && (
-            <div className="absolute right-0 top-11 w-56 bg-white border border-[#dedfdf] rounded-lg shadow-xl py-2 z-[100] text-sm text-[#1a1a1a]">
+            <div className="header-user-menu absolute right-0 top-11 w-56 bg-white border border-[#dedfdf] rounded-lg shadow-xl py-2 z-[350] text-sm text-[#1a1a1a]">
               
               {/* Role Toggle Link */}
               <button 
