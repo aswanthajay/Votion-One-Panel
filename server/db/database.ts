@@ -135,6 +135,72 @@ export async function initializeDatabaseSchema() {
       CREATE INDEX IF NOT EXISTS idx_vm_reimage_requests_vmid_created
         ON vm_reimage_requests (vmid, created_at DESC);
 
+      CREATE TABLE IF NOT EXISTS vm_reimage_image_profiles (
+        id VARCHAR(100) PRIMARY KEY,
+        os_label VARCHAR(100) NOT NULL,
+        vm_type VARCHAR(20) NOT NULL,
+        template_vmid INT,
+        template_node VARCHAR(100),
+        storage_id VARCHAR(100),
+        version VARCHAR(100) NOT NULL,
+        image_digest VARCHAR(255),
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        retired_at TIMESTAMP,
+        UNIQUE (os_label, vm_type, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS vm_reimage_executions (
+        id VARCHAR(100) PRIMARY KEY,
+        request_id VARCHAR(100) NOT NULL UNIQUE REFERENCES vm_reimage_requests(id) ON DELETE RESTRICT,
+        vmid INT NOT NULL REFERENCES vms(vmid) ON DELETE RESTRICT,
+        request_snapshot JSONB NOT NULL,
+        image_profile_id VARCHAR(100) REFERENCES vm_reimage_image_profiles(id) ON DELETE RESTRICT,
+        image_profile_version VARCHAR(100),
+        state VARCHAR(40) NOT NULL DEFAULT 'created',
+        plan_hash VARCHAR(128),
+        operator_email VARCHAR(255),
+        operator_confirmed_at TIMESTAMP,
+        preflight_snapshot JSONB,
+        backup_reference VARCHAR(500),
+        lease_owner VARCHAR(255),
+        lease_expires_at TIMESTAMP,
+        attempt_count INT NOT NULL DEFAULT 0,
+        current_step VARCHAR(100),
+        step_upids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        validation_result JSONB,
+        error_code VARCHAR(100),
+        error_message TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        queued_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        blocked_at TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_reimage_executions_state_updated
+        ON vm_reimage_executions (state, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_vm_reimage_executions_vmid_state
+        ON vm_reimage_executions (vmid, state);
+
+      CREATE TABLE IF NOT EXISTS vm_reimage_audit_events (
+        id VARCHAR(100) PRIMARY KEY,
+        request_id VARCHAR(100) REFERENCES vm_reimage_requests(id) ON DELETE SET NULL,
+        execution_id VARCHAR(100) REFERENCES vm_reimage_executions(id) ON DELETE SET NULL,
+        actor_email VARCHAR(255) NOT NULL,
+        actor_capability VARCHAR(100) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        from_state VARCHAR(40),
+        to_state VARCHAR(40),
+        correlation_id VARCHAR(100) NOT NULL,
+        plan_hash VARCHAR(128),
+        safe_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_reimage_audit_execution_created
+        ON vm_reimage_audit_events (execution_id, created_at DESC);
+
       CREATE TABLE IF NOT EXISTS audit_logs (
         id VARCHAR(100) PRIMARY KEY,
         timestamp TIMESTAMP DEFAULT NOW(),
@@ -308,6 +374,7 @@ export async function initializeDatabaseSchema() {
     await client.query(`
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS username VARCHAR(100) DEFAULT 'root@pam';
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS password VARCHAR(255);
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS operator_access BOOLEAN NOT NULL DEFAULT false;
     `);
 
     // Legacy migration: tasks column existed in old static constants — ensure table exists (created above)
@@ -1174,6 +1241,222 @@ export class DatabaseService {
       params,
     );
     return result.rows.map(row => this.mapReimageRequest(row));
+  }
+
+  private mapReimageExecution(row: any) {
+    return {
+      id: row.id,
+      requestId: row.request_id,
+      vmid: Number(row.vmid),
+      vmName: row.vm_name || undefined,
+      vmType: row.vm_type || undefined,
+      ownerEmail: row.owner_email || undefined,
+      requestedOs: row.requested_os,
+      requesterEmail: row.requester_email,
+      requestStatus: row.request_status,
+      imageProfileId: row.image_profile_id || undefined,
+      imageProfileVersion: row.image_profile_version || undefined,
+      state: row.state,
+      planHash: row.plan_hash || undefined,
+      operatorEmail: row.operator_email || undefined,
+      operatorConfirmedAt: row.operator_confirmed_at || undefined,
+      preflightSnapshot: row.preflight_snapshot || undefined,
+      backupReference: row.backup_reference || undefined,
+      leaseOwner: row.lease_owner || undefined,
+      leaseExpiresAt: row.lease_expires_at || undefined,
+      attemptCount: Number(row.attempt_count || 0),
+      currentStep: row.current_step || undefined,
+      stepUpids: row.step_upids || [],
+      validationResult: row.validation_result || undefined,
+      errorCode: row.error_code || undefined,
+      errorMessage: row.error_message || undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      queuedAt: row.queued_at || undefined,
+      completedAt: row.completed_at || undefined,
+      blockedAt: row.blocked_at || undefined,
+    };
+  }
+
+  private reimageExecutionSelect = `
+    SELECT e.*, r.requested_os, r.requester_email, r.status AS request_status,
+           v.vm_name, v.type AS vm_type, v.owner_email
+    FROM vm_reimage_executions e
+    JOIN vm_reimage_requests r ON r.id = e.request_id
+    JOIN vms v ON v.vmid = e.vmid
+  `;
+
+  async getApprovedReimageRequest(requestId: string) {
+    const result = await pgPool.query(
+      `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email, v.node, v.status AS vm_status, v.is_suspended
+       FROM vm_reimage_requests r
+       JOIN vms v ON v.vmid = r.vmid
+       WHERE r.id = $1 AND r.status = 'approved'`,
+      [requestId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getEnabledReimageImageProfile(osLabel: string, vmType: 'qemu' | 'lxc') {
+    const result = await pgPool.query(
+      `SELECT id, os_label, vm_type, template_vmid, template_node, storage_id, version, image_digest
+       FROM vm_reimage_image_profiles
+       WHERE os_label = $1 AND vm_type = $2 AND enabled = true AND retired_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [osLabel, vmType],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getReimageExecution(executionId: string) {
+    const result = await pgPool.query(
+      `${this.reimageExecutionSelect} WHERE e.id = $1`,
+      [executionId],
+    );
+    return result.rows[0] ? this.mapReimageExecution(result.rows[0]) : null;
+  }
+
+  async getReimageExecutions(options: { operatorEmail?: string; state?: string } = {}) {
+    const params: any[] = [];
+    const conditions: string[] = [];
+    if (options.operatorEmail) {
+      params.push(options.operatorEmail.toLowerCase().trim());
+      conditions.push(`LOWER(e.operator_email) = $${params.length}`);
+    }
+    if (options.state) {
+      params.push(options.state);
+      conditions.push(`e.state = $${params.length}`);
+    }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const result = await pgPool.query(
+      `${this.reimageExecutionSelect}${where} ORDER BY e.created_at DESC LIMIT 100`,
+      params,
+    );
+    return result.rows.map(row => this.mapReimageExecution(row));
+  }
+
+  async createReimageExecution(input: {
+    requestId: string;
+    vmid: number;
+    requestSnapshot: Record<string, unknown>;
+    imageProfileId: string;
+    imageProfileVersion: string;
+    planHash: string;
+    operatorEmail: string;
+  }) {
+    const client = await pgPool.connect();
+    let executionId: string;
+    try {
+      await client.query('BEGIN');
+      const request = await client.query(
+        `SELECT r.id, r.vmid, r.status, v.vm_name, v.type AS vm_type, v.owner_email
+         FROM vm_reimage_requests r JOIN vms v ON v.vmid = r.vmid
+         WHERE r.id = $1 FOR UPDATE`,
+        [input.requestId],
+      );
+      if (request.rows.length === 0) throw new Error('APPROVED_REQUEST_NOT_FOUND');
+      if (request.rows[0].status !== 'approved') throw new Error('APPROVED_REQUEST_NOT_ACTIVE');
+      if (Number(request.rows[0].vmid) !== input.vmid) throw new Error('EXECUTION_VM_MISMATCH');
+
+      const existing = await client.query(
+        `SELECT id FROM vm_reimage_executions
+         WHERE request_id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
+         ORDER BY created_at DESC LIMIT 1`,
+        [input.requestId],
+      );
+      if (existing.rows.length > 0) {
+        executionId = existing.rows[0].id;
+      } else {
+        executionId = `reimage-exec-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;
+        await client.query(
+          `INSERT INTO vm_reimage_executions
+           (id, request_id, vmid, request_snapshot, image_profile_id, image_profile_version, state, plan_hash, operator_email, current_step)
+           VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'created', $7, $8, 'created')`,
+          [executionId, input.requestId, input.vmid, JSON.stringify(input.requestSnapshot), input.imageProfileId, input.imageProfileVersion, input.planHash, input.operatorEmail.toLowerCase().trim()],
+        );
+        await client.query(
+          `INSERT INTO vm_reimage_audit_events
+           (id, request_id, execution_id, actor_email, actor_capability, action, from_state, to_state, correlation_id, plan_hash, safe_details)
+           VALUES ($1, $2, $3, $4, 'reimage.execute', 'CREATE_EXECUTION', NULL, 'created', $5, $6, $7::jsonb)`,
+          [`reimage-audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`, input.requestId, executionId, input.operatorEmail.toLowerCase().trim(), executionId, input.planHash, JSON.stringify({ vmid: input.vmid, imageProfileId: input.imageProfileId, imageProfileVersion: input.imageProfileVersion })],
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return await this.getReimageExecution(executionId);
+  }
+
+  async markReimagePreflightPassed(executionId: string, operatorEmail: string, snapshot: Record<string, unknown>, planHash: string) {
+    const email = operatorEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_executions
+       SET state = 'awaiting_confirmation', preflight_snapshot = $2::jsonb, plan_hash = $3,
+           operator_email = $4, current_step = 'preflight', updated_at = NOW()
+       WHERE id = $1 AND state IN ('created', 'preflight_passed')
+       RETURNING id`,
+      [executionId, JSON.stringify(snapshot), planHash, email],
+    );
+    if (result.rows.length === 0) return null;
+    await this.recordReimageAuditEvent({ executionId, actorEmail: email, action: 'PREFLIGHT_PASSED', fromState: 'created', toState: 'awaiting_confirmation', planHash, safeDetails: { checkCount: Object.keys(snapshot).length } });
+    return await this.getReimageExecution(executionId);
+  }
+
+  async queueReimageExecution(executionId: string, operatorEmail: string, planHash: string) {
+    const email = operatorEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_executions
+       SET state = 'queued', operator_email = $2, operator_confirmed_at = NOW(), queued_at = NOW(), current_step = 'queued', updated_at = NOW()
+       WHERE id = $1 AND state = 'awaiting_confirmation' AND plan_hash = $3
+       RETURNING id`,
+      [executionId, email, planHash],
+    );
+    if (result.rows.length === 0) return null;
+    await this.recordReimageAuditEvent({ executionId, actorEmail: email, action: 'QUEUE_EXECUTION', fromState: 'awaiting_confirmation', toState: 'queued', planHash, safeDetails: { executionEnabled: false } });
+    return await this.getReimageExecution(executionId);
+  }
+
+  async blockReimageExecution(executionId: string, actorEmail: string, errorCode: string, errorMessage: string) {
+    const email = actorEmail.toLowerCase().trim();
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_executions
+       SET state = 'blocked', error_code = $2, error_message = $3, blocked_at = NOW(), updated_at = NOW()
+       WHERE id = $1 AND state NOT IN ('completed', 'failed', 'cancelled')
+       RETURNING id`,
+      [executionId, errorCode, errorMessage.slice(0, 500)],
+    );
+    if (result.rows.length === 0) return null;
+    await this.recordReimageAuditEvent({ executionId, actorEmail: email, action: 'BLOCK_EXECUTION', fromState: undefined, toState: 'blocked', safeDetails: { errorCode } });
+    return await this.getReimageExecution(executionId);
+  }
+
+  async acquireReimageExecutionLease(executionId: string, workerId: string, leaseMs = 120000) {
+    const result = await pgPool.query(
+      `UPDATE vm_reimage_executions
+       SET state = 'processing', lease_owner = $2, lease_expires_at = NOW() + ($3 * INTERVAL '1 millisecond'),
+           attempt_count = attempt_count + 1, current_step = 'processing', updated_at = NOW()
+       WHERE id = $1 AND state = 'queued'
+         AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+       RETURNING id`,
+      [executionId, workerId, leaseMs],
+    );
+    return result.rows.length > 0 ? await this.getReimageExecution(executionId) : null;
+  }
+
+  async recordReimageAuditEvent(input: { requestId?: string; executionId?: string; actorEmail: string; action: string; fromState?: string; toState?: string; correlationId?: string; planHash?: string; safeDetails?: Record<string, unknown> }) {
+    const id = `reimage-audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    await pgPool.query(
+      `INSERT INTO vm_reimage_audit_events
+       (id, request_id, execution_id, actor_email, actor_capability, action, from_state, to_state, correlation_id, plan_hash, safe_details)
+       VALUES ($1, $2, $3, $4, 'reimage.execute', $5, $6, $7, $8, $9, $10::jsonb)`,
+      [id, input.requestId || null, input.executionId || null, input.actorEmail.toLowerCase().trim(), input.action, input.fromState || null, input.toState || null, input.correlationId || input.executionId || id, input.planHash || null, JSON.stringify(input.safeDetails || {})],
+    );
+    return { id };
   }
 
   async cancelReimageRequest(requestId: string, vmid: number, requesterEmail: string, isAdmin = false) {

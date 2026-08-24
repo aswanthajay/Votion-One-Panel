@@ -25,7 +25,7 @@ export function createSessionToken(accountId: number): string {
   return `${payload}.${signature}`;
 }
 
-export type AuthenticatedUser = { id: number; email: string; role: string; name: string };
+export type AuthenticatedUser = { id: number; email: string; role: string; name: string; operatorAccess?: boolean };
 
 export interface AuthenticatedRequest extends Request {
   authUser?: AuthenticatedUser;
@@ -45,9 +45,9 @@ export async function resolveSessionUser(token: string): Promise<AuthenticatedUs
   const parts = verified.payload.split('_');
   const accountId = parseInt(parts[1], 10);
   if (!accountId) return null;
-  const result = await pgPool.query('SELECT id, email, name, role FROM accounts WHERE id = $1', [accountId]);
+  const result = await pgPool.query('SELECT id, email, name, role, operator_access FROM accounts WHERE id = $1', [accountId]);
   const user = result.rows[0];
-  return user ? { id: user.id, email: user.email, role: user.role, name: user.name } : null;
+  return user ? { id: user.id, email: user.email, role: user.role, name: user.name, operatorAccess: user.operator_access === true } : null;
 }
 
 export function verifySessionToken(token: string): { payload: string } | null {
@@ -93,6 +93,19 @@ export function requireAdmin(req: AuthenticatedRequest, res: Response, next: Nex
   const adminRoles = ['administrator', 'admin', 'moderator'];
   if (!adminRoles.includes(user.role)) {
     return res.status(403).json({ success: false, error: 'Administrator access required' });
+  }
+  next();
+}
+
+/**
+ * Dedicated operator capability gate. Administrative access alone is not execution authorization.
+ */
+export function requireOperator(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const user = req.authUser;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const adminRoles = ['administrator', 'admin', 'moderator'];
+  if (!adminRoles.includes(user.role) || user.operatorAccess !== true) {
+    return res.status(403).json({ success: false, error: 'Dedicated reimage operator access is required' });
   }
   next();
 }
