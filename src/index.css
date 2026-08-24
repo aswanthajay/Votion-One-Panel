@@ -542,3 +542,43 @@ body {
     overflow-x: hidden;
   }
 }
+
+/* Overview-only mobile containment: the page has a nested header and telemetry split. */
+@media (max-width: 600px) {
+  .overview-dashboard,
+  .overview-dashboard .overview-header,
+  .overview-dashboard > div,
+  .overview-dashboard section {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  .overview-dashboard .overview-header {
+    position: relative !important;
+    top: auto !important;
+  }
+
+  .overview-dashboard * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .overview-dashboard .ink-block-wrapper,
+  .overview-dashboard .ink-block-header,
+  .overview-dashboard .overview-telemetry-table {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .overview-dashboard .overview-telemetry-table td,
+  .overview-dashboard .overview-telemetry-table th,
+  .overview-dashboard .overview-telemetry-table span {
+    overflow-wrap: anywhere;
+  }
+
+  .overview-dashboard .overview-header > div:last-child {
+    flex-shrink: 1;
+  }
+}
