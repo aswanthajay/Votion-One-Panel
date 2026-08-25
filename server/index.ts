@@ -15,7 +15,7 @@ import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
 import { checkDbHealth } from './services/databaseHealth.js';
 import { createProxmoxWebSocketTlsOptions, proxmoxFetch } from './services/proxmoxHttp.js';
-import { resolveSessionUser } from './middleware.js';
+import { requireAuth, resolveSessionUser } from './middleware.js';
 
 let ticketCache: { cookie: string, csrf: string, expiresAt: number } | null = null;
 
@@ -86,14 +86,51 @@ vncWss.on('connection', (clientWs) => {
   (clientWs as any).__upstream = null;
 });
 
+const proxyVmId = (req: any): number | null => {
+  try {
+    const url = new URL(req.originalUrl || req.url || '/', 'http://localhost');
+    const queryVmid = Number(url.searchParams.get('vmid'));
+    if (Number.isInteger(queryVmid) && queryVmid > 0) return queryVmid;
+    const pathMatch = url.pathname.match(/\\/(?:qemu|lxc)\\/(\\d+)(?:\\/|$)/i);
+    const pathVmid = Number(pathMatch?.[1]);
+    return Number.isInteger(pathVmid) && pathVmid > 0 ? pathVmid : null;
+  } catch {
+    return null;
+  }
+};
+
+const attachProxyConnection = async (req: any, res: express.Response, next: express.NextFunction) => {
+  try {
+    const connections = await dbService.getProxmoxConnections();
+    const vmid = proxyVmId(req);
+    const vm = vmid ? await dbService.getVMByVMID(vmid) : null;
+    const sessionUser = req.authUser;
+    const admin = ['administrator', 'admin', 'moderator'].includes(sessionUser?.role);
+    if (vmid && (!vm || (!admin && String(vm.ownerEmail).toLowerCase() !== String(sessionUser?.email || '').toLowerCase()))) {
+      return res.status(vm ? 403 : 404).json({ success: false, error: vm ? 'You do not have access to this VM' : 'VM not found' });
+    }
+
+    const connection = vm?.proxmoxConnectionId
+      ? connections.find(candidate => String(candidate.id) === String(vm.proxmoxConnectionId))
+      : connections.length === 1 ? connections[0] : null;
+    if (!connection) {
+      return res.status(409).json({ success: false, error: 'A VM-specific Proxmox connection is required for this proxy request' });
+    }
+    req.proxmoxConnection = connection;
+    next();
+  } catch {
+    res.status(503).json({ success: false, error: 'Proxmox proxy context is unavailable' });
+  }
+};
+
 // Proxmox noVNC Proxy
 const proxmoxProxy = createProxyMiddleware({
   secure: true,
   router: async (req: any) => {
     try {
       const conns = await dbService.getProxmoxConnections();
-      if (conns && conns.length > 0) {
-        const c = conns[0];
+      const c = req.proxmoxConnection || (conns.length === 1 ? conns[0] : null);
+      if (c) {
         const cleanHost = c.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
         const port = c.port || 8006;
         
@@ -111,7 +148,7 @@ const proxmoxProxy = createProxyMiddleware({
     } catch (err) {
       console.error('[PROXY] Failed to fetch Proxmox connection', err);
     }
-    return 'https://localhost:8006';
+    return 'https://127.0.0.1:9';
   },
   pathRewrite: (path, req: any) => {
     if (req.baseUrl === '/proxmox-console') {
@@ -139,10 +176,7 @@ const proxmoxProxy = createProxyMiddleware({
   }
 });
 
-app.use('/novnc', proxmoxProxy);
-app.use('/api2', proxmoxProxy);
-app.use('/pve2', proxmoxProxy);
-app.use('/proxmox-console', proxmoxProxy);
+app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachProxyConnection, proxmoxProxy);
 
 // Initialize and validate the database before any route, worker, or proxy queries run.
 await initializeDatabaseSchema();
@@ -186,39 +220,8 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
     return;
   }
   if (req.url?.startsWith('/api/vnc/ws') || req.url?.startsWith('/api/v1/vnc/ws')) {
-    if (!cachedConn) {
-      socket.destroy();
-      return;
-    }
-    const cleanHost = cachedConn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const pvePort = cachedConn.port || 8006;
-    req.proxmoxAuth = `PVEAPIToken=${cachedConn.token_id}=${cachedConn.token_secret}`;
-    
     try {
       const url = new URL(req.url, 'http://localhost');
-      // Normalize pseudo-node names. PVE's special 'info' node (the current host)
-      // is valid for node-scoped API calls, so keep it. Only resolve the cluster
-      // name ('pve-votion-cluster' — not a valid node path) to the real hosting
-      // node via the live cluster/resources list.
-      let node = url.searchParams.get('node');
-      if (node && /pve-votion-cluster/i.test(node)) {
-        try {
-          const cleanH = cachedConn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-          const pP = cachedConn.port || 8006;
-          const resInfo = await proxmoxFetch(`https://${cleanH}:${pP}/api2/json/cluster/resources?type=vm`, {
-            method: 'GET',
-            headers: { 'Authorization': req.proxmoxAuth },
-            sslFingerprint: cachedConn.ssl_fingerprint,
-          });
-          if (resInfo.ok) {
-            const jsonInfo = await resInfo.json();
-            const match = (jsonInfo.data || []).find((v: any) => Number(v.vmid) === Number(url.searchParams.get('vmid')));
-            if (match && match.node) node = match.node;
-          }
-        } catch (_e) {}
-        if (!node || /pve-votion-cluster/i.test(node)) node = 'info';
-      }
-      if (!node) node = 'info';
       const vmid = url.searchParams.get('vmid');
       const requestedVm = vmid ? await dbService.getVMByVMID(Number(vmid)) : null;
       const sessionIsAdmin = ['administrator', 'admin', 'moderator'].includes(sessionUser.role);
@@ -226,6 +229,39 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         socket.destroy();
         return;
       }
+
+      const connections = await dbService.getProxmoxConnections();
+      const proxmoxConn = requestedVm.proxmoxConnectionId
+        ? connections.find(connection => String(connection.id) === String(requestedVm.proxmoxConnectionId))
+        : null;
+      if (!proxmoxConn) {
+        socket.destroy();
+        return;
+      }
+      const cleanHost = String(proxmoxConn.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const pvePort = proxmoxConn.port || 8006;
+      req.proxmoxAuth = `PVEAPIToken=${proxmoxConn.token_id}=${proxmoxConn.token_secret}`;
+
+      // Normalize pseudo-node names. PVE's special 'info' node (the current host)
+      // is valid for node-scoped API calls, so keep it. Only resolve the cluster
+      // name to the real hosting node via the selected connection.
+      let node = url.searchParams.get('node');
+      if (node && /pve-votion-cluster/i.test(node)) {
+        try {
+          const resInfo = await proxmoxFetch(`https://${cleanHost}:${pvePort}/api2/json/cluster/resources?type=vm`, {
+            method: 'GET',
+            headers: { 'Authorization': req.proxmoxAuth },
+            sslFingerprint: proxmoxConn.ssl_fingerprint,
+          });
+          if (resInfo.ok) {
+            const jsonInfo = await resInfo.json();
+            const match = (jsonInfo.data || []).find((v: any) => Number(v.vmid) === Number(vmid));
+            if (match && match.node) node = match.node;
+          }
+        } catch (_e) {}
+        if (!node || /pve-votion-cluster/i.test(node)) node = 'info';
+      }
+      if (!node) node = 'info';
       const vncport = url.searchParams.get('port');
       const ticket = url.searchParams.get('ticket');
       const type = url.searchParams.get('type') || 'qemu';
@@ -249,7 +285,7 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         };
         try {
           upstream = new WebSocket(`wss://${cleanHost}:${pvePort}${upstreamPath}`, {
-            ...createProxmoxWebSocketTlsOptions(cachedConn.ssl_fingerprint),
+            ...createProxmoxWebSocketTlsOptions(proxmoxConn.ssl_fingerprint),
             headers: { Authorization: req.proxmoxAuth }
           });
         } catch (e) {
@@ -286,6 +322,12 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
       socket.destroy();
     }
   } else if (req.url?.startsWith('/novnc') || req.url?.startsWith('/api2') || req.url?.startsWith('/pve2') || req.url?.startsWith('/proxmox-console')) {
+    const proxyConnections = await dbService.getProxmoxConnections();
+    if (proxyConnections.length !== 1) {
+      socket.destroy();
+      return;
+    }
+    cachedConn = proxyConnections[0];
     proxmoxProxy.upgrade(req, socket, head);
   } else {
     console.log('[HTTP SERVER] Upgrade request did not match any proxy rules. Dropping.');
