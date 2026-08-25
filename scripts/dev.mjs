@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import process from 'node:process';
 
 const bin = name => process.platform === 'win32'
-  ? `node_modules/.bin/${name}.cmd`
+  ? `.\\node_modules\\.bin\\${name}.cmd`
   : `node_modules/.bin/${name}`;
 
 const children = [
