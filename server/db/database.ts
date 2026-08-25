@@ -2691,9 +2691,17 @@ export class DatabaseService {
     return res.rows[0] || null;
   }
 
-  async getVmBillingProfiles(vmid?: number) {
+  async getVmBillingProfiles(vmid?: number, ownerEmail?: string) {
     const params: any[] = [];
-    if (vmid !== undefined) { params.push(vmid); }
+    const conditions = ["v.owner_email NOT LIKE 'unassigned@%'"];
+    if (vmid !== undefined) {
+      params.push(vmid);
+      conditions.push(`v.vmid = $${params.length}`);
+    }
+    if (ownerEmail) {
+      params.push(ownerEmail.toLowerCase().trim());
+      conditions.push(`v.owner_email = $${params.length}`);
+    }
     const res = await pgPool.query(
       `SELECT v.vmid, v.vm_name, v.owner_email, v.expiry_date,
               p.plan_id, p.custom_monthly_price_cents, p.billing_status,
@@ -2704,8 +2712,7 @@ export class DatabaseService {
        FROM vms v
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
        LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
-       WHERE v.owner_email NOT LIKE 'unassigned@%'
-       ${vmid !== undefined ? 'AND v.vmid = $1' : ''}
+       WHERE ${conditions.join(' AND ')}
        ORDER BY v.vmid ASC`,
       params
     );

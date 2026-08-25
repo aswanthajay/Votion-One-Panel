@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan } from '../services/apiClient';
+import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan, ApiVmBillingProfile } from '../services/apiClient';
 
 /*
   OVERVIEW — v3 (editorial Carta Ink redesign)
@@ -145,6 +145,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
   const [billingSummary, setBillingSummary] = useState<ApiBillingSummary | null>(null);
   const [billingInvoices, setBillingInvoices] = useState<ApiBillingInvoice[]>([]);
   const [billingPlans, setBillingPlans] = useState<ApiPricingPlan[]>([]);
+  const [billingProfiles, setBillingProfiles] = useState<ApiVmBillingProfile[]>([]);
   const [opsCollapsed, setOpsCollapsed] = useState(false);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -190,11 +191,13 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
       apiClient.getBillingSummary(),
       apiClient.getBillingInvoices(),
       apiClient.getBillingPlans(),
-    ]).then(([summary, invoices, plans]) => {
+      apiClient.getClientVmBillingProfiles(),
+    ]).then(([summary, invoices, plans, profiles]) => {
       if (!mountedRef.current) return;
       setBillingSummary(summary);
       setBillingInvoices(invoices);
       setBillingPlans(plans);
+      setBillingProfiles(profiles);
     }).catch(() => { /* billing state retries on the next refresh cycle */ });
 
     // FLEET STREAM with backoff retry — hard-capped at 12s total so the UI
@@ -293,10 +296,24 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
       const vcpus = v.cpus;
       const ramGb = num(v.maxmem) / GB;
       const diskGb = num(v.disk) / GB;
-      const plan = matchPlan(vcpus, ramGb, diskGb);
-      return { vcpus, ramGb, diskGb, plan };
+      const profile = billingProfiles.find(item => item.vmid === v.vmid) || null;
+      const plan = profile?.planId
+        ? billingPlans.find(item => item.id === profile.planId) || matchPlan(vcpus, ramGb, diskGb)
+        : matchPlan(vcpus, ramGb, diskGb);
+      return { vcpus, ramGb, diskGb, plan, profile };
     });
-    const projectedMonthlyCents = rows.reduce((sum, row) => sum + Number(row.plan?.monthlyPriceCents || 0), 0);
+    const effectivePrices = rows.filter(row => row.profile).reduce<Record<string, number>>((totals, row) => {
+      const currency = row.profile?.currency || 'INR';
+      totals[currency] = (totals[currency] || 0) + Number(row.profile?.monthlyPriceCents || 0);
+      return totals;
+    }, {});
+    const hasCompleteBillingProfiles = rows.length > 0 && rows.every(row => row.profile !== null);
+    const projectedMonthlyLabel = hasCompleteBillingProfiles
+      ? Object.entries(effectivePrices).map(([currency, cents]) => money(cents, currency)).join(' · ')
+      : 'Billing profile not configured';
+    const projectedMonthlyCents = hasCompleteBillingProfiles
+      ? Object.values(effectivePrices).reduce((sum, cents) => sum + cents, 0)
+      : 0;
     const ceilings = rows.reduce((acc, row) => ({
       vcpus: acc.vcpus + Number(row.plan?.vcpuLimit || 0),
       ramGb: acc.ramGb + Number(row.plan?.ramGb || 0),
@@ -307,13 +324,15 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
     return {
       rows,
       projectedMonthlyCents,
+      projectedMonthlyLabel,
+      hasCompleteBillingProfiles,
       ceilings,
       nextPayment: nextInvoice ? new Date(nextInvoice.dueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase() : '—',
       outstandingCents: billingSummary?.outstandingCents || 0,
       overdueCount: billingSummary?.overdueCount || 0,
       overdueCents: billingSummary?.overdueCents || 0,
     };
-  }, [vms, billingPlans, billingInvoices, billingSummary]);
+  }, [vms, billingPlans, billingProfiles, billingInvoices, billingSummary]);
 
   // Aggregated fleet resources — use the GREATER of the live allocation and the
   // DB quota as each VM's effective capacity, so stale DB defaults (8 GB / 64 GB)
@@ -628,7 +647,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                   </div>
                   <div className="flex justify-between items-center text-xs font-mono mb-2.5">
                     <span className="text-[#656b6b]">Projected monthly</span>
-                    <span className="text-[#1a1a1a] font-semibold">{billingPlans.length ? money(billing.projectedMonthlyCents) : 'Not configured'}</span>
+                    <span className="text-[#1a1a1a] font-semibold">{billing.hasCompleteBillingProfiles ? billing.projectedMonthlyLabel : 'Not configured'}</span>
                   </div>
                   <div className="flex justify-between items-center text-xs font-mono mb-2.5">
                     <span className="text-[#656b6b]">Outstanding balance</span>

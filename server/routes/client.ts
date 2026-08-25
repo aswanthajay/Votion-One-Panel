@@ -115,6 +115,19 @@ clientRouter.get('/vms', async (req, res) => {
   res.json({ success: true, count: vms.length, data: vms });
 });
 
+// Read-only client billing profile view. Effective assigned prices are returned
+// without exposing catalog-wide assignments or administrator-only costs.
+clientRouter.get('/billing/vm-profiles', async (req, res) => {
+  const userEmail = (req as any).authUser?.email;
+  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  try {
+    const data = await dbService.getVmBillingProfiles(undefined, userEmail);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Unable to load billing profile', data: [] });
+  }
+});
+
 // 1.5. GET /api/client/vms/:vmid/metadata — Fetch sanitized Cloud-Init and Proxmox VM details
 clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
   const vm = (req as any).authorizedVm;

@@ -666,6 +666,12 @@ class ApiClient {
     return await res.json();
   }
 
+  async getClientVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/billing/vm-profiles`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load your billing profile.');
+    return data.data || [];
+  }
+
   async getBillingPlans(): Promise<ApiPricingPlan[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/billing/plans`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load pricing plans.');
