@@ -2740,12 +2740,17 @@ export class DatabaseService {
     const sharedCosts = await pgPool.query("SELECT currency, COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true GROUP BY currency");
     const serverCosts = await this.getBillingServerCosts(true);
     const mappedServerCosts = serverCosts.filter(item => item.proxmoxConnectionId);
+    const serverProfitability = accountEmail ? [] : await this.getBillingServerProfitability();
     const row = invoice.rows[0];
     const billed = Number(row.billed_cents);
     const collected = Number(row.collected_cents);
     const monthlyCost = Number(sharedCosts.rows.reduce((sum, item) => sum + (item.currency === 'INR' ? Number(item.monthly_cost_cents) : 0), 0));
-    const monthlyServerCostPaise = mappedServerCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
-    const monthlyIpCostPaise = mappedServerCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
+    const monthlyServerCostPaise = serverProfitability.length > 0
+      ? serverProfitability.reduce((sum, item) => sum + item.serverCostPaise, 0)
+      : mappedServerCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
+    const monthlyIpCostPaise = serverProfitability.length > 0
+      ? serverProfitability.reduce((sum, item) => sum + item.ipCostPaise, 0)
+      : mappedServerCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
     const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
     const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
     const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
