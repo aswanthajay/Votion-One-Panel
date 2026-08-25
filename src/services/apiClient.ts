@@ -690,6 +690,12 @@ class ApiClient {
     return data.data || [];
   }
 
+  async deleteBillingServerCost(id: string): Promise<{ id: string; name: string; nodeName: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to delete dedicated-server cost.');
+    return data.data;
+  }
+
   async getVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/billing/vm-profiles`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load VM billing profiles.');

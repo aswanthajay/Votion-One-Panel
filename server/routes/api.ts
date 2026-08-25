@@ -1575,6 +1575,18 @@ apiRouter.post('/billing/server-costs', async (req, res) => {
   }
 });
 
+apiRouter.delete('/billing/server-costs/:id', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.deleteBillingServerCost(req.params.id);
+    if (!data) return res.status(404).json({ success: false, error: 'Dedicated-server cost profile not found.' });
+    await dbService.logAudit(billingActor(req), 'DELETE_BILLING_SERVER_COST', data.id, `Deleted cost profile ${data.name} for node ${data.node_name}`);
+    res.json({ success: true, data: { id: data.id, name: data.name, nodeName: data.node_name } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 apiRouter.get('/billing/vm-profiles', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
   try {

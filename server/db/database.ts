@@ -2531,6 +2531,11 @@ export class DatabaseService {
     return profiles.find(item => item.id === res.rows[0].id) || null;
   }
 
+  async deleteBillingServerCost(id: string) {
+    const res = await pgPool.query('DELETE FROM billing_server_costs WHERE id = $1 RETURNING id, name, node_name', [String(id || '').trim()]);
+    return res.rows[0] || null;
+  }
+
   async getVmBillingProfiles(vmid?: number) {
     const params: any[] = [];
     if (vmid !== undefined) { params.push(vmid); }
