@@ -2557,17 +2557,23 @@ export class DatabaseService {
                COALESCE(SUM(GREATEST(i.total_cents - i.paid_cents, 0)) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS outstanding_paise
         FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid
         GROUP BY v.proxmox_connection_id`),
-      pgPool.query(`SELECT v.proxmox_connection_id,
-               COALESCE(pl.currency, (SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') AS currency,
+      pgPool.query(`WITH billing_currency AS (
+          SELECT COALESCE(MAX(setting_value->>'currency'), 'INR') AS currency
+          FROM system_settings
+          WHERE setting_key = 'billing_config'
+        )
+        SELECT v.proxmox_connection_id,
+               COALESCE(pl.currency, billing_currency.currency) AS currency,
                COUNT(*)::int AS assignment_count,
                COALESCE(SUM(COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents, 0)), 0)::bigint AS projected_revenue_cents
         FROM vms v
         LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
         LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
+        CROSS JOIN billing_currency
         WHERE v.owner_email NOT LIKE '%unassigned@%'
           AND COALESCE(p.billing_status, 'active') NOT IN ('closed', 'waived')
           AND COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents) IS NOT NULL
-        GROUP BY v.proxmox_connection_id, COALESCE(pl.currency, 'USD')`),
+        GROUP BY v.proxmox_connection_id, pl.currency, billing_currency.currency`),
       pgPool.query(`SELECT name, monthly_cost_cents, allocation_method FROM billing_cost_bases WHERE is_active = true AND currency = 'INR'`),
     ]);
     const profileByConnection = new Map(mappedServerCosts.map(profile => [profile.proxmoxConnectionId, profile]));
