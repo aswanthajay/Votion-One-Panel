@@ -446,9 +446,28 @@ class ApiClient {
   }
 
   private async apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const response = await globalThis['fetch'](input, init);
-    this.notifyAuthExpired(response);
-    return response;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const externalSignal = init?.signal;
+    const abortFromCaller = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', abortFromCaller, { once: true });
+    }
+
+    try {
+      const response = await globalThis['fetch'](input, { ...init, signal: controller.signal });
+      this.notifyAuthExpired(response);
+      return response;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('The request timed out. Please try again.');
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', abortFromCaller);
+    }
   }
 
   private async readTicketResponse(response: Response): Promise<any> {

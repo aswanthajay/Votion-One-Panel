@@ -53,6 +53,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const currentUserEmail = localStorage.getItem('votion_user_email') || 'client@votioncloud.org';
 
@@ -66,6 +67,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     try {
       const vms = await apiClient.getClientVMs();
       setClientVMs(vms);
+      setLoadError(null);
       if (vms.length > 0 && !selectedVm) {
         setSelectedVm(vms[0]);
       }
@@ -74,6 +76,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
       setIsLoading(false);
     } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Unable to load assigned instances.');
       setIsLoading(false);
     }
   };
@@ -292,10 +295,10 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
           <h1 style={{ fontSize: '36px', fontFamily: 'var(--ink-font-global-family-prominent)', fontWeight: 400, color: '#1a1a1a' }}>Manage instances</h1>
           <div className="flex gap-8 text-[13px]">
             <div className="flex flex-col items-end">
-              <div className="flex items-center gap-1.5 text-black">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]"></span>
-                Cluster API Connected
-              </div>
+                  <div className="flex items-center gap-1.5 text-black" aria-live="polite">
+                    <span className={`w-1.5 h-1.5 rounded-full ${loadError ? 'bg-[#ef4444]' : 'bg-[#10b981]'}`}></span>
+                    {loadError ? 'Cluster API unavailable' : 'Cluster API Connected'}
+                  </div>
               <a href="#" className="text-[#2563eb] hover:underline" onClick={(e) => { e.preventDefault(); loadClientVMs(); }}>Refresh sync</a>
             </div>
             <div className="flex flex-col items-end">
@@ -408,7 +411,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               ) : displayVMs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-[13px] text-[#656b6b]">
-                    {localFilter === 'lxc'
+                    {loadError ? (
+                      <span className="inline-flex flex-col items-center gap-2">
+                        <span className="font-semibold text-[#8d3028]">Assigned instances could not be loaded</span>
+                        <span>{loadError}</span>
+                        <button type="button" onClick={() => void loadClientVMs()} className="rounded border border-[#1a1a1a] px-3 py-1.5 text-[11px] font-semibold text-[#1a1a1a] hover:bg-[#f4f5f5]">Retry</button>
+                      </span>
+                    ) : localFilter === 'lxc'
                       ? 'No assigned LXC containers found'
                       : searchQuery.trim()
                         ? 'No instances match the current search'
