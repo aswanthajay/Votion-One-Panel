@@ -2451,12 +2451,13 @@ export class DatabaseService {
   async getBillingServerProfitability() {
     const serverCosts = await this.getBillingServerCosts(true);
     const [resources, revenue, sharedCosts] = await Promise.all([
-      pgPool.query(`SELECT node,
-               COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
-               COALESCE(SUM(cpus) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_vcpu,
-               COALESCE(SUM(COALESCE(maxmem, memory, ram_mb * 1048576, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_ram_bytes,
-               COALESCE(SUM(COALESCE(maxdisk, disk, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_disk_bytes
-        FROM vms GROUP BY node`),
+      pgPool.query(`SELECT v.node,
+               COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
+               COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count,
+               COALESCE(SUM(v.cpus) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_vcpu,
+               COALESCE(SUM(COALESCE(v.maxmem, v.memory, v.ram_mb * 1048576, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_ram_bytes,
+               COALESCE(SUM(COALESCE(v.maxdisk, v.disk, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_disk_bytes
+        FROM vms v LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid GROUP BY v.node`),
       pgPool.query(`SELECT v.node,
                COUNT(i.id) FILTER (WHERE i.currency = 'INR')::int AS invoice_count,
                COALESCE(SUM(i.total_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS billed_paise,
@@ -2475,6 +2476,7 @@ export class DatabaseService {
       const resource = resourcesByNode.get(nodeName) || {};
       const nodeRevenue = revenueByNode.get(nodeName) || {};
       const runningVmCount = Number(resource.running_vm_count || 0);
+      const runningIpCount = Number(resource.running_ip_count || 0);
       const runningVcpu = Number(resource.running_vcpu || 0);
       const runningRamGb = Number(resource.running_ram_bytes || 0) / 1073741824;
       const runningDiskGb = Number(resource.running_disk_bytes || 0) / 1073741824;
@@ -2487,7 +2489,6 @@ export class DatabaseService {
         return sum + amount / configuredServerCount;
       }, 0);
       const serverCostPaise = Number(profile?.monthlyCostPaise || 0);
-      const runningIpCount = Number(profile?.runningIpCount || 0);
       const assignedIpCount = Number(profile?.assignedIpCount || 0);
       const includedIpCount = Number(profile?.includedIpCount || 0);
       const billableIpCount = Math.max(0, runningIpCount - includedIpCount);
@@ -2638,7 +2639,8 @@ export class DatabaseService {
     const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
     const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
     const totalRunningServerVms = Number(runningVms.rows[0]?.running_vm_count || 0);
-    const totalRunningIpCount = serverCosts.reduce((sum, item) => sum + item.runningIpCount, 0);
+    const runningIpTotals = await pgPool.query(`SELECT COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count FROM vms v LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid`);
+    const totalRunningIpCount = Number(runningIpTotals.rows[0]?.running_ip_count || 0);
     const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
     const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
     return {
