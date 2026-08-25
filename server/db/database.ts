@@ -2539,7 +2539,7 @@ export class DatabaseService {
   async getBillingServerProfitability() {
     const serverCosts = await this.getBillingServerCosts(true);
     const mappedServerCosts = serverCosts.filter(profile => profile.proxmoxConnectionId);
-    const [resources, revenue, sharedCosts] = await Promise.all([
+    const [resources, revenue, projectedRevenue, sharedCosts] = await Promise.all([
       pgPool.query(`SELECT v.proxmox_connection_id, pc.name AS connection_name,
                STRING_AGG(DISTINCT v.node, ', ' ORDER BY v.node) AS raw_node_name,
                COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
@@ -2557,9 +2557,28 @@ export class DatabaseService {
                COALESCE(SUM(GREATEST(i.total_cents - i.paid_cents, 0)) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS outstanding_paise
         FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid
         GROUP BY v.proxmox_connection_id`),
+      pgPool.query(`SELECT v.proxmox_connection_id,
+               COALESCE(pl.currency, 'USD') AS currency,
+               COUNT(*)::int AS assignment_count,
+               COALESCE(SUM(COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents, 0)), 0)::bigint AS projected_revenue_cents
+        FROM vms v
+        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+        LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
+        WHERE v.owner_email NOT LIKE '%unassigned@%'
+          AND COALESCE(p.billing_status, 'active') NOT IN ('closed', 'waived')
+          AND COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents) IS NOT NULL
+        GROUP BY v.proxmox_connection_id, COALESCE(pl.currency, 'USD')`),
       pgPool.query(`SELECT name, monthly_cost_cents, allocation_method FROM billing_cost_bases WHERE is_active = true AND currency = 'INR'`),
     ]);
     const profileByConnection = new Map(mappedServerCosts.map(profile => [profile.proxmoxConnectionId, profile]));
+    const projectedRevenueByConnection = new Map<string, Record<string, { cents: number; assignmentCount: number }>>();
+    for (const row of projectedRevenue.rows) {
+      if (!row.proxmox_connection_id) continue;
+      const currency = String(row.currency || 'USD');
+      const byCurrency = projectedRevenueByConnection.get(row.proxmox_connection_id) || {};
+      byCurrency[currency] = { cents: Number(row.projected_revenue_cents || 0), assignmentCount: Number(row.assignment_count || 0) };
+      projectedRevenueByConnection.set(row.proxmox_connection_id, byCurrency);
+    }
     const resourcesByConnection = new Map(resources.rows.filter(row => row.proxmox_connection_id).map(row => [row.proxmox_connection_id, row]));
     const revenueByConnection = new Map(revenue.rows.filter(row => row.proxmox_connection_id).map(row => [row.proxmox_connection_id, row]));
     const connectionIds = Array.from(new Set([...mappedServerCosts.map(profile => profile.proxmoxConnectionId!), ...resources.rows.filter(row => row.proxmox_connection_id).map(row => row.proxmox_connection_id), ...revenue.rows.filter(row => row.proxmox_connection_id).map(row => row.proxmox_connection_id)])).sort();
@@ -2568,6 +2587,9 @@ export class DatabaseService {
       const profile = profileByConnection.get(proxmoxConnectionId);
       const resource = resourcesByConnection.get(proxmoxConnectionId) || {};
       const nodeRevenue = revenueByConnection.get(proxmoxConnectionId) || {};
+      const projectedNodeRevenue = projectedRevenueByConnection.get(proxmoxConnectionId) || {};
+      const projectedRevenueByCurrency = Object.fromEntries(Object.entries(projectedNodeRevenue).map(([currency, value]) => [currency, { cents: value.cents, assignmentCount: value.assignmentCount }]));
+      const projectedRevenuePaise = Number(projectedNodeRevenue.INR?.cents || 0);
       const runningVmCount = Number(resource.running_vm_count || 0);
       const runningIpCount = Number(resource.running_ip_count || 0);
       const runningVcpu = Number(resource.running_vcpu || 0);
@@ -2590,6 +2612,7 @@ export class DatabaseService {
       const outstandingPaise = Number(nodeRevenue.outstanding_paise || 0);
       const totalCostPaise = Math.round(serverCostPaise + ipCostPaise + sharedCostPaise);
       const grossProfitPaise = billedPaise - totalCostPaise;
+      const projectedGrossProfitPaise = projectedRevenuePaise - totalCostPaise;
       const plannedVmCapacity = Number(profile?.plannedVmCapacity || 0);
       return {
         serverId: profile?.id || `connection:${proxmoxConnectionId}`,
@@ -2600,7 +2623,7 @@ export class DatabaseService {
         connectionName: resource.connection_name || profile?.connectionName || null,
         legacyNeedsAssignment: false,
         hasCostProfile: Boolean(profile),
-        invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise,
+        invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise, projectedRevenuePaise, projectedGrossProfitPaise, projectedRevenueByCurrency,
         serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
         marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
         runningVmCount, assignedVmCount: Number(profile?.assignedVmCount || 0), plannedVmCapacity, availableVmCapacity: Math.max(0, plannedVmCapacity - runningVmCount),
@@ -2611,10 +2634,10 @@ export class DatabaseService {
     const legacyRows = serverCosts.filter(profile => profile.legacyNeedsAssignment).map(profile => ({
       serverId: profile.id, serverName: profile.name, nodeName: profile.rawNodeName, rawNodeName: profile.rawNodeName,
       proxmoxConnectionId: null, connectionName: null, legacyNeedsAssignment: true, hasCostProfile: false,
-      invoiceCount: 0, billedPaise: 0, collectedPaise: 0, outstandingPaise: 0, serverCostPaise: 0, ipCostPaise: 0,
+      invoiceCount: 0, billedPaise: 0, collectedPaise: 0, outstandingPaise: 0, projectedRevenuePaise: 0, projectedGrossProfitPaise: 0, serverCostPaise: 0, ipCostPaise: 0,
       sharedCostPaise: 0, totalCostPaise: 0, grossProfitPaise: 0, marginPercent: 0, runningVmCount: 0, assignedVmCount: 0,
       plannedVmCapacity: profile.plannedVmCapacity, availableVmCapacity: profile.plannedVmCapacity, runningIpCount: 0,
-      assignedIpCount: 0, includedIpCount: profile.includedIpCount, billableIpCount: 0, breakEvenStatus: 'configure_costs',
+      assignedIpCount: 0, includedIpCount: profile.includedIpCount, billableIpCount: 0, projectedRevenuePaise: 0, projectedGrossProfitPaise: 0, projectedRevenueByCurrency: {}, breakEvenStatus: 'configure_costs',
     }));
     return [...rows, ...legacyRows];
   }
@@ -2752,6 +2775,15 @@ export class DatabaseService {
       ? serverProfitability.reduce((sum, item) => sum + item.ipCostPaise, 0)
       : mappedServerCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
     const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
+    const projectedRevenueByCurrency: Record<string, { cents: number; assignmentCount: number }> = {};
+    for (const item of serverProfitability) {
+      for (const [currency, value] of Object.entries(item.projectedRevenueByCurrency || {})) {
+        const current = projectedRevenueByCurrency[currency] || { cents: 0, assignmentCount: 0 };
+        projectedRevenueByCurrency[currency] = { cents: current.cents + Number(value.cents || 0), assignmentCount: current.assignmentCount + Number(value.assignmentCount || 0) };
+      }
+    }
+    const projectedInrRevenuePaise = Number(projectedRevenueByCurrency.INR?.cents || 0);
+    const projectedInrGrossProfitPaise = projectedInrRevenuePaise - totalInrCostPaise;
     const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
     const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
     const inrCollectedPaise = Number(inrRevenue?.collected_cents || 0);
@@ -2768,7 +2800,7 @@ export class DatabaseService {
     return {
       invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
       estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
-      reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
+      reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, projectedInrRevenuePaise, projectedInrGrossProfitPaise, projectedRevenueByCurrency, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
       totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, unmappedServerCostProfileCount: serverCosts.filter(item => item.legacyNeedsAssignment).length, billableIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), billableRunningIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
     };
   }

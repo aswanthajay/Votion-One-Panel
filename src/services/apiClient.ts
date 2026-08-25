@@ -220,6 +220,9 @@ export interface ApiBillingSummary {
   inrOutstandingPaise: number;
   inrGrossProfitPaise: number;
   inrCollectedGrossProfitPaise: number;
+  projectedInrRevenuePaise: number;
+  projectedInrGrossProfitPaise: number;
+  projectedRevenueByCurrency: Record<string, { cents: number; assignmentCount: number }>;
   monthlySharedCostPaise: number;
   monthlyServerCostPaise: number;
   monthlyIpCostPaise: number;
@@ -305,6 +308,9 @@ export interface ApiBillingServerProfitability {
   billedPaise: number;
   collectedPaise: number;
   outstandingPaise: number;
+  projectedRevenuePaise: number;
+  projectedGrossProfitPaise: number;
+  projectedRevenueByCurrency: Record<string, { cents: number; assignmentCount: number }>;
   serverCostPaise: number;
   ipCostPaise: number;
   sharedCostPaise: number;
