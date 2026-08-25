@@ -53,6 +53,8 @@ export interface ApiVM {
   name: string;
   type: 'qemu' | 'lxc';
   node: string;
+  proxmoxConnectionId?: string | null;
+  proxmoxConnectionName?: string | null;
   ownerEmail: string;
   status: 'running' | 'stopped' | 'paused';
   cpus: number;
@@ -222,6 +224,7 @@ export interface ApiBillingSummary {
   monthlyServerCostPaise: number;
   monthlyIpCostPaise: number;
   totalInrCostPaise: number;
+  unmappedServerCostProfileCount?: number;
   totalServerCapacityVms: number;
   totalAssignedServerVms: number;
   totalRunningServerVms: number;
@@ -273,7 +276,11 @@ export interface ApiBillingCostBase {
 export interface ApiBillingServerCost {
   id: string;
   name: string;
-  nodeName: string;
+  nodeName: string | null;
+  rawNodeName: string | null;
+  proxmoxConnectionId: string | null;
+  connectionName: string | null;
+  legacyNeedsAssignment: boolean;
   monthlyCostPaise: number;
   ipCostPaise: number;
   plannedVmCapacity: number;
@@ -288,7 +295,11 @@ export interface ApiBillingServerCost {
 export interface ApiBillingServerProfitability {
   serverId: string;
   serverName: string;
-  nodeName: string;
+  nodeName: string | null;
+  rawNodeName: string | null;
+  proxmoxConnectionId: string | null;
+  connectionName: string | null;
+  legacyNeedsAssignment: boolean;
   hasCostProfile: boolean;
   invoiceCount: number;
   billedPaise: number;
@@ -309,6 +320,18 @@ export interface ApiBillingServerProfitability {
   includedIpCount: number;
   billableIpCount: number;
   breakEvenStatus: 'configure_costs' | 'no_revenue' | 'profitable' | 'loss' | string;
+}
+
+export interface ApiProxmoxVmIdentityConflict {
+  vmid: number;
+  existingConnectionId: string;
+  existingConnectionName: string | null;
+  incomingConnectionId: string;
+  incomingConnectionName: string | null;
+  existingVmName: string | null;
+  incomingVmName: string | null;
+  rawNodeName: string | null;
+  detectedAt: string;
 }
 
 export interface ApiBillingSuspensionAction {
@@ -1165,6 +1188,12 @@ class ApiClient {
   // ==========================================
   // CLUSTER CONNECTIONS MANAGER
   // ==========================================
+  async getProxmoxVmIdentityConflicts(): Promise<ApiProxmoxVmIdentityConflict[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/vm-identity-conflicts`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load VM identity diagnostics.');
+    return data.data || [];
+  }
+
   async getProxmoxConnections(): Promise<ApiProxmoxConnection[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
     let payload: unknown;

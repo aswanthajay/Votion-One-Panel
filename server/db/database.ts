@@ -95,6 +95,7 @@ export async function initializeDatabaseSchema() {
         vmid INT PRIMARY KEY,
         user_id INT REFERENCES accounts(id) ON DELETE SET NULL,
         node_id VARCHAR(50),
+        proxmox_connection_id VARCHAR(50) REFERENCES proxmox_connections(id) ON DELETE SET NULL,
         vm_name VARCHAR(255) NOT NULL,
         os_type VARCHAR(100) NOT NULL DEFAULT 'Ubuntu 24.04 LTS',
         cpu_cores INT NOT NULL DEFAULT 4,
@@ -115,6 +116,20 @@ export async function initializeDatabaseSchema() {
         ip_address VARCHAR(50),
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS vm_identity_conflicts (
+        vmid INT NOT NULL,
+        existing_proxmox_connection_id VARCHAR(50) NOT NULL,
+        incoming_proxmox_connection_id VARCHAR(50) NOT NULL,
+        existing_vm_name VARCHAR(255),
+        incoming_vm_name VARCHAR(255),
+        raw_node_name VARCHAR(100),
+        detected_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_identity_conflicts_detected
+        ON vm_identity_conflicts (detected_at DESC);
 
       CREATE TABLE IF NOT EXISTS vm_reimage_requests (
         id VARCHAR(100) PRIMARY KEY,
@@ -369,15 +384,15 @@ export async function initializeDatabaseSchema() {
       CREATE TABLE IF NOT EXISTS billing_server_costs (
         id VARCHAR(100) PRIMARY KEY,
         name VARCHAR(150) NOT NULL,
-        node_name VARCHAR(100) NOT NULL,
+        node_name VARCHAR(100),
+        proxmox_connection_id VARCHAR(50) REFERENCES proxmox_connections(id) ON DELETE SET NULL,
         monthly_cost_paise BIGINT NOT NULL DEFAULT 0,
         ip_cost_paise BIGINT NOT NULL DEFAULT 0,
         planned_vm_capacity INT NOT NULL DEFAULT 0,
         included_ip_count INT NOT NULL DEFAULT 0,
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        UNIQUE (node_name)
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
       ALTER TABLE vm_billing_profiles ADD COLUMN IF NOT EXISTS ip_count INT NOT NULL DEFAULT 1;
@@ -500,6 +515,14 @@ export async function initializeDatabaseSchema() {
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS password VARCHAR(255);
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS operator_access BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE billing_cost_bases ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
+      ALTER TABLE vms ADD COLUMN IF NOT EXISTS proxmox_connection_id VARCHAR(50);
+      ALTER TABLE billing_server_costs ADD COLUMN IF NOT EXISTS proxmox_connection_id VARCHAR(50);
+      ALTER TABLE billing_server_costs ALTER COLUMN node_name DROP NOT NULL;
+      ALTER TABLE billing_server_costs DROP CONSTRAINT IF EXISTS billing_server_costs_node_name_key;
+      CREATE INDEX IF NOT EXISTS idx_vms_proxmox_connection_id ON vms (proxmox_connection_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_server_costs_connection_unique
+        ON billing_server_costs (proxmox_connection_id)
+        WHERE proxmox_connection_id IS NOT NULL;
     `);
 
     // Legacy migration: tasks column existed in old static constants — ensure table exists (created above)
@@ -965,13 +988,36 @@ export class DatabaseService {
     }
   }
 
-  async upsertProxmoxVMs(resources: Array<{ vmid: number; node: string; name?: string; status?: string; cpus?: number; maxmem?: number; maxdisk?: number; type?: string }>, defaultOwnerEmail: string) {
-    if (resources.length === 0) return;
+  async upsertProxmoxVMs(resources: Array<{ vmid: number; node: string; name?: string; status?: string; cpus?: number; maxmem?: number; maxdisk?: number; type?: string; proxmoxConnectionId: string }>, defaultOwnerEmail: string) {
+    if (resources.length === 0) return { synchronized: 0, conflicts: 0, synchronizedVmids: [] as number[] };
+    const vmids = resources.map(resource => resource.vmid);
+    const existing = await pgPool.query(
+      'SELECT vmid, proxmox_connection_id, vm_name FROM vms WHERE vmid = ANY($1::int[])',
+      [vmids]
+    );
+    const existingByVmid = new Map(existing.rows.map(row => [Number(row.vmid), row]));
+    const safeResources = resources.filter(resource => {
+      const row = existingByVmid.get(resource.vmid);
+      if (!row?.proxmox_connection_id || row.proxmox_connection_id === resource.proxmoxConnectionId) return true;
+      void pgPool.query(
+        `INSERT INTO vm_identity_conflicts (vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id, existing_vm_name, incoming_vm_name, raw_node_name, detected_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id) DO UPDATE SET
+           existing_vm_name = EXCLUDED.existing_vm_name,
+           incoming_vm_name = EXCLUDED.incoming_vm_name,
+           raw_node_name = EXCLUDED.raw_node_name,
+           detected_at = NOW()`,
+        [resource.vmid, row.proxmox_connection_id, resource.proxmoxConnectionId, row.vm_name, resource.name || `vm-${resource.vmid}`, resource.node]
+      ).catch(error => console.error('[PROXMOX SYNC] Unable to record VM identity conflict:', error?.message || error));
+      return false;
+    });
+    if (safeResources.length === 0) return { synchronized: 0, conflicts: resources.length, synchronizedVmids: [] as number[] };
     await pgPool.query(
-      `INSERT INTO vms (vmid, vm_name, node, status, cpus, maxmem, maxdisk, memory, disk, cpu_cores, ram_mb, disk_gb, owner_email, type)
+      `INSERT INTO vms (vmid, vm_name, node, proxmox_connection_id, status, cpus, maxmem, maxdisk, memory, disk, cpu_cores, ram_mb, disk_gb, owner_email, type)
        SELECT resource.vmid,
               COALESCE(NULLIF(resource.name, ''), 'vm-' || resource.vmid),
               resource.node,
+              resource.proxmox_connection_id,
               COALESCE(NULLIF(resource.status, ''), 'unknown'),
               GREATEST(COALESCE(resource.cpus, 1), 1),
               COALESCE(resource.maxmem, 0),
@@ -984,11 +1030,12 @@ export class DatabaseService {
               $2,
               CASE WHEN resource.type = 'lxc' THEN 'lxc' ELSE 'qemu' END
        FROM jsonb_to_recordset($1::jsonb) AS resource(
-         vmid INT, node TEXT, name TEXT, status TEXT, cpus INT, maxmem BIGINT, maxdisk BIGINT, type TEXT
+         vmid INT, node TEXT, name TEXT, proxmox_connection_id TEXT, status TEXT, cpus INT, maxmem BIGINT, maxdisk BIGINT, type TEXT
        )
        ON CONFLICT (vmid) DO UPDATE SET
          vm_name = EXCLUDED.vm_name,
          node = EXCLUDED.node,
+         proxmox_connection_id = COALESCE(vms.proxmox_connection_id, EXCLUDED.proxmox_connection_id),
          status = CASE
            WHEN vms.status IN ('starting', 'stopping', 'restarting') AND EXCLUDED.status = 'unknown' THEN vms.status
            ELSE EXCLUDED.status
@@ -1001,9 +1048,12 @@ export class DatabaseService {
          cpu_cores = EXCLUDED.cpu_cores,
          ram_mb = EXCLUDED.ram_mb,
          disk_gb = EXCLUDED.disk_gb,
-         type = EXCLUDED.type`,
-      [JSON.stringify(resources), defaultOwnerEmail]
+         type = EXCLUDED.type
+       WHERE vms.proxmox_connection_id IS NULL
+          OR vms.proxmox_connection_id = EXCLUDED.proxmox_connection_id`,
+      [JSON.stringify(safeResources), defaultOwnerEmail]
     );
+    return { synchronized: safeResources.length, conflicts: resources.length - safeResources.length, synchronizedVmids: safeResources.map(resource => resource.vmid) };
   }
 
   async insertVmMetricsBatch(samples: Array<{ vmid: number; cpuPct: number; ramBytes: number; netInBytes: number; netOutBytes: number; diskReadBytes?: number; diskWriteBytes?: number }>) {
@@ -1241,7 +1291,7 @@ export class DatabaseService {
 
   // VMS & EXPIRY SUSPENSION ENGINE
   async getVMs(ownerEmail?: string, vmid?: number) {
-    let query = "SELECT * FROM vms";
+    let query = "SELECT v.*, pc.name AS proxmox_connection_name FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id";
     let params: any[] = [];
     let conditions = [];
     
@@ -1258,7 +1308,7 @@ export class DatabaseService {
     
     const res = await pgPool.query(query, params);
     return res.rows.map(v => ({
-      vmid: v.vmid, name: v.vm_name, type: v.type, node: v.node, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
+      vmid: v.vmid, name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
     }));
   }
 
@@ -2205,6 +2255,35 @@ export class DatabaseService {
     return res.rows;
   }
 
+  async getProxmoxVmIdentityConflicts() {
+    const res = await pgPool.query(
+      `SELECT c.vmid,
+              c.existing_proxmox_connection_id,
+              existing_connection.name AS existing_connection_name,
+              c.incoming_proxmox_connection_id,
+              incoming_connection.name AS incoming_connection_name,
+              c.existing_vm_name,
+              c.incoming_vm_name,
+              c.raw_node_name,
+              c.detected_at
+       FROM vm_identity_conflicts c
+       LEFT JOIN proxmox_connections existing_connection ON existing_connection.id = c.existing_proxmox_connection_id
+       LEFT JOIN proxmox_connections incoming_connection ON incoming_connection.id = c.incoming_proxmox_connection_id
+       ORDER BY c.detected_at DESC`
+    );
+    return res.rows.map(row => ({
+      vmid: Number(row.vmid),
+      existingConnectionId: row.existing_proxmox_connection_id,
+      existingConnectionName: row.existing_connection_name || null,
+      incomingConnectionId: row.incoming_proxmox_connection_id,
+      incomingConnectionName: row.incoming_connection_name || null,
+      existingVmName: row.existing_vm_name || null,
+      incomingVmName: row.incoming_vm_name || null,
+      rawNodeName: row.raw_node_name || null,
+      detectedAt: row.detected_at,
+    }));
+  }
+
   async addProxmoxConnection(name: string, host_ip: string, port: number, username: string, password: string, token_id: string, token_secret: string, ssl_fingerprint: string) {
     const connId = `pve-conn-${Date.now()}`;
     const res = await pgPool.query(
@@ -2418,22 +2497,28 @@ export class DatabaseService {
 
   async getBillingServerCosts(activeOnly = false) {
     const res = await pgPool.query(
-      `SELECT s.*,
+      `SELECT s.*, pc.name AS connection_name,
               COUNT(DISTINCT v.vmid) FILTER (WHERE v.owner_email NOT LIKE 'unassigned@%')::int AS assigned_vm_count,
               COUNT(DISTINCT v.vmid) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
               COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count,
               COALESCE(SUM(CASE WHEN v.owner_email NOT LIKE 'unassigned@%' THEN COALESCE(p.ip_count, 1) ELSE 0 END), 0)::int AS assigned_ip_count
        FROM billing_server_costs s
-       LEFT JOIN vms v ON v.node = s.node_name
+       LEFT JOIN proxmox_connections pc ON pc.id = s.proxmox_connection_id
+       LEFT JOIN vms v ON v.proxmox_connection_id = s.proxmox_connection_id
+         AND (s.node_name IS NULL OR v.node = s.node_name)
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
        ${activeOnly ? 'WHERE s.is_active = true' : ''}
-       GROUP BY s.id
-       ORDER BY s.node_name ASC`
+       GROUP BY s.id, pc.name
+       ORDER BY pc.name ASC NULLS LAST, s.node_name ASC NULLS LAST, s.name ASC`
     );
     return res.rows.map(row => ({
       id: row.id,
       name: row.name,
-      nodeName: row.node_name,
+      nodeName: row.node_name || null,
+      rawNodeName: row.node_name || null,
+      proxmoxConnectionId: row.proxmox_connection_id || null,
+      connectionName: row.connection_name || null,
+      legacyNeedsAssignment: !row.proxmox_connection_id,
       monthlyCostPaise: Number(row.monthly_cost_paise),
       ipCostPaise: Number(row.ip_cost_paise),
       plannedVmCapacity: Number(row.planned_vm_capacity),
@@ -2450,31 +2535,36 @@ export class DatabaseService {
 
   async getBillingServerProfitability() {
     const serverCosts = await this.getBillingServerCosts(true);
+    const mappedServerCosts = serverCosts.filter(profile => profile.proxmoxConnectionId);
     const [resources, revenue, sharedCosts] = await Promise.all([
-      pgPool.query(`SELECT v.node,
+      pgPool.query(`SELECT v.proxmox_connection_id, pc.name AS connection_name,
+               STRING_AGG(DISTINCT v.node, ', ' ORDER BY v.node) AS raw_node_name,
                COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
                COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count,
                COALESCE(SUM(v.cpus) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_vcpu,
                COALESCE(SUM(COALESCE(v.maxmem, v.memory, v.ram_mb * 1048576, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_ram_bytes,
                COALESCE(SUM(COALESCE(v.maxdisk, v.disk, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_disk_bytes
-        FROM vms v LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid GROUP BY v.node`),
-      pgPool.query(`SELECT v.node,
+        FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id
+        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+        GROUP BY v.proxmox_connection_id, pc.name`),
+      pgPool.query(`SELECT v.proxmox_connection_id,
                COUNT(i.id) FILTER (WHERE i.currency = 'INR')::int AS invoice_count,
                COALESCE(SUM(i.total_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS billed_paise,
                COALESCE(SUM(i.paid_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS collected_paise,
                COALESCE(SUM(GREATEST(i.total_cents - i.paid_cents, 0)) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS outstanding_paise
-        FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid GROUP BY v.node`),
+        FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid
+        GROUP BY v.proxmox_connection_id`),
       pgPool.query(`SELECT name, monthly_cost_cents, allocation_method FROM billing_cost_bases WHERE is_active = true AND currency = 'INR'`),
     ]);
-    const profileByNode = new Map(serverCosts.map(profile => [profile.nodeName, profile]));
-    const resourcesByNode = new Map(resources.rows.map(row => [row.node, row]));
-    const revenueByNode = new Map(revenue.rows.map(row => [row.node, row]));
-    const nodeNames = Array.from(new Set([...serverCosts.map(profile => profile.nodeName), ...resources.rows.map(row => row.node), ...revenue.rows.map(row => row.node)])).sort();
-    const configuredServerCount = Math.max(1, serverCosts.length);
-    return nodeNames.map(nodeName => {
-      const profile = profileByNode.get(nodeName);
-      const resource = resourcesByNode.get(nodeName) || {};
-      const nodeRevenue = revenueByNode.get(nodeName) || {};
+    const profileByConnection = new Map(mappedServerCosts.map(profile => [profile.proxmoxConnectionId, profile]));
+    const resourcesByConnection = new Map(resources.rows.filter(row => row.proxmox_connection_id).map(row => [row.proxmox_connection_id, row]));
+    const revenueByConnection = new Map(revenue.rows.filter(row => row.proxmox_connection_id).map(row => [row.proxmox_connection_id, row]));
+    const connectionIds = Array.from(new Set([...mappedServerCosts.map(profile => profile.proxmoxConnectionId!), ...resources.rows.filter(row => row.proxmox_connection_id).map(row => row.proxmox_connection_id), ...revenue.rows.filter(row => row.proxmox_connection_id).map(row => row.proxmox_connection_id)])).sort();
+    const configuredServerCount = Math.max(1, mappedServerCosts.length);
+    const rows = connectionIds.map(proxmoxConnectionId => {
+      const profile = profileByConnection.get(proxmoxConnectionId);
+      const resource = resourcesByConnection.get(proxmoxConnectionId) || {};
+      const nodeRevenue = revenueByConnection.get(proxmoxConnectionId) || {};
       const runningVmCount = Number(resource.running_vm_count || 0);
       const runningIpCount = Number(resource.running_ip_count || 0);
       const runningVcpu = Number(resource.running_vcpu || 0);
@@ -2489,7 +2579,6 @@ export class DatabaseService {
         return sum + amount / configuredServerCount;
       }, 0);
       const serverCostPaise = Number(profile?.monthlyCostPaise || 0);
-      const assignedIpCount = Number(profile?.assignedIpCount || 0);
       const includedIpCount = Number(profile?.includedIpCount || 0);
       const billableIpCount = Math.max(0, runningIpCount - includedIpCount);
       const ipCostPaise = billableIpCount * Number(profile?.ipCostPaise || 0);
@@ -2500,32 +2589,51 @@ export class DatabaseService {
       const grossProfitPaise = billedPaise - totalCostPaise;
       const plannedVmCapacity = Number(profile?.plannedVmCapacity || 0);
       return {
-        serverId: profile?.id || `node:${nodeName}`, serverName: profile?.name || `Unconfigured node`, nodeName, hasCostProfile: Boolean(profile),
+        serverId: profile?.id || `connection:${proxmoxConnectionId}`,
+        serverName: profile?.name || resource.connection_name || `Unconfigured connection`,
+        nodeName: resource.raw_node_name || profile?.rawNodeName || null,
+        rawNodeName: resource.raw_node_name || profile?.rawNodeName || null,
+        proxmoxConnectionId,
+        connectionName: resource.connection_name || profile?.connectionName || null,
+        legacyNeedsAssignment: false,
+        hasCostProfile: Boolean(profile),
         invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise,
         serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
         marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
         runningVmCount, assignedVmCount: Number(profile?.assignedVmCount || 0), plannedVmCapacity, availableVmCapacity: Math.max(0, plannedVmCapacity - runningVmCount),
-        runningIpCount, assignedIpCount, includedIpCount, billableIpCount,
+        runningIpCount, assignedIpCount: Number(profile?.assignedIpCount || 0), includedIpCount, billableIpCount,
         breakEvenStatus: !profile ? 'configure_costs' : billedPaise <= 0 ? 'no_revenue' : grossProfitPaise >= 0 ? 'profitable' : 'loss',
       };
     });
+    const legacyRows = serverCosts.filter(profile => profile.legacyNeedsAssignment).map(profile => ({
+      serverId: profile.id, serverName: profile.name, nodeName: profile.rawNodeName, rawNodeName: profile.rawNodeName,
+      proxmoxConnectionId: null, connectionName: null, legacyNeedsAssignment: true, hasCostProfile: false,
+      invoiceCount: 0, billedPaise: 0, collectedPaise: 0, outstandingPaise: 0, serverCostPaise: 0, ipCostPaise: 0,
+      sharedCostPaise: 0, totalCostPaise: 0, grossProfitPaise: 0, marginPercent: 0, runningVmCount: 0, assignedVmCount: 0,
+      plannedVmCapacity: profile.plannedVmCapacity, availableVmCapacity: profile.plannedVmCapacity, runningIpCount: 0,
+      assignedIpCount: 0, includedIpCount: profile.includedIpCount, billableIpCount: 0, breakEvenStatus: 'configure_costs',
+    }));
+    return [...rows, ...legacyRows];
   }
 
   async upsertBillingServerCost(cost: any) {
     const id = String(cost.id || `server-cost-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`).trim().toLowerCase();
     const name = String(cost.name || '').trim().slice(0, 150);
-    const nodeName = String(cost.nodeName || '').trim().slice(0, 100);
+    const nodeName = String(cost.nodeName || '').trim().slice(0, 100) || null;
+    const proxmoxConnectionId = String(cost.proxmoxConnectionId || '').trim() || null;
     const monthlyCostPaise = Math.round(Number(cost.monthlyCostPaise));
     const ipCostPaise = Math.round(Number(cost.ipCostPaise));
     const plannedVmCapacity = Math.max(0, Math.round(Number(cost.plannedVmCapacity) || 0));
     const includedIpCount = Math.max(0, Math.round(Number(cost.includedIpCount) || 0));
-    if (!id || !name || !nodeName || !Number.isInteger(monthlyCostPaise) || monthlyCostPaise < 0 || !Number.isInteger(ipCostPaise) || ipCostPaise < 0) throw new Error('Dedicated server cost values are invalid.');
+    if (!id || !name || !proxmoxConnectionId || !Number.isInteger(monthlyCostPaise) || monthlyCostPaise < 0 || !Number.isInteger(ipCostPaise) || ipCostPaise < 0) throw new Error('Dedicated server cost values are invalid. Select a Proxmox connection before saving.');
+    const connection = await pgPool.query('SELECT id FROM proxmox_connections WHERE id = $1', [proxmoxConnectionId]);
+    if (!connection.rows[0]) throw new Error('Selected Proxmox connection was not found.');
     const res = await pgPool.query(
-      `INSERT INTO billing_server_costs (id, name, node_name, monthly_cost_paise, ip_cost_paise, planned_vm_capacity, included_ip_count, is_active, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-       ON CONFLICT (id) DO UPDATE SET name = $2, node_name = $3, monthly_cost_paise = $4, ip_cost_paise = $5, planned_vm_capacity = $6, included_ip_count = $7, is_active = $8, updated_at = NOW()
+      `INSERT INTO billing_server_costs (id, name, node_name, proxmox_connection_id, monthly_cost_paise, ip_cost_paise, planned_vm_capacity, included_ip_count, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+       ON CONFLICT (id) DO UPDATE SET name = $2, node_name = $3, proxmox_connection_id = $4, monthly_cost_paise = $5, ip_cost_paise = $6, planned_vm_capacity = $7, included_ip_count = $8, is_active = $9, updated_at = NOW()
        RETURNING *`,
-      [id, name, nodeName, monthlyCostPaise, ipCostPaise, plannedVmCapacity, includedIpCount, cost.isActive !== false]
+      [id, name, nodeName, proxmoxConnectionId, monthlyCostPaise, ipCostPaise, plannedVmCapacity, includedIpCount, cost.isActive !== false]
     );
     const profiles = await this.getBillingServerCosts();
     return profiles.find(item => item.id === res.rows[0].id) || null;
@@ -2628,12 +2736,13 @@ export class DatabaseService {
     const runningVms = await pgPool.query(`SELECT COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count FROM vms ${runningVmWhere}`, params);
     const sharedCosts = await pgPool.query("SELECT currency, COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true GROUP BY currency");
     const serverCosts = await this.getBillingServerCosts(true);
+    const mappedServerCosts = serverCosts.filter(item => item.proxmoxConnectionId);
     const row = invoice.rows[0];
     const billed = Number(row.billed_cents);
     const collected = Number(row.collected_cents);
     const monthlyCost = Number(sharedCosts.rows.reduce((sum, item) => sum + (item.currency === 'INR' ? Number(item.monthly_cost_cents) : 0), 0));
-    const monthlyServerCostPaise = serverCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
-    const monthlyIpCostPaise = serverCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
+    const monthlyServerCostPaise = mappedServerCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
+    const monthlyIpCostPaise = mappedServerCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
     const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
     const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
     const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
@@ -2641,18 +2750,18 @@ export class DatabaseService {
     const inrOutstandingPaise = Number(inrRevenue?.outstanding_cents || 0);
     const inrGrossProfitPaise = inrBilledPaise - totalInrCostPaise;
     const inrCollectedGrossProfitPaise = inrCollectedPaise - totalInrCostPaise;
-    const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
-    const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
+    const totalServerCapacityVms = mappedServerCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
+    const totalAssignedServerVms = mappedServerCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
     const totalRunningServerVms = Number(runningVms.rows[0]?.running_vm_count || 0);
     const runningIpTotals = await pgPool.query(`SELECT COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count FROM vms v LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid`);
     const totalRunningIpCount = Number(runningIpTotals.rows[0]?.running_ip_count || 0);
-    const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
-    const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
+    const totalAssignedIpCount = mappedServerCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
+    const totalIncludedIpCount = mappedServerCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
     return {
       invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
       estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
       reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
-      totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), billableRunningIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
+      totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, unmappedServerCostProfileCount: serverCosts.filter(item => item.legacyNeedsAssignment).length, billableIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), billableRunningIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
     };
   }
 

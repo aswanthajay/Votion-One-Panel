@@ -1754,11 +1754,20 @@ apiRouter.get('/admin/proxmox', async (req, res) => {
       await pool.query('ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()').catch(() => {});
       pool.end();
     });
-    const connections = await dbService.getProxmoxConnections();
+  const connections = await dbService.getProxmoxConnections();
     res.json(connections);
   } catch (err: any) {
     console.error('[PROXMOX GET] Error:', err.message);
     res.json([]);
+  }
+});
+
+apiRouter.get('/admin/proxmox/vm-identity-conflicts', async (_req, res) => {
+  try {
+    const conflicts = await dbService.getProxmoxVmIdentityConflicts();
+    res.json({ success: true, count: conflicts.length, data: conflicts });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
   }
 });
 

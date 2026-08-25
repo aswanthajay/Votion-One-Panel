@@ -29,6 +29,7 @@ export type ProxmoxVmResource = {
   diskread?: number;
   diskwrite?: number;
   uptime?: number;
+  proxmoxConnectionId: string;
 };
 
 export class ProxmoxSyncWorker {
@@ -103,12 +104,14 @@ export class ProxmoxSyncWorker {
         maxmem: Number(resource.maxmem || 0),
         maxdisk: Number(resource.maxdisk || 0),
         type: resource.type === 'lxc' ? 'lxc' : 'qemu',
+        proxmoxConnectionId: connection.id,
       }));
 
     if (resources.length === 0) return;
 
-    await dbService.upsertProxmoxVMs(resources, DEFAULT_OWNER_EMAIL);
-    await dbService.insertVmMetricsBatch(resources.map(resource => ({
+    const syncResult = await dbService.upsertProxmoxVMs(resources, DEFAULT_OWNER_EMAIL);
+    const synchronizedVmids = new Set(syncResult.synchronizedVmids);
+    await dbService.insertVmMetricsBatch(resources.filter(resource => synchronizedVmids.has(resource.vmid)).map(resource => ({
       vmid: resource.vmid,
       cpuPct: Number(resource.cpu || 0) * 100,
       ramBytes: Number(resource.mem || 0),
