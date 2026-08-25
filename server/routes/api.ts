@@ -1458,7 +1458,7 @@ apiRouter.get('/billing/summary', async (req, res) => {
   try {
     const data = await dbService.getBillingSummary(isBillingAdmin(req) ? undefined : billingActor(req));
     if (!isBillingAdmin(req)) {
-      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise, totalServerCapacityVms, totalAssignedServerVms, availableServerCapacityVms, totalAssignedIpCount, totalIncludedIpCount, billableIpCount, revenueByCurrency, ...clientData } = data;
+      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise, totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms, totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, billableIpCount, billableRunningIpCount, revenueByCurrency, ...clientData } = data;
       res.json({ success: true, data: clientData });
       return;
     }
