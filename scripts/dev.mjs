@@ -8,10 +8,12 @@ const bin = name => process.platform === 'win32'
 const children = [
   spawn(bin('tsx'), ['server/index.ts'], {
     stdio: 'inherit',
+    shell: process.platform === 'win32',
     env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },
   }),
   spawn(bin('vite'), ['--host', '0.0.0.0'], {
     stdio: 'inherit',
+    shell: process.platform === 'win32',
     env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },
   }),
 ];
