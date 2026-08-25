@@ -180,6 +180,13 @@ const AppShell: React.FC = () => {
   const activeRole: UserRole = roleQuery === 'admin' || roleQuery === 'client' ? roleQuery : userRole;
 
   useEffect(() => {
+    if (roleQuery === 'admin' || roleQuery === 'client') {
+      setUserRole(roleQuery);
+      localStorage.setItem('votion_user_role', roleQuery);
+    }
+  }, [roleQuery]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
@@ -206,7 +213,12 @@ const AppShell: React.FC = () => {
     startTransition(() => setActiveModal(modalName));
   };
 
-  const handleNavigate = (view: unknown) => navigateForView(navigate, view);
+  const handleNavigate = (view: unknown) => {
+    const path = typeof view === 'string' && view in VIEW_PATHS
+      ? VIEW_PATHS[view as ViewMode]
+      : VIEW_PATHS.dashboard;
+    startTransition(() => navigate(`${path}?role=${activeRole}`));
+  };
 
   const handleToggleRole = () => {
     const nextRole: UserRole = activeRole === 'admin' ? 'client' : 'admin';
