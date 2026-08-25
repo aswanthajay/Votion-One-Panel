@@ -27,8 +27,6 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   // Table Interactions State
   const [searchQuery, setSearchQuery] = useState('');
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
-  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
-  const [nodesMenuOpen, setNodesMenuOpen] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState({
     id: true, name: true, owner: true, status: true, type: true, node: true, ip: true
   });
@@ -323,13 +321,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
         <div className="flex justify-between items-center mt-6 mb-4">
           <div className="flex gap-2 relative">
-            <button onClick={() => setActionsMenuOpen(!actionsMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#656b6b] flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Actions <span className="text-[10px]">▼</span></button>
-            {actionsMenuOpen && (
-              <div className="absolute top-10 left-0 w-48 bg-white border border-[#dedfdf] rounded shadow-lg z-50 py-1">
-                <button onClick={() => { showToast('Selected instances started'); setActionsMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer text-green-700 font-semibold">Start Selected</button>
-                <button onClick={() => { showToast('Selected instances stopped'); setActionsMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer text-red-700 font-semibold">Stop Selected</button>
-              </div>
-            )}
+            <button type="button" disabled title="Bulk power actions are unavailable in client view" aria-disabled="true" className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#8a9090] flex items-center gap-1 cursor-not-allowed opacity-70">Actions</button>
             <input 
               value={searchQuery} 
               onChange={e => setSearchQuery(e.target.value)} 
@@ -338,7 +330,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             />
           </div>
           <div className="flex gap-2 items-center relative">
-            <button className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black hover:bg-[#fbfaf9] cursor-pointer">Filters</button>
+            <button type="button" disabled title="Use the instance tabs and search field to filter this list" aria-disabled="true" className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#8a9090] cursor-not-allowed opacity-70">Filters</button>
             
             <button onClick={() => setColumnsMenuOpen(!columnsMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Select columns <span className="text-[10px]">▼</span></button>
             {columnsMenuOpen && (
@@ -354,12 +346,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
             <div className="w-6"></div>
             
-            <button onClick={() => setNodesMenuOpen(!nodesMenuOpen)} className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-black flex items-center gap-1 hover:bg-[#fbfaf9] cursor-pointer">Manage nodes <span className="text-[10px]">▼</span></button>
-            {nodesMenuOpen && (
-              <div className="absolute top-10 right-32 w-48 bg-white border border-[#dedfdf] rounded shadow-lg z-50 py-1">
-                <button onClick={() => { showToast('Syncing nodes from cluster...'); setNodesMenuOpen(false); }} className="w-full text-left px-4 py-2 text-[13px] hover:bg-[#f1f1f1] cursor-pointer">Sync Nodes</button>
-              </div>
-            )}
+            <button type="button" disabled title="Node management is available to administrators only" aria-disabled="true" className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#8a9090] flex items-center gap-1 cursor-not-allowed opacity-70">Manage nodes</button>
 
             <button onClick={() => onOpenModal('support')} className="bg-[#1a1a1a] text-white rounded px-4 py-1.5 text-[13px] font-bold shadow-sm hover:bg-black transition-colors cursor-pointer">Request Instance</button>
           </div>
