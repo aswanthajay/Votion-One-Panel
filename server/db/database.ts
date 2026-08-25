@@ -2500,7 +2500,7 @@ export class DatabaseService {
       const grossProfitPaise = billedPaise - totalCostPaise;
       const plannedVmCapacity = Number(profile?.plannedVmCapacity || 0);
       return {
-        serverId: profile?.id || `node:${nodeName}`, serverName: profile?.name || nodeName, nodeName, hasCostProfile: Boolean(profile),
+        serverId: profile?.id || `node:${nodeName}`, serverName: profile?.name || `Unconfigured node`, nodeName, hasCostProfile: Boolean(profile),
         invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise,
         serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
         marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
