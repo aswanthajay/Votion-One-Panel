@@ -2563,7 +2563,9 @@ export class DatabaseService {
           WHERE setting_key = 'billing_config'
         )
         SELECT v.proxmox_connection_id,
-               CASE WHEN p.custom_monthly_price_cents IS NOT NULL THEN billing_currency.currency ELSE COALESCE(pl.currency, billing_currency.currency) END AS currency,
+               billing_currency.currency AS default_currency,
+               pl.currency AS plan_currency,
+               p.custom_monthly_price_cents,
                COUNT(*)::int AS assignment_count,
                COALESCE(SUM(COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents, 0)), 0)::bigint AS projected_revenue_cents
         FROM vms v
@@ -2573,16 +2575,19 @@ export class DatabaseService {
         WHERE v.owner_email NOT LIKE '%unassigned@%'
           AND COALESCE(p.billing_status, 'active') NOT IN ('closed', 'waived')
           AND COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents) IS NOT NULL
-        GROUP BY v.proxmox_connection_id, pl.currency, billing_currency.currency`),
+        GROUP BY v.proxmox_connection_id, billing_currency.currency, pl.currency, p.custom_monthly_price_cents`),
       pgPool.query(`SELECT name, monthly_cost_cents, allocation_method FROM billing_cost_bases WHERE is_active = true AND currency = 'INR'`),
     ]);
     const profileByConnection = new Map(mappedServerCosts.map(profile => [profile.proxmoxConnectionId, profile]));
     const projectedRevenueByConnection = new Map<string, Record<string, { cents: number; assignmentCount: number }>>();
     for (const row of projectedRevenue.rows) {
       if (!row.proxmox_connection_id) continue;
-      const currency = String(row.currency || 'USD');
+      const currency = row.custom_monthly_price_cents !== null && row.custom_monthly_price_cents !== undefined
+        ? String(row.default_currency || 'INR')
+        : String(row.plan_currency || row.default_currency || 'INR');
       const byCurrency = projectedRevenueByConnection.get(row.proxmox_connection_id) || {};
-      byCurrency[currency] = { cents: Number(row.projected_revenue_cents || 0), assignmentCount: Number(row.assignment_count || 0) };
+      const current = byCurrency[currency] || { cents: 0, assignmentCount: 0 };
+      byCurrency[currency] = { cents: current.cents + Number(row.projected_revenue_cents || 0), assignmentCount: current.assignmentCount + Number(row.assignment_count || 0) };
       projectedRevenueByConnection.set(row.proxmox_connection_id, byCurrency);
     }
     const resourcesByConnection = new Map(resources.rows.filter(row => row.proxmox_connection_id).map(row => [row.proxmox_connection_id, row]));
