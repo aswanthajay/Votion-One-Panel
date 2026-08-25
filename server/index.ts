@@ -91,7 +91,7 @@ const proxyVmId = (req: any): number | null => {
     const url = new URL(req.originalUrl || req.url || '/', 'http://localhost');
     const queryVmid = Number(url.searchParams.get('vmid'));
     if (Number.isInteger(queryVmid) && queryVmid > 0) return queryVmid;
-    const pathMatch = url.pathname.match(/\\/(?:qemu|lxc)\\/(\\d+)(?:\\/|$)/i);
+    const pathMatch = url.pathname.match(/\/(?:qemu|lxc)\/(\d+)(?:\/|$)/i);
     const pathVmid = Number(pathMatch?.[1]);
     return Number.isInteger(pathVmid) && pathVmid > 0 ? pathVmid : null;
   } catch {
