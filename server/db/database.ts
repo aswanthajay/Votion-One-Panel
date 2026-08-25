@@ -2505,7 +2505,6 @@ export class DatabaseService {
        FROM billing_server_costs s
        LEFT JOIN proxmox_connections pc ON pc.id = s.proxmox_connection_id
        LEFT JOIN vms v ON v.proxmox_connection_id = s.proxmox_connection_id
-         AND (s.node_name IS NULL OR v.node = s.node_name)
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
        ${activeOnly ? 'WHERE s.is_active = true' : ''}
        GROUP BY s.id, pc.name
