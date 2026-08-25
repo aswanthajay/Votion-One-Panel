@@ -187,18 +187,18 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
 
     // BILLING STREAM — optional and non-blocking. A billing outage must never
     // blank the operational telemetry surface.
-    void Promise.all([
+    void Promise.allSettled([
       apiClient.getBillingSummary(),
       apiClient.getBillingInvoices(),
       apiClient.getBillingPlans(),
       apiClient.getClientVmBillingProfiles(),
     ]).then(([summary, invoices, plans, profiles]) => {
       if (!mountedRef.current) return;
-      setBillingSummary(summary);
-      setBillingInvoices(invoices);
-      setBillingPlans(plans);
-      setBillingProfiles(profiles);
-    }).catch(() => { /* billing state retries on the next refresh cycle */ });
+      if (summary.status === 'fulfilled') setBillingSummary(summary.value);
+      if (invoices.status === 'fulfilled') setBillingInvoices(invoices.value);
+      if (plans.status === 'fulfilled') setBillingPlans(plans.value);
+      if (profiles.status === 'fulfilled') setBillingProfiles(profiles.value);
+    });
 
     // FLEET STREAM with backoff retry — hard-capped at 12s total so the UI
     // always fails CLOSED (error card) instead of hanging on skeleton bars.
