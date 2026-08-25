@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { CircleDollarSign, Gauge, Landmark, Server, TrendingUp, Wallet } from 'lucide-react';
 import {
   apiClient,
   ApiBillingConfig,
@@ -262,29 +263,29 @@ export const BillingOperationsPanel: React.FC = () => {
   const actionStatusClass = (status: string) => status === 'executed' ? 'text-[#8d3028] bg-[#fff1ef] border-[#f0c0bb]' : status === 'reversed' ? 'text-[#176b52] bg-[#eef9f4] border-[#b8e3cf]' : status === 'failed' ? 'text-[#8b5e00] bg-[#fff8e8] border-[#f3d19a]' : 'text-[#656b6b] bg-[#f4f5f5] border-[#dedfdf]';
 
   return (
-    <main className="app-content min-h-full bg-[#fbfaf9] px-4 py-5 sm:px-6 lg:px-8" aria-busy={loading}>
+    <main className="app-content min-h-full bg-[#f4f5f5] px-4 py-5 sm:px-6 lg:px-8" aria-busy={loading}>
       <div className="mx-auto max-w-[1440px]">
-        <header className="mb-6 flex flex-col gap-4 border-b border-[#dedfdf] pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <header className="mb-6 flex flex-col gap-5 rounded-xl border border-[#dedfdf] border-l-4 border-l-[#8b5e00] bg-white px-5 py-5 shadow-sm lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#8b5e00]">Finance operations</p>
-            <h1 className="text-[25px] font-semibold tracking-[-0.02em] text-[#1a1a1a]">Billing control plane</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#656b6b]">Manage recurring pricing, invoice collection, overdue policy, reversible suspension intent, and estimated gross margin from one auditable workspace.</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#8b5e00]">Finance operations · INR reporting</p>
+            <h1 className="text-[26px] font-semibold tracking-[-0.025em] text-[#1a1a1a]">Billing control plane</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-[#656b6b]">A single operating view for revenue collection, infrastructure cost allocation, dedicated-server economics, and controlled lifecycle policy.</p>
           </div>
-          <button type="button" onClick={() => void load()} disabled={loading} className="h-9 rounded border border-[#1a1a1a] bg-white px-4 text-xs font-semibold text-[#1a1a1a] hover:bg-[#f4f5f5] disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh data'}</button>
+          <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-[#1a1a1a] bg-[#1a1a1a] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh data'}</button>
         </header>
 
-        {error && <div role="alert" className="mb-5 rounded border border-[#e4b5b0] bg-[#fff7f6] px-4 py-3 text-sm text-[#8d3028]">{error}</div>}
-        {notice && <div role="status" className="mb-5 rounded border border-[#b8e3cf] bg-[#eef9f4] px-4 py-3 text-sm text-[#176b52]">{notice}<button type="button" onClick={() => setNotice(null)} className="ml-3 font-semibold underline">Dismiss</button></div>}
+        {error && <div role="alert" className="mb-5 rounded-lg border border-[#e4b5b0] bg-[#fff7f6] px-4 py-3 text-sm text-[#8d3028] shadow-sm">{error}</div>}
+        {notice && <div role="status" className="mb-5 rounded-lg border border-[#b8e3cf] bg-[#eef9f4] px-4 py-3 text-sm text-[#176b52] shadow-sm">{notice}<button type="button" onClick={() => setNotice(null)} className="ml-3 font-semibold underline underline-offset-2">Dismiss</button></div>}
 
-        <section className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-6" aria-label="Billing KPIs">
+        <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6" aria-label="Billing KPIs">
           {[
-            ['INR billed revenue', summary ? moneyPaise(summary.inrBilledPaise) : '—'],
-            ['INR collected', summary ? moneyPaise(summary.inrCollectedPaise) : '—'],
-            ['INR outstanding', summary ? moneyPaise(summary.inrOutstandingPaise) : '—'],
-            ['Monthly INR cost', summary ? moneyPaise(summary.totalInrCostPaise) : '—'],
-            ['INR gross profit', summary ? moneyPaise(summary.inrGrossProfitPaise) : '—'],
-            ['INR margin', summary ? `${summary.estimatedMarginPercent.toFixed(1)}%` : '—'],
-          ].map(([label, value]) => <div key={label} className={`${cardClass} min-h-[104px] p-4`}><p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9090]">{label}</p><p className={`mt-3 text-xl font-semibold tabular-nums ${label === 'INR gross profit' && summary && summary.inrGrossProfitPaise < 0 ? 'text-[#8d3028]' : 'text-[#1a1a1a]'}`}>{value}</p></div>)}
+            { label: 'INR billed revenue', value: summary ? moneyPaise(summary.inrBilledPaise) : '—', icon: CircleDollarSign, tone: 'text-[#8b5e00] bg-[#fff8e8]' },
+            { label: 'INR collected', value: summary ? moneyPaise(summary.inrCollectedPaise) : '—', icon: Wallet, tone: 'text-[#176b52] bg-[#eef9f4]' },
+            { label: 'INR outstanding', value: summary ? moneyPaise(summary.inrOutstandingPaise) : '—', icon: Landmark, tone: 'text-[#8b5e00] bg-[#fff8e8]' },
+            { label: 'Monthly INR cost', value: summary ? moneyPaise(summary.totalInrCostPaise) : '—', icon: Server, tone: 'text-[#656b6b] bg-[#f4f5f5]' },
+            { label: 'INR gross profit', value: summary ? moneyPaise(summary.inrGrossProfitPaise) : '—', icon: TrendingUp, tone: summary && summary.inrGrossProfitPaise < 0 ? 'text-[#8d3028] bg-[#fff1ef]' : 'text-[#176b52] bg-[#eef9f4]' },
+            { label: 'INR margin', value: summary ? `${summary.estimatedMarginPercent.toFixed(1)}%` : '—', icon: Gauge, tone: 'text-[#176b52] bg-[#eef9f4]' },
+          ].map(({ label, value, icon: Icon, tone }) => <div key={label} className="group relative min-h-[118px] overflow-hidden rounded-lg border border-[#dedfdf] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"><div className={`mb-4 flex h-8 w-8 items-center justify-center rounded-md ${tone}`}><Icon size={16} strokeWidth={1.8} aria-hidden="true" /></div><p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-[#8a9090]">{label}</p><p className={`mt-2 text-xl font-semibold tabular-nums ${label === 'INR gross profit' && summary && summary.inrGrossProfitPaise < 0 ? 'text-[#8d3028]' : 'text-[#1a1a1a]'}`}>{value}</p><div className="absolute inset-x-0 bottom-0 h-0.5 bg-[#ededed] transition-colors group-hover:bg-[#8b5e00]" /></div>)}
         </section>
 
         {summary && <section className="mb-6 grid gap-6 xl:grid-cols-2" aria-label="INR unit economics"><div className={`${cardClass} p-5`}><div className="mb-4 flex items-start justify-between gap-4"><div><h2 className="text-sm font-semibold text-[#1a1a1a]">INR unit economics</h2><p className="mt-1 text-xs leading-5 text-[#656b6b]">Revenue less actual configured costs. This is an operational estimate, not an accounting or tax statement.</p></div><span className="rounded border border-[#dedfdf] bg-[#f4f5f5] px-2 py-1 text-[10px] font-semibold uppercase text-[#656b6b]">{summary.reportingCurrency} reporting</span></div><div className="space-y-3 text-xs"><div className="flex items-center justify-between"><span className="text-[#656b6b]">Shared operating costs</span><span className="font-mono font-semibold text-[#1a1a1a]">{moneyPaise(summary.monthlySharedCostPaise)}</span></div><div className="flex items-center justify-between"><span className="text-[#656b6b]">Dedicated-server base cost</span><span className="font-mono font-semibold text-[#1a1a1a]">{moneyPaise(summary.monthlyServerCostPaise)}</span></div><div className="flex items-center justify-between"><span className="text-[#656b6b]">Additional IP charges</span><span className="font-mono font-semibold text-[#1a1a1a]">{moneyPaise(summary.monthlyIpCostPaise)}</span></div><div className="flex items-center justify-between border-t border-[#ededed] pt-3"><span className="font-semibold text-[#1a1a1a]">Total monthly cost</span><span className="font-mono font-semibold text-[#1a1a1a]">{moneyPaise(summary.totalInrCostPaise)}</span></div></div></div><div className={`${cardClass} p-5`}><div className="mb-4"><h2 className="text-sm font-semibold text-[#1a1a1a]">Capacity & IP utilization</h2><p className="mt-1 text-xs leading-5 text-[#656b6b]">Use these figures to see available VM capacity and paid IP exposure on each dedicated server.</p></div><div className="grid grid-cols-2 gap-4 text-xs"><div><p className="text-[#656b6b]">Assigned VMs</p><p className="mt-1 text-lg font-semibold tabular-nums text-[#1a1a1a]">{summary.totalAssignedServerVms} <span className="text-xs font-normal text-[#8a9090]">/ {summary.totalServerCapacityVms || '—'}</span></p></div><div><p className="text-[#656b6b]">Available VM capacity</p><p className="mt-1 text-lg font-semibold tabular-nums text-[#1a1a1a]">{summary.availableServerCapacityVms}</p></div><div><p className="text-[#656b6b]">Assigned IPs</p><p className="mt-1 text-lg font-semibold tabular-nums text-[#1a1a1a]">{summary.totalAssignedIpCount}</p></div><div><p className="text-[#656b6b]">Billable IPs</p><p className="mt-1 text-lg font-semibold tabular-nums text-[#1a1a1a]">{summary.billableIpCount}</p></div></div>{summary.revenueByCurrency.length > 0 && <div className="mt-5 border-t border-[#ededed] pt-4"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8a9090]">Revenue by currency</p><div className="space-y-2">{summary.revenueByCurrency.map(item => <div key={item.currency} className="flex items-center justify-between text-xs"><span className="font-semibold text-[#656b6b]">{item.currency} · {item.invoiceCount} invoices</span><span className="font-mono font-semibold text-[#1a1a1a]">{money(item.billedCents, item.currency)} billed</span></div>)}</div></div>}</div></section>}
