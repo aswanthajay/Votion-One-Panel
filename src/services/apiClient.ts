@@ -222,6 +222,7 @@ export interface ApiBillingSummary {
   inrCollectedGrossProfitPaise: number;
   projectedInrRevenuePaise: number;
   projectedInrGrossProfitPaise: number;
+  projectedInrMarginPercent: number | null;
   projectedRevenueByCurrency: Record<string, { cents: number; assignmentCount: number }>;
   monthlySharedCostPaise: number;
   monthlyServerCostPaise: number;
@@ -316,7 +317,7 @@ export interface ApiBillingServerProfitability {
   sharedCostPaise: number;
   totalCostPaise: number;
   grossProfitPaise: number;
-  marginPercent: number;
+  marginPercent: number | null;
   runningVmCount: number;
   assignedVmCount: number;
   plannedVmCapacity: number;

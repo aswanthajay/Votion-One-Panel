@@ -2624,6 +2624,8 @@ export class DatabaseService {
       const totalCostPaise = Math.round(serverCostPaise + ipCostPaise + sharedCostPaise);
       const grossProfitPaise = billedPaise - totalCostPaise;
       const projectedGrossProfitPaise = projectedRevenuePaise - totalCostPaise;
+      const marginRevenuePaise = projectedRevenuePaise > 0 ? projectedRevenuePaise : billedPaise;
+      const marginPercent = marginRevenuePaise > 0 ? Math.round(((projectedRevenuePaise > 0 ? projectedGrossProfitPaise : grossProfitPaise) / marginRevenuePaise) * 10000) / 100 : null;
       const plannedVmCapacity = Number(profile?.plannedVmCapacity || 0);
       return {
         serverId: profile?.id || `connection:${proxmoxConnectionId}`,
@@ -2636,7 +2638,7 @@ export class DatabaseService {
         hasCostProfile: Boolean(profile),
         invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise, projectedRevenuePaise, projectedGrossProfitPaise, projectedRevenueByCurrency,
         serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
-        marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
+        marginPercent,
         runningVmCount, assignedVmCount: Number(profile?.assignedVmCount || 0), plannedVmCapacity, availableVmCapacity: Math.max(0, plannedVmCapacity - runningVmCount),
         runningIpCount, assignedIpCount: Number(profile?.assignedIpCount || 0), includedIpCount, billableIpCount,
         breakEvenStatus: !profile ? 'configure_costs' : billedPaise <= 0 ? 'no_revenue' : grossProfitPaise >= 0 ? 'profitable' : 'loss',
@@ -2797,6 +2799,7 @@ export class DatabaseService {
     }
     const projectedInrRevenuePaise = Number(projectedRevenueByCurrency.INR?.cents || 0);
     const projectedInrGrossProfitPaise = projectedInrRevenuePaise - totalInrCostPaise;
+    const projectedInrMarginPercent = projectedInrRevenuePaise > 0 ? Math.round((projectedInrGrossProfitPaise / projectedInrRevenuePaise) * 10000) / 100 : null;
     const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
     const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
     const inrCollectedPaise = Number(inrRevenue?.collected_cents || 0);
@@ -2813,7 +2816,7 @@ export class DatabaseService {
     return {
       invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
       estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
-      reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, projectedInrRevenuePaise, projectedInrGrossProfitPaise, projectedRevenueByCurrency, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
+      reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, projectedInrRevenuePaise, projectedInrGrossProfitPaise, projectedInrMarginPercent, projectedRevenueByCurrency, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
       totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, unmappedServerCostProfileCount: serverCosts.filter(item => item.legacyNeedsAssignment).length, billableIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), billableRunningIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
     };
   }
