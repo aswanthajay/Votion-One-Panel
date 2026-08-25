@@ -282,6 +282,30 @@ export interface ApiBillingServerCost {
   isActive: boolean;
 }
 
+export interface ApiBillingServerProfitability {
+  serverId: string;
+  serverName: string;
+  nodeName: string;
+  hasCostProfile: boolean;
+  invoiceCount: number;
+  billedPaise: number;
+  collectedPaise: number;
+  outstandingPaise: number;
+  serverCostPaise: number;
+  ipCostPaise: number;
+  sharedCostPaise: number;
+  totalCostPaise: number;
+  grossProfitPaise: number;
+  marginPercent: number;
+  runningVmCount: number;
+  assignedVmCount: number;
+  plannedVmCapacity: number;
+  availableVmCapacity: number;
+  assignedIpCount: number;
+  includedIpCount: number;
+  billableIpCount: number;
+  breakEvenStatus: 'configure_costs' | 'no_revenue' | 'profitable' | 'loss' | string;
+}
 
 export interface ApiBillingSuspensionAction {
   id: string;
@@ -654,6 +678,12 @@ class ApiClient {
     const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(cost) });
     const data = await this.readApiResponse(res, 'Unable to save dedicated-server cost.');
     return data.data;
+  }
+
+  async getBillingServerProfitability(): Promise<ApiBillingServerProfitability[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-profitability`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load server profitability.');
+    return data.data || [];
   }
 
   async getVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {

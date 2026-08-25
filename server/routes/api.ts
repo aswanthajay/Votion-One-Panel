@@ -1546,6 +1546,15 @@ apiRouter.post('/billing/cost-bases', async (req, res) => {
   }
 });
 
+apiRouter.get('/billing/server-profitability', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    res.json({ success: true, data: await dbService.getBillingServerProfitability() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
 apiRouter.get('/billing/server-costs', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
   try {

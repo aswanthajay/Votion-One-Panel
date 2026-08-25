@@ -2446,6 +2446,67 @@ export class DatabaseService {
     }));
   }
 
+  async getBillingServerProfitability() {
+    const serverCosts = await this.getBillingServerCosts(true);
+    const [resources, revenue, sharedCosts] = await Promise.all([
+      pgPool.query(`SELECT node,
+               COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
+               COALESCE(SUM(cpus) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_vcpu,
+               COALESCE(SUM(COALESCE(maxmem, memory, ram_mb * 1048576, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_ram_bytes,
+               COALESCE(SUM(COALESCE(maxdisk, disk, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_disk_bytes
+        FROM vms GROUP BY node`),
+      pgPool.query(`SELECT v.node,
+               COUNT(i.id) FILTER (WHERE i.currency = 'INR')::int AS invoice_count,
+               COALESCE(SUM(i.total_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS billed_paise,
+               COALESCE(SUM(i.paid_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS collected_paise,
+               COALESCE(SUM(GREATEST(i.total_cents - i.paid_cents, 0)) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS outstanding_paise
+        FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid GROUP BY v.node`),
+      pgPool.query(`SELECT name, monthly_cost_cents, allocation_method FROM billing_cost_bases WHERE is_active = true AND currency = 'INR'`),
+    ]);
+    const profileByNode = new Map(serverCosts.map(profile => [profile.nodeName, profile]));
+    const resourcesByNode = new Map(resources.rows.map(row => [row.node, row]));
+    const revenueByNode = new Map(revenue.rows.map(row => [row.node, row]));
+    const nodeNames = Array.from(new Set([...serverCosts.map(profile => profile.nodeName), ...resources.rows.map(row => row.node), ...revenue.rows.map(row => row.node)])).sort();
+    const configuredServerCount = Math.max(1, serverCosts.length);
+    return nodeNames.map(nodeName => {
+      const profile = profileByNode.get(nodeName);
+      const resource = resourcesByNode.get(nodeName) || {};
+      const nodeRevenue = revenueByNode.get(nodeName) || {};
+      const runningVmCount = Number(resource.running_vm_count || 0);
+      const runningVcpu = Number(resource.running_vcpu || 0);
+      const runningRamGb = Number(resource.running_ram_bytes || 0) / 1073741824;
+      const runningDiskGb = Number(resource.running_disk_bytes || 0) / 1073741824;
+      const sharedCostPaise = sharedCosts.rows.reduce((sum, cost) => {
+        const amount = Number(cost.monthly_cost_cents || 0);
+        if (cost.allocation_method === 'per_vm') return sum + amount * runningVmCount;
+        if (cost.allocation_method === 'per_vcpu') return sum + amount * runningVcpu;
+        if (cost.allocation_method === 'per_gb_ram') return sum + amount * runningRamGb;
+        if (cost.allocation_method === 'per_gb_disk') return sum + amount * runningDiskGb;
+        return sum + amount / configuredServerCount;
+      }, 0);
+      const serverCostPaise = Number(profile?.monthlyCostPaise || 0);
+      const assignedIpCount = Number(profile?.assignedIpCount || 0);
+      const includedIpCount = Number(profile?.includedIpCount || 0);
+      const billableIpCount = Math.max(0, assignedIpCount - includedIpCount);
+      const ipCostPaise = billableIpCount * Number(profile?.ipCostPaise || 0);
+      const billedPaise = Number(nodeRevenue.billed_paise || 0);
+      const collectedPaise = Number(nodeRevenue.collected_paise || 0);
+      const outstandingPaise = Number(nodeRevenue.outstanding_paise || 0);
+      const totalCostPaise = Math.round(serverCostPaise + ipCostPaise + sharedCostPaise);
+      const grossProfitPaise = billedPaise - totalCostPaise;
+      const plannedVmCapacity = Number(profile?.plannedVmCapacity || 0);
+      return {
+        serverId: profile?.id || `node:${nodeName}`, serverName: profile?.name || nodeName, nodeName, hasCostProfile: Boolean(profile),
+        invoiceCount: Number(nodeRevenue.invoice_count || 0), billedPaise, collectedPaise, outstandingPaise,
+        serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
+        marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
+        runningVmCount, assignedVmCount: Number(profile?.assignedVmCount || 0), plannedVmCapacity, availableVmCapacity: Math.max(0, plannedVmCapacity - runningVmCount),
+        assignedIpCount, includedIpCount, billableIpCount,
+        breakEvenStatus: !profile ? 'configure_costs' : billedPaise <= 0 ? 'no_revenue' : grossProfitPaise >= 0 ? 'profitable' : 'loss',
+      };
+    });
+  }
+
   async upsertBillingServerCost(cost: any) {
     const id = String(cost.id || `server-cost-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`).trim().toLowerCase();
     const name = String(cost.name || '').trim().slice(0, 150);
