@@ -226,9 +226,11 @@ export interface ApiBillingSummary {
   totalAssignedServerVms: number;
   totalRunningServerVms: number;
   availableServerCapacityVms: number;
+  totalRunningIpCount: number;
   totalAssignedIpCount: number;
   totalIncludedIpCount: number;
   billableIpCount: number;
+  billableRunningIpCount: number;
   revenueByCurrency: Array<{ currency: BillingCurrency; invoiceCount: number; billedCents: number; collectedCents: number; outstandingCents: number }>;
 }
 
@@ -278,6 +280,7 @@ export interface ApiBillingServerCost {
   includedIpCount: number;
   assignedVmCount: number;
   runningVmCount: number;
+  runningIpCount: number;
   assignedIpCount: number;
   isActive: boolean;
 }
@@ -301,6 +304,7 @@ export interface ApiBillingServerProfitability {
   assignedVmCount: number;
   plannedVmCapacity: number;
   availableVmCapacity: number;
+  runningIpCount: number;
   assignedIpCount: number;
   includedIpCount: number;
   billableIpCount: number;

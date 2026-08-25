@@ -2421,6 +2421,7 @@ export class DatabaseService {
       `SELECT s.*,
               COUNT(DISTINCT v.vmid) FILTER (WHERE v.owner_email NOT LIKE 'unassigned@%')::int AS assigned_vm_count,
               COUNT(DISTINCT v.vmid) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
+              COALESCE(SUM(CASE WHEN LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up') THEN GREATEST(COALESCE(p.ip_count, 1), 1) ELSE 0 END), 0)::int AS running_ip_count,
               COALESCE(SUM(CASE WHEN v.owner_email NOT LIKE 'unassigned@%' THEN COALESCE(p.ip_count, 1) ELSE 0 END), 0)::int AS assigned_ip_count
        FROM billing_server_costs s
        LEFT JOIN vms v ON v.node = s.node_name
@@ -2439,6 +2440,7 @@ export class DatabaseService {
       includedIpCount: Number(row.included_ip_count),
       assignedVmCount: Number(row.assigned_vm_count),
       runningVmCount: Number(row.running_vm_count),
+      runningIpCount: Number(row.running_ip_count),
       assignedIpCount: Number(row.assigned_ip_count),
       isActive: Boolean(row.is_active),
       createdAt: row.created_at,
@@ -2485,9 +2487,10 @@ export class DatabaseService {
         return sum + amount / configuredServerCount;
       }, 0);
       const serverCostPaise = Number(profile?.monthlyCostPaise || 0);
+      const runningIpCount = Number(profile?.runningIpCount || 0);
       const assignedIpCount = Number(profile?.assignedIpCount || 0);
       const includedIpCount = Number(profile?.includedIpCount || 0);
-      const billableIpCount = Math.max(0, assignedIpCount - includedIpCount);
+      const billableIpCount = Math.max(0, runningIpCount - includedIpCount);
       const ipCostPaise = billableIpCount * Number(profile?.ipCostPaise || 0);
       const billedPaise = Number(nodeRevenue.billed_paise || 0);
       const collectedPaise = Number(nodeRevenue.collected_paise || 0);
@@ -2501,7 +2504,7 @@ export class DatabaseService {
         serverCostPaise, ipCostPaise: Math.round(ipCostPaise), sharedCostPaise: Math.round(sharedCostPaise), totalCostPaise, grossProfitPaise,
         marginPercent: billedPaise > 0 ? Math.round((grossProfitPaise / billedPaise) * 10000) / 100 : 0,
         runningVmCount, assignedVmCount: Number(profile?.assignedVmCount || 0), plannedVmCapacity, availableVmCapacity: Math.max(0, plannedVmCapacity - runningVmCount),
-        assignedIpCount, includedIpCount, billableIpCount,
+        runningIpCount, assignedIpCount, includedIpCount, billableIpCount,
         breakEvenStatus: !profile ? 'configure_costs' : billedPaise <= 0 ? 'no_revenue' : grossProfitPaise >= 0 ? 'profitable' : 'loss',
       };
     });
@@ -2624,7 +2627,7 @@ export class DatabaseService {
     const collected = Number(row.collected_cents);
     const monthlyCost = Number(sharedCosts.rows.reduce((sum, item) => sum + (item.currency === 'INR' ? Number(item.monthly_cost_cents) : 0), 0));
     const monthlyServerCostPaise = serverCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
-    const monthlyIpCostPaise = serverCosts.reduce((sum, item) => sum + Math.max(0, item.assignedIpCount - item.includedIpCount) * item.ipCostPaise, 0);
+    const monthlyIpCostPaise = serverCosts.reduce((sum, item) => sum + Math.max(0, item.runningIpCount - item.includedIpCount) * item.ipCostPaise, 0);
     const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
     const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
     const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
@@ -2635,13 +2638,14 @@ export class DatabaseService {
     const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
     const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
     const totalRunningServerVms = Number(runningVms.rows[0]?.running_vm_count || 0);
+    const totalRunningIpCount = serverCosts.reduce((sum, item) => sum + item.runningIpCount, 0);
     const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
     const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
     return {
       invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
       estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
       reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
-      totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalAssignedIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
+      totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), billableRunningIpCount: Math.max(0, totalRunningIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
     };
   }
 
