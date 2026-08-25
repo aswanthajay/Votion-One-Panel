@@ -30,7 +30,7 @@ const getConnectionForVm = async (vm: { proxmoxConnectionId?: string | null }) =
 };
 
 const getVmEndpoint = (connection: any, vm: { node: string; type: string; vmid: number }, suffix: string) => {
-  const cleanHost = String(connection.host_ip || '').replace(/^https?:\\/\\//, '').replace(/\\/$/, '');
+  const cleanHost = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
   const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
   return `https://${cleanHost}:${connection.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/${resourceType}/${vm.vmid}/${suffix}`;
 };
