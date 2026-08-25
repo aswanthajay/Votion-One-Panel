@@ -60,14 +60,16 @@ export class ProxmoxService {
     }
 
     const connections = await dbService.getProxmoxConnections();
-    const connection = connections[0];
+    const connection = vm.proxmoxConnectionId
+      ? connections.find(item => item.id === vm.proxmoxConnectionId)
+      : connections[0];
     if (!connection) {
       throw new Error('No Proxmox connection is configured. Configure a connection before issuing VM actions.');
     }
 
     const targetNode = vm.node || node;
     const vmType = vm.type === 'lxc' ? 'lxc' : 'qemu';
-    const operation = action === 'shutdown' ? 'stop' : action;
+    const operation = action;
     const host = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
     const port = Number(connection.port) || 8006;
     const response = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${encodeURIComponent(targetNode)}/${vmType}/${vmid}/status/${operation}`, {

@@ -1115,20 +1115,27 @@ export class DatabaseService {
   }
 
   // ADMIN: Full cluster telemetry history across all VMs (used by the admin dashboard chart)
-  async getTelemetryHistory(hours: number = 24) {
+  async getTelemetryHistory(hours: number = 24, vmids?: number[]) {
+    const params: any[] = [hours];
+    const vmFilter = vmids ? (vmids.length > 0 ? `AND vmid = ANY($2::int[])` : 'AND FALSE') : '';
+    if (vmids) params.push(vmids);
     const res = await pgPool.query(
       `SELECT timestamp, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes,
               diskread_bytes, diskwrite_bytes
               FROM vm_metrics
        WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
+       ${vmFilter}
        ORDER BY timestamp ASC`,
-      [hours]
+      params
     );
     return res.rows;
   }
 
   // ADMIN: Per-node aggregated stats (peak/min/avg over the window)
-  async getNodeTelemetryAggregates(hours: number = 24) {
+  async getNodeTelemetryAggregates(hours: number = 24, vmids?: number[]) {
+    const params: any[] = [hours];
+    const vmFilter = vmids ? (vmids.length > 0 ? `AND vmid = ANY($2::int[])` : 'AND FALSE') : '';
+    if (vmids) params.push(vmids);
     const res = await pgPool.query(
       `SELECT vmid,
               round(avg(cpu_pct)::numeric, 2) AS avg_cpu,
@@ -1140,8 +1147,9 @@ export class DatabaseService {
               sum(net_out_bytes) AS total_net_out_bytes
               FROM vm_metrics
        WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
+       ${vmFilter}
        GROUP BY vmid`,
-      [hours]
+      params
     );
     return res.rows;
   }

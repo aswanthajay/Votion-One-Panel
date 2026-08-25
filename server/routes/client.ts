@@ -2,12 +2,21 @@ import { Router } from 'express';
 import os from 'os';
 import { dbService } from '../db/database.js';
 import { proxmoxApi } from '../services/proxmox.js';
+import { ProxmoxService } from '../services/proxmoxService.js';
 import { requireAuth } from '../middleware.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
 import { mapProxmoxVmMetadata } from '../services/proxmoxVmMetadata.js';
 
 export const clientRouter = Router();
 clientRouter.use(requireAuth);
+
+const proxmoxService = new ProxmoxService({
+  hostIp: process.env.PVE_HOST || '',
+  port: parseInt(process.env.PVE_PORT || '8006', 10),
+  tokenId: process.env.PVE_TOKEN_ID || '',
+  tokenSecret: process.env.PVE_TOKEN_SECRET || '',
+  sslFingerprint: process.env.PVE_SSL_FINGERPRINT,
+});
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
 clientRouter.use('/vms/:vmid', async (req, res, next) => {
@@ -413,6 +422,10 @@ clientRouter.post('/vms/:vmid/power', async (req, res) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const vmid = parseInt(req.params.vmid, 10);
   const { action } = req.body;
+  const allowedActions = new Set(['start', 'stop', 'shutdown', 'reboot']);
+  if (!allowedActions.has(action)) {
+    return res.status(400).json({ success: false, error: 'Unsupported power action. Use start, stop, shutdown, or reboot.' });
+  }
 
   const vm = await dbService.getVMByVMID(vmid);
   if (!vm) {
@@ -431,7 +444,7 @@ clientRouter.post('/vms/:vmid/power', async (req, res) => {
   }
 
   try {
-    const updated = await dbService.executeVMAction(vmid, action || 'start', userEmail);
+    const updated = await proxmoxService.executePowerAction(vm.node, vmid, action, userEmail);
     res.json({
       success: true,
       message: `Power action ${action ? action.toUpperCase() : 'START'} executed for VMID ${vmid}`,

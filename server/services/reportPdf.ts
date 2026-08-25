@@ -163,11 +163,18 @@ export async function generateMetricsReportPdf(opts: {
   const since = new Date(now.getTime() - hours * 3600 * 1000);
 
   // ---------- Data ----------
-  const [vms, conns, agg, adminHist, alerts, notifCount] = await Promise.all([
+  const [allVms, conns] = await Promise.all([
     dbService.getVMs(),
     dbService.getProxmoxConnections(),
-    dbService.getNodeTelemetryAggregates(hours),
-    dbService.getTelemetryHistory(hours),
+  ]);
+  const vms = allVms.filter((vm: any) => {
+    const ownerEmail = String(vm.ownerEmail || vm.owner_email || '').trim().toLowerCase();
+    return ownerEmail.length > 0 && !ownerEmail.startsWith('unassigned@');
+  });
+  const reportVmids = vms.map((vm: any) => Number(vm.vmid)).filter((vmid: number) => Number.isInteger(vmid));
+  const [agg, adminHist, alerts, notifCount] = await Promise.all([
+    dbService.getNodeTelemetryAggregates(hours, reportVmids),
+    dbService.getTelemetryHistory(hours, reportVmids),
     pgPool.query("SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE severity = 'critical')::int AS critical FROM notifications WHERE created_at > NOW() - INTERVAL '1 hour' * $1", [hours]),
     pgPool.query("SELECT COUNT(*)::int AS total FROM notifications"),
   ]);
@@ -200,7 +207,7 @@ export async function generateMetricsReportPdf(opts: {
   doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(
     'This report is written to serve everyone — from someone seeing server metrics for the first time, to an experienced operator. ' +
     'Section 1 explains the environment you manage. Section 2 explains what each metric actually means in plain language. ' +
-    'Section 3 shows cluster-wide trends over your chosen window. Section 4 dives into every virtual machine, one by one. ' +
+    'Section 3 shows trends for assigned customer VMs over your chosen window. Section 4 dives into every assigned virtual machine, one by one. ' +
     'Section 5 summarizes events and alerts the system detected, and Section 6 explains the data pipeline itself, so you can trust the numbers.',
     { lineGap: 4 }
   );
@@ -266,7 +273,7 @@ export async function generateMetricsReportPdf(opts: {
   nextSection(doc);
 
   // ---------- SECTION 3: CLUSTER OVERVIEW ----------
-  sectionHeader(doc, '3', 'Cluster-wide performance', `Aggregated across all ${vms.length} VMs for the selected window. Sparklines show the trend — an upward slope means growing load.`);
+  sectionHeader(doc, '3', 'Cluster-wide performance', `Aggregated across ${vms.length} assigned VMs for the selected window. Sparklines show the trend — an upward slope means growing load.`);
   // compute cluster aggregates from adminHist
   let cpuVals: number[] = [], ramVals: number[] = [], inVals: number[] = [], outVals: number[] = [], dR = 0, dW = 0;
   adminHist.forEach((r: any) => {
@@ -328,7 +335,7 @@ export async function generateMetricsReportPdf(opts: {
   doc.addPage();
 
   // ---------- SECTION 4: PER-VM ----------
-  sectionHeader(doc, '4', 'Virtual machine detail', 'One block per VM with its own summary, sparklines, and guidance. VMs are ordered by VMID.');
+  sectionHeader(doc, '4', 'Virtual machine detail', 'One block per assigned VM with its own summary, sparklines, and guidance. VMs are ordered by VMID.');
   for (const vm of vms) {
     progressDoc(doc);
     const rows = vmTelemetry.get(vm.vmid) || [];
@@ -413,9 +420,11 @@ export async function generateMetricsReportPdf(opts: {
 
   // ---------- SECTION 6: DATA PIPELINE ----------
   sectionHeader(doc, '6', 'How the data is collected and stored', 'Why you can trust these numbers: an explanation of the telemetry pipeline, for transparency.');
-  const totalSamples = (await pgPool.query('SELECT COUNT(*)::int AS t FROM vm_telemetry')).rows[0]?.t || 0;
-  const firstSample = (await pgPool.query('SELECT MIN(timestamp)::text AS t FROM vm_telemetry')).rows[0]?.t || '—';
-  const perVm = (await pgPool.query('SELECT vmid, COUNT(*)::int AS c FROM vm_telemetry GROUP BY vmid ORDER BY 1')).rows;
+  const telemetryFilter = reportVmids.length > 0 ? 'WHERE vmid = ANY($1::int[])' : 'WHERE FALSE';
+  const telemetryParams = reportVmids.length > 0 ? [reportVmids] : [];
+  const totalSamples = (await pgPool.query(`SELECT COUNT(*)::int AS t FROM vm_telemetry ${telemetryFilter}`, telemetryParams)).rows[0]?.t || 0;
+  const firstSample = (await pgPool.query(`SELECT MIN(timestamp)::text AS t FROM vm_telemetry ${telemetryFilter}`, telemetryParams)).rows[0]?.t || '—';
+  const perVm = (await pgPool.query(`SELECT vmid, COUNT(*)::int AS c FROM vm_telemetry ${telemetryFilter} GROUP BY vmid ORDER BY 1`, telemetryParams)).rows;
   const perVmText = perVm.map((r: any) => `VMID ${r.vmid}: ${r.c} samples`).join('   ·   ');
   doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(
     'Every 15 seconds, the panel asks the cluster for the live status of each running virtual machine. The raw numbers — CPU load, memory, network counters, and disk counters — are written directly into the PostgreSQL database (table vm_telemetry), timestamped at the moment of collection. ' +
