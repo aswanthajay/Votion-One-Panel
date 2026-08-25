@@ -135,8 +135,13 @@ export class ReimageExecutionService {
     }
 
     const connections = await dbService.getProxmoxConnections();
-    const connection = connections[0];
-    if (!connection || !connection.ssl_fingerprint) {
+    const connection = vm.proxmoxConnectionId
+      ? connections.find(candidate => String(candidate.id) === String(vm.proxmoxConnectionId))
+      : null;
+    if (!connection) {
+      throw new ReimageExecutionError('PROXMOX_CONNECTION_REQUIRED', 'The target VM is not associated with an available Proxmox connection.');
+    }
+    if (!connection.ssl_fingerprint) {
       throw new ReimageExecutionError('PROXMOX_FINGERPRINT_REQUIRED', 'A pinned Proxmox SHA-256 fingerprint is required before preflight.');
     }
 
