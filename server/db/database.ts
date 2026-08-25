@@ -2563,7 +2563,7 @@ export class DatabaseService {
           WHERE setting_key = 'billing_config'
         )
         SELECT v.proxmox_connection_id,
-               COALESCE(pl.currency, billing_currency.currency) AS currency,
+               CASE WHEN p.custom_monthly_price_cents IS NOT NULL THEN billing_currency.currency ELSE COALESCE(pl.currency, billing_currency.currency) END AS currency,
                COUNT(*)::int AS assignment_count,
                COALESCE(SUM(COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents, 0)), 0)::bigint AS projected_revenue_cents
         FROM vms v
@@ -2684,7 +2684,7 @@ export class DatabaseService {
               p.plan_id, p.custom_monthly_price_cents, p.billing_status,
               p.billing_cycle_day, p.grace_period_days, p.next_due_at, p.ip_count, p.updated_at,
               pl.name AS plan_name,
-              COALESCE(pl.currency, (SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') AS effective_currency,
+              CASE WHEN p.custom_monthly_price_cents IS NOT NULL THEN COALESCE((SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') ELSE COALESCE(pl.currency, (SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') END AS effective_currency,
               pl.monthly_price_cents
        FROM vms v
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
