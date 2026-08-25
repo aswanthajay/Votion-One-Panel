@@ -224,6 +224,7 @@ export interface ApiBillingSummary {
   totalInrCostPaise: number;
   totalServerCapacityVms: number;
   totalAssignedServerVms: number;
+  totalRunningServerVms: number;
   availableServerCapacityVms: number;
   totalAssignedIpCount: number;
   totalIncludedIpCount: number;
@@ -276,6 +277,7 @@ export interface ApiBillingServerCost {
   plannedVmCapacity: number;
   includedIpCount: number;
   assignedVmCount: number;
+  runningVmCount: number;
   assignedIpCount: number;
   isActive: boolean;
 }

@@ -2419,10 +2419,11 @@ export class DatabaseService {
   async getBillingServerCosts(activeOnly = false) {
     const res = await pgPool.query(
       `SELECT s.*,
-              COUNT(DISTINCT v.vmid)::int AS assigned_vm_count,
-              COALESCE(SUM(COALESCE(p.ip_count, 1)), 0)::int AS assigned_ip_count
+              COUNT(DISTINCT v.vmid) FILTER (WHERE v.owner_email NOT LIKE 'unassigned@%')::int AS assigned_vm_count,
+              COUNT(DISTINCT v.vmid) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count,
+              COALESCE(SUM(CASE WHEN v.owner_email NOT LIKE 'unassigned@%' THEN COALESCE(p.ip_count, 1) ELSE 0 END), 0)::int AS assigned_ip_count
        FROM billing_server_costs s
-       LEFT JOIN vms v ON v.node = s.node_name AND v.owner_email NOT LIKE 'unassigned@%'
+       LEFT JOIN vms v ON v.node = s.node_name
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
        ${activeOnly ? 'WHERE s.is_active = true' : ''}
        GROUP BY s.id
@@ -2437,6 +2438,7 @@ export class DatabaseService {
       plannedVmCapacity: Number(row.planned_vm_capacity),
       includedIpCount: Number(row.included_ip_count),
       assignedVmCount: Number(row.assigned_vm_count),
+      runningVmCount: Number(row.running_vm_count),
       assignedIpCount: Number(row.assigned_ip_count),
       isActive: Boolean(row.is_active),
       createdAt: row.created_at,
@@ -2569,13 +2571,14 @@ export class DatabaseService {
     const inrCollectedGrossProfitPaise = inrCollectedPaise - totalInrCostPaise;
     const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
     const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
+    const totalRunningServerVms = serverCosts.reduce((sum, item) => sum + item.runningVmCount, 0);
     const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
     const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
     return {
       invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
       estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
       reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
-      totalServerCapacityVms, totalAssignedServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalAssignedServerVms), totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalAssignedIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
+      totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalRunningServerVms), totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalAssignedIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
     };
   }
 
