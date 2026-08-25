@@ -257,9 +257,9 @@ const AppShell: React.FC = () => {
             <Routes>
                             <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} /> :   <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS.dashboard} element={<DashboardContent onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS.instances} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS.instances} element={activeRole === 'admin' ? <DashboardContent pageTitle="Virtual Machines" onOpenModal={handleOpenModal} /> : <ClientPanelRoute onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['instances-qemu']} element={activeRole === 'admin' ? <DashboardContent pageTitle="QEMU Virtual Machines" typeFilter="qemu" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['instances-lxc']} element={activeRole === 'admin' ? <DashboardContent pageTitle="LXC Containers" typeFilter="lxc" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
               <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['operator-reimage']} element={activeRole === 'admin' ? <OperatorReimagePanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />

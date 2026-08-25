@@ -21,7 +21,7 @@ interface StellarNode {
   uptimeDays: number;
 }
 
-export const DashboardContent: React.FC<{ pageTitle?: string; onOpenModal: (modalName: string) => void }> = ({ pageTitle = 'Dashboard', onOpenModal }) => {
+export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu' | 'lxc'; onOpenModal: (modalName: string) => void }> = ({ pageTitle = 'Dashboard', typeFilter, onOpenModal }) => {
   const [nodes, setNodes] = useState<StellarNode[]>([]);
   const [vms, setVMs] = useState<ApiVM[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
@@ -41,7 +41,9 @@ export const DashboardContent: React.FC<{ pageTitle?: string; onOpenModal: (moda
 
   const [selectedVmForAction, setSelectedVmForAction] = useState<ApiVM | null>(null);
   const [targetAccountEmail, setTargetAccountEmail] = useState('');
-  const [extendDays, setExtendDays] = useState(30);
+    const [extendDays, setExtendDays] = useState(30);
+  const visibleVms = typeFilter ? vms.filter(vm => vm.type === typeFilter) : vms;
+
   const [selectedTargetOS, setSelectedTargetOS] = useState('Ubuntu 24.04 LTS');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -445,7 +447,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; onOpenModal: (moda
           </div>
           <div className="flex gap-3">
             <span className="text-xs font-bold text-[#656b6b] bg-white border border-[#dedfdf] px-2 py-1.5 rounded shadow-sm flex items-center">
-              {isLoading ? <span className="inline-block h-3.5 w-20 animate-pulse rounded bg-[#f1f1f1]" aria-label="Loading instance count" /> : `${vms.length} Instances`}
+              {isLoading ? <span className="inline-block h-3.5 w-20 animate-pulse rounded bg-[#f1f1f1]" aria-label="Loading instance count" /> : `${visibleVms.length} ${typeFilter === 'qemu' ? 'QEMU VMs' : typeFilter === 'lxc' ? 'LXC containers' : 'Instances'}`}
             </span>
             <button onClick={() => setModalType('provision-vm')} className="btn-primary py-1.5 px-4 text-xs shadow-sm">
               + Provision VM
@@ -474,9 +476,9 @@ export const DashboardContent: React.FC<{ pageTitle?: string; onOpenModal: (moda
                     </span>
                   </td>
                 </tr>
-              ) : vms.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-10 text-center"><p className="text-sm font-semibold text-[#1a1a1a]">No guest allocations found.</p><p className="mt-1 text-xs text-[#656b6b]">Provisioned virtual machines and containers will appear here.</p></td></tr>
-              ) : vms.map(vm => (
+              ) : visibleVms.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-10 text-center"><p className="text-sm font-semibold text-[#1a1a1a]">No {typeFilter === 'qemu' ? 'QEMU virtual machines' : typeFilter === 'lxc' ? 'LXC containers' : 'guest allocations'} found.</p><p className="mt-1 text-xs text-[#656b6b]">Provisioned virtual machines and containers will appear here.</p></td></tr>
+              ) : visibleVms.map(vm => (
                 <tr key={vm.vmid} className={`border-b border-[#dedfdf] last:border-0 hover:bg-[#fbfaf9] transition-colors ${vm.isSuspended ? 'opacity-70 bg-[#f9f8f6]' : ''}`}>
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
