@@ -255,8 +255,8 @@ const AppShell: React.FC = () => {
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-              <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS.dashboard} element={<DashboardContent />} />
+                            <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} /> :   <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS.dashboard} element={<DashboardContent onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS.instances} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
