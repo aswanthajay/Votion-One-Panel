@@ -2554,6 +2554,8 @@ export class DatabaseService {
     );
     const vmWhere = accountEmail ? 'WHERE owner_email = $1 AND owner_email NOT LIKE \'unassigned@%\'' : "WHERE owner_email NOT LIKE 'unassigned@%'";
     const vm = await pgPool.query(`SELECT COUNT(*)::int AS vm_count FROM vms ${vmWhere}`, params);
+    const runningVmWhere = accountEmail ? 'WHERE owner_email = $1' : '';
+    const runningVms = await pgPool.query(`SELECT COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(status, ''))) IN ('running', 'online', 'up'))::int AS running_vm_count FROM vms ${runningVmWhere}`, params);
     const sharedCosts = await pgPool.query("SELECT currency, COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true GROUP BY currency");
     const serverCosts = await this.getBillingServerCosts(true);
     const row = invoice.rows[0];
@@ -2571,7 +2573,7 @@ export class DatabaseService {
     const inrCollectedGrossProfitPaise = inrCollectedPaise - totalInrCostPaise;
     const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
     const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
-    const totalRunningServerVms = serverCosts.reduce((sum, item) => sum + item.runningVmCount, 0);
+    const totalRunningServerVms = Number(runningVms.rows[0]?.running_vm_count || 0);
     const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
     const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
     return {
