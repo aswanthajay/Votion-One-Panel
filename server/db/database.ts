@@ -1012,6 +1012,10 @@ export class DatabaseService {
       return false;
     });
     if (safeResources.length === 0) return { synchronized: 0, conflicts: resources.length, synchronizedVmids: [] as number[] };
+    const dbResources = safeResources.map(resource => ({
+      ...resource,
+      proxmox_connection_id: resource.proxmoxConnectionId,
+    }));
     await pgPool.query(
       `INSERT INTO vms (vmid, vm_name, node, proxmox_connection_id, status, cpus, maxmem, maxdisk, memory, disk, cpu_cores, ram_mb, disk_gb, owner_email, type)
        SELECT resource.vmid,
@@ -1051,7 +1055,7 @@ export class DatabaseService {
          type = EXCLUDED.type
        WHERE vms.proxmox_connection_id IS NULL
           OR vms.proxmox_connection_id = EXCLUDED.proxmox_connection_id`,
-      [JSON.stringify(safeResources), defaultOwnerEmail]
+      [JSON.stringify(dbResources), defaultOwnerEmail]
     );
     return { synchronized: safeResources.length, conflicts: resources.length - safeResources.length, synchronizedVmids: safeResources.map(resource => resource.vmid) };
   }
