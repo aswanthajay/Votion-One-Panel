@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import os from 'os';
 import { dbService } from '../db/database.js';
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
@@ -19,6 +18,22 @@ const proxmoxService = new ProxmoxService({
 });
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
+
+const getConnectionForVm = async (vm: { proxmoxConnectionId?: string | null }) => {
+  const connectionId = vm.proxmoxConnectionId;
+  if (!connectionId) throw new Error('This VM is not associated with a Proxmox connection');
+
+  const connections = await dbService.getProxmoxConnections();
+  const connection = connections.find(candidate => String(candidate.id) === String(connectionId));
+  if (!connection) throw new Error('The Proxmox connection assigned to this VM is unavailable');
+  return connection;
+};
+
+const getVmEndpoint = (connection: any, vm: { node: string; type: string; vmid: number }, suffix: string) => {
+  const cleanHost = String(connection.host_ip || '').replace(/^https?:\\/\\//, '').replace(/\\/$/, '');
+  const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
+  return `https://${cleanHost}:${connection.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/${resourceType}/${vm.vmid}/${suffix}`;
+};
 clientRouter.use('/vms/:vmid', async (req, res, next) => {
   const vmid = Number(req.params.vmid);
   const vm = await dbService.getVMByVMID(vmid);
@@ -106,13 +121,8 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
   if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
 
   try {
-    const connections = await dbService.getProxmoxConnections();
-    const conn = connections[0];
-    if (!conn) return res.status(503).json({ success: false, error: 'No Proxmox connection is configured' });
-
-    const cleanHost = String(conn.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
-    const configUrl = `https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/${resourceType}/${vm.vmid}/config`;
+    const conn = await getConnectionForVm(vm);
+    const configUrl = getVmEndpoint(conn, vm, 'config');
     const configResponse = await proxmoxFetch(configUrl, {
       method: 'GET',
       headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
@@ -133,7 +143,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
 
     if (agentEnabled) {
       try {
-        const agentResponse = await proxmoxFetch(`https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/qemu/${vm.vmid}/agent/network-get-interfaces`, {
+        const agentResponse = await proxmoxFetch(getVmEndpoint(conn, vm, 'agent/network-get-interfaces'), {
           method: 'GET',
           headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
           sslFingerprint: conn.ssl_fingerprint,
@@ -158,19 +168,15 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
 // 2. GET /api/client/vms/:vmid/telemetry — Fetch live CPU %, RAM, and Bandwidth usage from Proxmox for VMID
 clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
   const vmid = parseInt(req.params.vmid, 10);
-  const vm = await dbService.getVMByVMID(vmid);
+  const vm = (req as any).authorizedVm;
 
   if (!vm) {
     return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
   }
 
   try {
-    const conns = await dbService.getProxmoxConnections();
-    if (!conns || conns.length === 0) throw new Error('No Proxmox connection found');
-    const conn = conns[0];
-    const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    
-    const pveRes = await proxmoxFetch(`https://${cleanHost}:${conn.port || 8006}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/status/current`, {
+    const conn = await getConnectionForVm(vm);
+    const pveRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'status/current'), {
       method: 'GET',
       headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
       sslFingerprint: conn.ssl_fingerprint,
@@ -201,42 +207,11 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
     } else {
       throw new Error('No data field');
     }
-  } catch (err) {
-    // No live Proxmox connection available: return REAL telemetry from the machine running
-    // this panel (never fabricated Proxmox numbers), clearly marked so the UI labels it.
-    const cpus = os.cpus();
-    let totalIdle = 0;
-    let totalTick = 0;
-    for (const c of cpus) {
-      for (const k of Object.keys(c.times) as (keyof typeof c.times)[]) {
-        totalTick += c.times[k];
-      }
-      totalIdle += c.times.idle;
-    }
-    const cpuPct = vm.status === 'running' ? Math.min(100, Math.max(0, (1 - totalIdle / Math.max(totalTick, 1)) * 100)) / 100 : 0;
-    const ramUsageBytes = vm.status === 'running' ? (os.totalmem() - os.freemem()) : 0;
-    const baseNet = 90000000000 + Math.floor(Math.random() * 10000000);
-    const baseDisk = 300000000000 + Math.floor(Math.random() * 5000000);
-
-    res.json({
-      success: true,
-      simulated: true,
-      reason: 'No live Proxmox connection available — telemetry shows the panel host, not the VM.',
+  } catch (err: any) {
+    res.status(503).json({
+      success: false,
+      error: err?.message || 'Live VM telemetry is currently unavailable',
       vmid,
-      name: vm.name,
-      status: vm.status,
-      isSuspended: vm.isSuspended,
-      telemetry: {
-        cpu: cpuPct,
-        mem: ramUsageBytes,
-        maxmem: vm.memory || vm.maxmem || 8589934592,
-        netin: baseNet,
-        netout: baseNet * 2,
-        diskread: baseDisk,
-        diskwrite: baseDisk / 3,
-        uptime: Math.floor(os.uptime()),
-        timestamp: new Date().toISOString()
-      },
     });
   }
 });
@@ -461,17 +436,18 @@ clientRouter.post('/vms/:vmid/power', async (req, res) => {
 clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
   const vmid = parseInt(req.params.vmid, 10);
   try {
-    const vm = await dbService.getVMByVMID(vmid);
+    const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
-    
-    const conns = await dbService.getProxmoxConnections();
-    if (!conns.length) throw new Error('No Proxmox conn');
-    const conn = conns[0];
-    const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+    const conn = await getConnectionForVm(vm);
     const headers = { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` };
 
     // Fetch Options (to check if firewall is enabled)
-    const optRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/firewall/options`, { headers });
+    const optRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'firewall/options'), {
+      method: 'GET',
+      headers,
+      sslFingerprint: conn.ssl_fingerprint,
+    });
     let options = {};
     if (optRes.ok) {
       const optJson = await optRes.json();
@@ -479,7 +455,11 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
     }
 
     // Fetch Rules
-    const rulesRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/firewall/rules`, { headers });
+    const rulesRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'firewall/rules'), {
+      method: 'GET',
+      headers,
+      sslFingerprint: conn.ssl_fingerprint,
+    });
     let rules = [];
     if (rulesRes.ok) {
       const rulesJson = await rulesRes.json();
@@ -488,14 +468,12 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
 
     res.json({ success: true, options, rules });
   } catch (err: any) {
-    // No Proxmox connection: return the locally stored firewall rules so the panel still works
-    try {
-      const localRules = await dbService.getVmFirewallRules(vmid);
-      const options = await dbService.getVmFirewallOptions(vmid);
-      return res.json({ success: true, simulated: true, reason: 'No live Proxmox connection — showing locally stored rules.', options, rules: localRules });
-    } catch (innerErr: any) {
-      res.json({ success: false, error: innerErr.message, options: {}, rules: [] });
-    }
+    res.status(503).json({
+      success: false,
+      error: err?.message || 'Live firewall data is currently unavailable',
+      options: {},
+      rules: [],
+    });
   }
 });
 
@@ -504,31 +482,30 @@ clientRouter.post('/vms/:vmid/firewall/toggle', async (req, res) => {
   try {
     const vmid = parseInt(req.params.vmid, 10);
     const { enable } = req.body;
-    const vm = await dbService.getVMByVMID(vmid);
+    const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
-    
-    const conns = await dbService.getProxmoxConnections();
-    const conn = conns[0];
-    const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const headers = { 
+
+    const conn = await getConnectionForVm(vm);
+    const headers = {
       'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}`,
-      'Content-Type': 'application/x-www-form-urlencoded'
+      'Content-Type': 'application/x-www-form-urlencoded',
     };
 
     const params = new URLSearchParams();
     params.append('enable', enable ? '1' : '0');
 
-    const pveRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/firewall/options`, {
+    const pveRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'firewall/options'), {
       method: 'PUT',
       headers,
-      body: params
+      body: params.toString(),
+      sslFingerprint: conn.ssl_fingerprint,
     });
 
     if (!pveRes.ok) throw new Error('Failed to toggle firewall in Proxmox');
     await dbService.setVmFirewallOptions(vmid, { enabled: enable === true });
     res.json({ success: true });
   } catch (err: any) {
-    res.json({ success: false, error: err.message });
+    res.status(503).json({ success: false, error: err.message || 'Unable to update firewall state' });
   }
 });
 
@@ -537,15 +514,13 @@ clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
   try {
     const vmid = parseInt(req.params.vmid, 10);
     const { action, type, proto, dport, enable, comment } = req.body;
-    const vm = await dbService.getVMByVMID(vmid);
+    const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
-    
-    const conns = await dbService.getProxmoxConnections();
-    const conn = conns[0];
-    const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const headers = { 
+
+    const conn = await getConnectionForVm(vm);
+    const headers = {
       'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}`,
-      'Content-Type': 'application/x-www-form-urlencoded'
+      'Content-Type': 'application/x-www-form-urlencoded',
     };
 
     const params = new URLSearchParams();
@@ -556,21 +531,21 @@ clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
     if (dport) params.append('dport', dport);
     if (comment) params.append('comment', comment);
 
-    const pveRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/firewall/rules`, {
+    const pveRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'firewall/rules'), {
       method: 'POST',
       headers,
-      body: params
+      body: params.toString(),
+      sslFingerprint: conn.ssl_fingerprint,
     });
 
     if (!pveRes.ok) {
-      const errText = await pveRes.text();
-      throw new Error(`Failed to create rule: ${errText}`);
+      throw new Error('Failed to create rule in Proxmox');
     }
     // Mirror the rule in the local store so the panel stays consistent when the connection drops
     await dbService.addVmFirewallRule(vmid, { ruleType: type || 'in', action: action || 'ACCEPT', proto, dport, enable: enable !== false, comment });
     res.json({ success: true });
   } catch (err: any) {
-    res.json({ success: false, error: err.message });
+    res.status(503).json({ success: false, error: err.message || 'Unable to create firewall rule' });
   }
 });
 
@@ -579,23 +554,22 @@ clientRouter.delete('/vms/:vmid/firewall/:pos', async (req, res) => {
   try {
     const vmid = parseInt(req.params.vmid, 10);
     const pos = parseInt(req.params.pos, 10);
-    const vm = await dbService.getVMByVMID(vmid);
+    const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
-    
-    const conns = await dbService.getProxmoxConnections();
-    const conn = conns[0];
-    const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+    const conn = await getConnectionForVm(vm);
     const headers = { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` };
 
-    const pveRes = await fetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${vm.node}/${vm.type}/${vmid}/firewall/rules/${pos}`, {
+    const pveRes = await proxmoxFetch(getVmEndpoint(conn, vm, `firewall/rules/${pos}`), {
       method: 'DELETE',
-      headers
+      headers,
+      sslFingerprint: conn.ssl_fingerprint,
     });
 
     if (!pveRes.ok) throw new Error('Failed to delete rule from Proxmox');
     await dbService.removeVmFirewallRule(vmid, pos);
     res.json({ success: true });
   } catch (err: any) {
-    res.json({ success: false, error: err.message });
+    res.status(503).json({ success: false, error: err.message || 'Unable to delete firewall rule' });
   }
 });
