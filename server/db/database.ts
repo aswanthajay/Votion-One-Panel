@@ -360,10 +360,27 @@ export async function initializeDatabaseSchema() {
         name VARCHAR(150) NOT NULL,
         monthly_cost_cents BIGINT NOT NULL DEFAULT 0,
         allocation_method VARCHAR(30) NOT NULL DEFAULT 'fixed',
+        currency VARCHAR(3) NOT NULL DEFAULT 'INR',
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS billing_server_costs (
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        node_name VARCHAR(100) NOT NULL,
+        monthly_cost_paise BIGINT NOT NULL DEFAULT 0,
+        ip_cost_paise BIGINT NOT NULL DEFAULT 0,
+        planned_vm_capacity INT NOT NULL DEFAULT 0,
+        included_ip_count INT NOT NULL DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (node_name)
+      );
+
+      ALTER TABLE vm_billing_profiles ADD COLUMN IF NOT EXISTS ip_count INT NOT NULL DEFAULT 1;
 
       CREATE TABLE IF NOT EXISTS billing_events (
         id VARCHAR(100) PRIMARY KEY,
@@ -482,6 +499,7 @@ export async function initializeDatabaseSchema() {
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS username VARCHAR(100) DEFAULT 'root@pam';
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS password VARCHAR(255);
       ALTER TABLE accounts ADD COLUMN IF NOT EXISTS operator_access BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE billing_cost_bases ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
     `);
 
     // Legacy migration: tasks column existed in old static constants — ensure table exists (created above)
@@ -497,8 +515,15 @@ export async function initializeDatabaseSchema() {
     `);
     await client.query(`
       INSERT INTO system_settings (setting_key, setting_value)
-      VALUES ('billing_config', '{"automationEnabled": false, "reminderEmailsEnabled": false, "suspensionExecutionEnabled": false, "daysBeforeDue": 7, "gracePeriodDays": 7, "suspendAfterDaysOverdue": 1, "taxRatePercent": 0, "currency": "USD"}')
+      VALUES ('billing_config', '{"automationEnabled": false, "reminderEmailsEnabled": false, "suspensionExecutionEnabled": false, "daysBeforeDue": 7, "gracePeriodDays": 7, "suspendAfterDaysOverdue": 1, "taxRatePercent": 0, "currency": "INR"}')
       ON CONFLICT (setting_key) DO NOTHING
+    `);
+    await client.query(`
+      UPDATE system_settings
+      SET setting_value = jsonb_set(setting_value, '{currency}', '"INR"'::jsonb), updated_at = NOW()
+      WHERE setting_key = 'billing_config'
+        AND COALESCE(setting_value->>'currency', 'USD') = 'USD'
+        AND NOT EXISTS (SELECT 1 FROM billing_invoices)
     `);
     await client.query(`
       INSERT INTO pricing_plans (id, name, currency, monthly_price_cents, vcpu_limit, ram_gb, disk_gb, bandwidth_gb, sort_order)
@@ -2370,7 +2395,7 @@ export class DatabaseService {
 
   async getBillingCostBases(activeOnly = false) {
     const res = await pgPool.query(`SELECT * FROM billing_cost_bases ${activeOnly ? 'WHERE is_active = true' : ''} ORDER BY name ASC`);
-    return res.rows.map(row => ({ id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at }));
+    return res.rows.map(row => ({ id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, currency: row.currency || 'INR', isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at }));
   }
 
   async upsertBillingCostBase(cost: any) {
@@ -2378,16 +2403,65 @@ export class DatabaseService {
     const name = String(cost.name || '').trim().slice(0, 150);
     const monthlyCostCents = Math.round(Number(cost.monthlyCostCents));
     const allocationMethod = ['fixed', 'per_vm', 'per_vcpu', 'per_gb_ram', 'per_gb_disk'].includes(cost.allocationMethod) ? cost.allocationMethod : 'fixed';
-    if (!id || !name || !Number.isInteger(monthlyCostCents) || monthlyCostCents < 0) throw new Error('Cost basis values are invalid.');
+    const currency = String(cost.currency || 'INR').trim().toUpperCase().slice(0, 3);
+    if (!id || !name || !['INR', 'USD', 'EUR'].includes(currency) || !Number.isInteger(monthlyCostCents) || monthlyCostCents < 0) throw new Error('Cost basis values are invalid. Currency must be INR, USD, or EUR.');
     const res = await pgPool.query(
-      `INSERT INTO billing_cost_bases (id, name, monthly_cost_cents, allocation_method, is_active, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       ON CONFLICT (id) DO UPDATE SET name = $2, monthly_cost_cents = $3, allocation_method = $4, is_active = $5, updated_at = NOW()
+      `INSERT INTO billing_cost_bases (id, name, monthly_cost_cents, allocation_method, currency, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (id) DO UPDATE SET name = $2, monthly_cost_cents = $3, allocation_method = $4, currency = $5, is_active = $6, updated_at = NOW()
        RETURNING *`,
-      [id, name, monthlyCostCents, allocationMethod, cost.isActive !== false]
+      [id, name, monthlyCostCents, allocationMethod, currency, cost.isActive !== false]
     );
     const row = res.rows[0];
-    return { id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, name: row.name, monthlyCostCents: Number(row.monthly_cost_cents), allocationMethod: row.allocation_method, currency: row.currency || 'INR', isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  async getBillingServerCosts(activeOnly = false) {
+    const res = await pgPool.query(
+      `SELECT s.*,
+              COUNT(DISTINCT v.vmid)::int AS assigned_vm_count,
+              COALESCE(SUM(COALESCE(p.ip_count, 1)), 0)::int AS assigned_ip_count
+       FROM billing_server_costs s
+       LEFT JOIN vms v ON v.node = s.node_name AND v.owner_email NOT LIKE 'unassigned@%'
+       LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+       ${activeOnly ? 'WHERE s.is_active = true' : ''}
+       GROUP BY s.id
+       ORDER BY s.node_name ASC`
+    );
+    return res.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      nodeName: row.node_name,
+      monthlyCostPaise: Number(row.monthly_cost_paise),
+      ipCostPaise: Number(row.ip_cost_paise),
+      plannedVmCapacity: Number(row.planned_vm_capacity),
+      includedIpCount: Number(row.included_ip_count),
+      assignedVmCount: Number(row.assigned_vm_count),
+      assignedIpCount: Number(row.assigned_ip_count),
+      isActive: Boolean(row.is_active),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  async upsertBillingServerCost(cost: any) {
+    const id = String(cost.id || `server-cost-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`).trim().toLowerCase();
+    const name = String(cost.name || '').trim().slice(0, 150);
+    const nodeName = String(cost.nodeName || '').trim().slice(0, 100);
+    const monthlyCostPaise = Math.round(Number(cost.monthlyCostPaise));
+    const ipCostPaise = Math.round(Number(cost.ipCostPaise));
+    const plannedVmCapacity = Math.max(0, Math.round(Number(cost.plannedVmCapacity) || 0));
+    const includedIpCount = Math.max(0, Math.round(Number(cost.includedIpCount) || 0));
+    if (!id || !name || !nodeName || !Number.isInteger(monthlyCostPaise) || monthlyCostPaise < 0 || !Number.isInteger(ipCostPaise) || ipCostPaise < 0) throw new Error('Dedicated server cost values are invalid.');
+    const res = await pgPool.query(
+      `INSERT INTO billing_server_costs (id, name, node_name, monthly_cost_paise, ip_cost_paise, planned_vm_capacity, included_ip_count, is_active, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (id) DO UPDATE SET name = $2, node_name = $3, monthly_cost_paise = $4, ip_cost_paise = $5, planned_vm_capacity = $6, included_ip_count = $7, is_active = $8, updated_at = NOW()
+       RETURNING *`,
+      [id, name, nodeName, monthlyCostPaise, ipCostPaise, plannedVmCapacity, includedIpCount, cost.isActive !== false]
+    );
+    const profiles = await this.getBillingServerCosts();
+    return profiles.find(item => item.id === res.rows[0].id) || null;
   }
 
   async getVmBillingProfiles(vmid?: number) {
@@ -2396,7 +2470,7 @@ export class DatabaseService {
     const res = await pgPool.query(
       `SELECT v.vmid, v.vm_name, v.owner_email, v.expiry_date,
               p.plan_id, p.custom_monthly_price_cents, p.billing_status,
-              p.billing_cycle_day, p.grace_period_days, p.next_due_at, p.updated_at,
+              p.billing_cycle_day, p.grace_period_days, p.next_due_at, p.ip_count, p.updated_at,
               pl.name AS plan_name, pl.currency, pl.monthly_price_cents
        FROM vms v
        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
@@ -2410,7 +2484,7 @@ export class DatabaseService {
 
       billingCycleDay: Number(row.billing_cycle_day || 1),
       gracePeriodDays: row.grace_period_days === null || row.grace_period_days === undefined ? null : Number(row.grace_period_days),
-      nextDueAt: row.next_due_at || row.expiry_date, updatedAt: row.updated_at }));
+      nextDueAt: row.next_due_at || row.expiry_date, ipCount: Number(row.ip_count || 1), updatedAt: row.updated_at }));
   }
 
   async upsertVmBillingProfile(vmid: number, profile: any, actorEmail: string) {
@@ -2427,12 +2501,13 @@ export class DatabaseService {
     const cycleDay = Math.min(28, Math.max(1, Math.round(Number(profile.billingCycleDay) || 1)));
     const grace = profile.gracePeriodDays === null || profile.gracePeriodDays === '' || profile.gracePeriodDays === undefined ? null : Math.min(365, Math.max(0, Math.round(Number(profile.gracePeriodDays))));
     const nextDueAt = profile.nextDueAt || vm.expiryDate || null;
+    const ipCount = Math.min(256, Math.max(1, Math.round(Number(profile.ipCount) || 1)));
     const res = await pgPool.query(
-      `INSERT INTO vm_billing_profiles (vmid, plan_id, custom_monthly_price_cents, billing_status, billing_cycle_day, grace_period_days, next_due_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-       ON CONFLICT (vmid) DO UPDATE SET plan_id = $2, custom_monthly_price_cents = $3, billing_status = $4, billing_cycle_day = $5, grace_period_days = $6, next_due_at = $7, updated_at = NOW()
+      `INSERT INTO vm_billing_profiles (vmid, plan_id, custom_monthly_price_cents, billing_status, billing_cycle_day, grace_period_days, next_due_at, ip_count, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (vmid) DO UPDATE SET plan_id = $2, custom_monthly_price_cents = $3, billing_status = $4, billing_cycle_day = $5, grace_period_days = $6, next_due_at = $7, ip_count = $8, updated_at = NOW()
        RETURNING *`,
-      [vmid, planId, customPrice, billingStatus, cycleDay, grace, nextDueAt]
+      [vmid, planId, customPrice, billingStatus, cycleDay, grace, nextDueAt, ipCount]
     );
     await this.logAudit(actorEmail, 'UPDATE_VM_BILLING_PROFILE', `VMID ${vmid}`, `Updated plan ${planId || 'custom'} and billing status ${billingStatus}`);
     return (await this.getVmBillingProfiles(vmid))[0] || res.rows[0];
@@ -2466,14 +2541,42 @@ export class DatabaseService {
        FROM billing_invoices ${where}`,
       params,
     );
+    const revenueByCurrency = await pgPool.query(
+      `SELECT currency, COUNT(*)::int AS invoice_count,
+              COALESCE(SUM(total_cents), 0)::bigint AS billed_cents,
+              COALESCE(SUM(paid_cents), 0)::bigint AS collected_cents,
+              COALESCE(SUM(GREATEST(total_cents - paid_cents, 0)), 0)::bigint AS outstanding_cents
+       FROM billing_invoices ${where}
+       GROUP BY currency ORDER BY currency ASC`,
+      params,
+    );
     const vmWhere = accountEmail ? 'WHERE owner_email = $1 AND owner_email NOT LIKE \'unassigned@%\'' : "WHERE owner_email NOT LIKE 'unassigned@%'";
     const vm = await pgPool.query(`SELECT COUNT(*)::int AS vm_count FROM vms ${vmWhere}`, params);
-    const cost = await pgPool.query("SELECT COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true");
+    const sharedCosts = await pgPool.query("SELECT currency, COALESCE(SUM(monthly_cost_cents), 0)::bigint AS monthly_cost_cents FROM billing_cost_bases WHERE is_active = true GROUP BY currency");
+    const serverCosts = await this.getBillingServerCosts(true);
     const row = invoice.rows[0];
     const billed = Number(row.billed_cents);
     const collected = Number(row.collected_cents);
-    const monthlyCost = Number(cost.rows[0].monthly_cost_cents);
-    return { invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: monthlyCost, estimatedGrossProfitCents: billed - monthlyCost, collectedGrossProfitCents: collected - monthlyCost, estimatedMarginPercent: billed > 0 ? Math.round(((billed - monthlyCost) / billed) * 10000) / 100 : 0 };
+    const monthlyCost = Number(sharedCosts.rows.reduce((sum, item) => sum + (item.currency === 'INR' ? Number(item.monthly_cost_cents) : 0), 0));
+    const monthlyServerCostPaise = serverCosts.reduce((sum, item) => sum + item.monthlyCostPaise, 0);
+    const monthlyIpCostPaise = serverCosts.reduce((sum, item) => sum + Math.max(0, item.assignedIpCount - item.includedIpCount) * item.ipCostPaise, 0);
+    const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
+    const inrRevenue = revenueByCurrency.rows.find(item => item.currency === 'INR');
+    const inrBilledPaise = Number(inrRevenue?.billed_cents || 0);
+    const inrCollectedPaise = Number(inrRevenue?.collected_cents || 0);
+    const inrOutstandingPaise = Number(inrRevenue?.outstanding_cents || 0);
+    const inrGrossProfitPaise = inrBilledPaise - totalInrCostPaise;
+    const inrCollectedGrossProfitPaise = inrCollectedPaise - totalInrCostPaise;
+    const totalServerCapacityVms = serverCosts.reduce((sum, item) => sum + item.plannedVmCapacity, 0);
+    const totalAssignedServerVms = serverCosts.reduce((sum, item) => sum + item.assignedVmCount, 0);
+    const totalAssignedIpCount = serverCosts.reduce((sum, item) => sum + item.assignedIpCount, 0);
+    const totalIncludedIpCount = serverCosts.reduce((sum, item) => sum + item.includedIpCount, 0);
+    return {
+      invoiceCount: Number(row.invoice_count), vmCount: Number(vm.rows[0].vm_count), billedCents: billed, collectedCents: collected, outstandingCents: Number(row.outstanding_cents), overdueCount: Number(row.overdue_count), overdueCents: Number(row.overdue_cents), suspendedInvoiceCount: Number(row.suspended_invoice_count), monthlyCostCents: totalInrCostPaise,
+      estimatedGrossProfitCents: inrGrossProfitPaise, collectedGrossProfitCents: inrCollectedGrossProfitPaise, estimatedMarginPercent: inrBilledPaise > 0 ? Math.round((inrGrossProfitPaise / inrBilledPaise) * 10000) / 100 : 0,
+      reportingCurrency: 'INR', inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise: monthlyCost, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise,
+      totalServerCapacityVms, totalAssignedServerVms, availableServerCapacityVms: Math.max(0, totalServerCapacityVms - totalAssignedServerVms), totalAssignedIpCount, totalIncludedIpCount, billableIpCount: Math.max(0, totalAssignedIpCount - totalIncludedIpCount), revenueByCurrency: revenueByCurrency.rows.map(item => ({ currency: item.currency, invoiceCount: Number(item.invoice_count), billedCents: Number(item.billed_cents), collectedCents: Number(item.collected_cents), outstandingCents: Number(item.outstanding_cents) })),
+    };
   }
 
   async createInvoiceForVm(vmid: number, issuedAt = new Date()) {

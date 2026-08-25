@@ -1458,7 +1458,7 @@ apiRouter.get('/billing/summary', async (req, res) => {
   try {
     const data = await dbService.getBillingSummary(isBillingAdmin(req) ? undefined : billingActor(req));
     if (!isBillingAdmin(req)) {
-      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, ...clientData } = data;
+      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise, totalServerCapacityVms, totalAssignedServerVms, availableServerCapacityVms, totalAssignedIpCount, totalIncludedIpCount, billableIpCount, revenueByCurrency, ...clientData } = data;
       res.json({ success: true, data: clientData });
       return;
     }
@@ -1540,6 +1540,26 @@ apiRouter.post('/billing/cost-bases', async (req, res) => {
   try {
     const data = await dbService.upsertBillingCostBase(req.body || {});
     await dbService.logAudit(billingActor(req), 'UPSERT_BILLING_COST_BASIS', data.id, `Saved ${data.name} at ${data.monthlyCostCents} cents per month`);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/billing/server-costs', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    res.json({ success: true, data: await dbService.getBillingServerCosts() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+apiRouter.post('/billing/server-costs', async (req, res) => {
+  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+  try {
+    const data = await dbService.upsertBillingServerCost(req.body || {});
+    await dbService.logAudit(billingActor(req), 'UPSERT_BILLING_SERVER_COST', data.id, `Saved dedicated server cost for ${data.nodeName}`);
     res.json({ success: true, data });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });

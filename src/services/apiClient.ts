@@ -212,6 +212,23 @@ export interface ApiBillingSummary {
   estimatedGrossProfitCents: number;
   collectedGrossProfitCents: number;
   estimatedMarginPercent: number;
+  reportingCurrency: BillingCurrency;
+  inrBilledPaise: number;
+  inrCollectedPaise: number;
+  inrOutstandingPaise: number;
+  inrGrossProfitPaise: number;
+  inrCollectedGrossProfitPaise: number;
+  monthlySharedCostPaise: number;
+  monthlyServerCostPaise: number;
+  monthlyIpCostPaise: number;
+  totalInrCostPaise: number;
+  totalServerCapacityVms: number;
+  totalAssignedServerVms: number;
+  availableServerCapacityVms: number;
+  totalAssignedIpCount: number;
+  totalIncludedIpCount: number;
+  billableIpCount: number;
+  revenueByCurrency: Array<{ currency: BillingCurrency; invoiceCount: number; billedCents: number; collectedCents: number; outstandingCents: number }>;
 }
 
 export interface ApiBillingConfig {
@@ -238,6 +255,7 @@ export interface ApiVmBillingProfile {
   billingCycleDay: number;
   gracePeriodDays: number | null;
   nextDueAt?: string;
+  ipCount: number;
 }
 
 export interface ApiBillingCostBase {
@@ -245,8 +263,23 @@ export interface ApiBillingCostBase {
   name: string;
   monthlyCostCents: number;
   allocationMethod: string;
+  currency: BillingCurrency;
   isActive: boolean;
 }
+
+export interface ApiBillingServerCost {
+  id: string;
+  name: string;
+  nodeName: string;
+  monthlyCostPaise: number;
+  ipCostPaise: number;
+  plannedVmCapacity: number;
+  includedIpCount: number;
+  assignedVmCount: number;
+  assignedIpCount: number;
+  isActive: boolean;
+}
+
 
 export interface ApiBillingSuspensionAction {
   id: string;
@@ -606,6 +639,18 @@ class ApiClient {
   async upsertBillingCostBase(cost: Partial<ApiBillingCostBase>): Promise<ApiBillingCostBase> {
     const res = await this.apiFetch(`${API_BASE_URL}/billing/cost-bases`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(cost) });
     const data = await this.readApiResponse(res, 'Unable to save cost basis.');
+    return data.data;
+  }
+
+  async getBillingServerCosts(): Promise<ApiBillingServerCost[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load dedicated-server costs.');
+    return data.data || [];
+  }
+
+  async upsertBillingServerCost(cost: Partial<ApiBillingServerCost>): Promise<ApiBillingServerCost> {
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(cost) });
+    const data = await this.readApiResponse(res, 'Unable to save dedicated-server cost.');
     return data.data;
   }
 
