@@ -236,9 +236,18 @@ export async function initializeDatabaseSchema() {
         priority VARCHAR(50) NOT NULL DEFAULT 'medium',
         status VARCHAR(50) NOT NULL DEFAULT 'open',
         user_email VARCHAR(255) NOT NULL,
+        assigned_to VARCHAR(255),
+        last_client_read_at TIMESTAMP,
+        last_admin_read_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS assigned_to VARCHAR(255);
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_client_read_at TIMESTAMP;
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_admin_read_at TIMESTAMP;
+      CREATE INDEX IF NOT EXISTS idx_tickets_queue ON tickets (status, priority, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tickets_assigned_to ON tickets (assigned_to, updated_at DESC);
 
       CREATE TABLE IF NOT EXISTS ticket_replies (
         id VARCHAR(100) PRIMARY KEY,
@@ -1788,67 +1797,153 @@ export class DatabaseService {
   }
 
   // SUPPORT TICKET SYSTEM & REPLIES
-  async getSupportTickets(userEmail?: string) {
-    let query = 'SELECT * FROM tickets';
-    let params: any[] = [];
-    if (userEmail) {
-      query += ' WHERE user_email = $1';
-      params.push(userEmail.toLowerCase().trim());
+  async getSupportTickets(userEmail?: string, filters: { search?: string; status?: string; priority?: string; assignedTo?: string; viewerEmail?: string; viewerRole?: 'admin' | 'client' } = {}) {
+    const params: any[] = [];
+    const conditions: string[] = [];
+    const addParam = (value: any) => { params.push(value); return `$${params.length}`; };
+
+    if (userEmail) conditions.push(`t.user_email = ${addParam(userEmail.toLowerCase().trim())}`);
+    if (filters.search?.trim()) {
+      const search = addParam(`%${filters.search.trim()}%`);
+      conditions.push(`(t.id ILIKE ${search} OR t.subject ILIKE ${search} OR t.category ILIKE ${search} OR t.user_email ILIKE ${search})`);
     }
-    query += ' ORDER BY created_at DESC';
-    const res = await pgPool.query(query, params);
-    
-    return res.rows.map(t => ({
-      id: t.id, ticket_number: t.ticket_number, vmid: t.vmid, subject: t.subject, category: t.category, status: t.status, priority: t.priority, userEmail: t.user_email, createdAt: t.created_at,
-    }));
+    if (filters.status && ['open', 'in-progress', 'replied', 'resolved', 'closed'].includes(filters.status)) {
+      conditions.push(`t.status = ${addParam(filters.status)}`);
+    }
+    if (filters.priority && ['low', 'medium', 'high', 'urgent'].includes(filters.priority)) {
+      conditions.push(`t.priority = ${addParam(filters.priority)}`);
+    }
+    if (filters.assignedTo) {
+      conditions.push(filters.assignedTo === 'unassigned' ? 't.assigned_to IS NULL' : `t.assigned_to = ${addParam(filters.assignedTo.toLowerCase().trim())}`);
+    }
+
+    const res = await pgPool.query(
+      `SELECT t.*, COUNT(r.id)::int AS reply_count, MAX(r.created_at) AS last_reply_at,
+              (ARRAY_AGG(r.sender_role ORDER BY r.created_at DESC))[1] AS last_reply_role
+       FROM tickets t
+       LEFT JOIN ticket_replies r ON r.ticket_id = t.id
+       ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+       GROUP BY t.id
+       ORDER BY CASE WHEN t.status IN ('open', 'in-progress', 'replied') THEN 0 ELSE 1 END,
+                CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                COALESCE(MAX(r.created_at), t.updated_at, t.created_at) DESC`,
+      params,
+    );
+
+    const viewerEmail = filters.viewerEmail?.toLowerCase().trim();
+    const viewerRole = filters.viewerRole || 'client';
+    return res.rows.map(t => {
+      const lastReplyAt = t.last_reply_at || t.created_at;
+      const readAt = viewerRole === 'admin' ? t.last_admin_read_at : t.last_client_read_at;
+      const unread = Boolean(viewerEmail && t.last_reply_role && t.last_reply_role !== viewerRole && (!readAt || new Date(readAt).getTime() < new Date(lastReplyAt).getTime()));
+      return {
+        id: t.id,
+        ticket_number: t.ticket_number,
+        vmid: t.vmid,
+        subject: t.subject,
+        category: t.category,
+        status: t.status,
+        priority: t.priority,
+        userEmail: t.user_email,
+        assignedTo: t.assigned_to,
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
+        replyCount: Number(t.reply_count || 0),
+        lastReplyAt,
+        lastReplyRole: t.last_reply_role || null,
+        unread,
+      };
+    });
   }
 
   async getTicketDetails(ticketId: string) {
     const tRes = await pgPool.query('SELECT * FROM tickets WHERE id = $1 OR ticket_number = $1', [ticketId]);
     if (tRes.rows.length === 0) return null;
     const ticket = tRes.rows[0];
-
     const rRes = await pgPool.query('SELECT * FROM ticket_replies WHERE ticket_id = $1 ORDER BY created_at ASC', [ticket.id]);
-    
+
     return {
-      ticket: { id: ticket.id, ticket_number: ticket.ticket_number, vmid: ticket.vmid, subject: ticket.subject, category: ticket.category, status: ticket.status, priority: ticket.priority, userEmail: ticket.user_email, createdAt: ticket.created_at },
+      ticket: {
+        id: ticket.id,
+        ticket_number: ticket.ticket_number,
+        vmid: ticket.vmid,
+        subject: ticket.subject,
+        category: ticket.category,
+        status: ticket.status,
+        priority: ticket.priority,
+        userEmail: ticket.user_email,
+        assignedTo: ticket.assigned_to,
+        createdAt: ticket.created_at,
+        updatedAt: ticket.updated_at,
+      },
       replies: rRes.rows.map(r => ({ id: r.id, ticketId: r.ticket_id, senderEmail: r.sender_email, senderRole: r.sender_role, message: r.message, timestamp: r.created_at })),
     };
   }
 
   async createSupportTicket(subject: string, category: string, priority: string, vmid?: number, userEmail: string = 'admin@votioncloud.org') {
-    const ticketId = `TICK-${Math.floor(1000 + Math.random() * 9000)}`;
+    const ticketId = `TICK-${Date.now().toString().slice(-8)}-${Math.floor(100 + Math.random() * 900)}`;
     const email = userEmail.toLowerCase().trim();
-    
     await pgPool.query(
       `INSERT INTO tickets (id, ticket_number, vmid, subject, category, status, priority, user_email, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
       [ticketId, ticketId, vmid || null, subject, category || 'General', 'open', priority || 'medium', email]
     );
-
     await this.logAudit(userEmail, 'CREATE_TICKET', ticketId, `Opened support ticket for VMID ${vmid || 'N/A'}`);
     return await this.getTicketDetails(ticketId);
   }
 
   async addTicketReply(ticketId: string, senderEmail: string, message: string, senderRole: 'admin' | 'client' = 'client') {
-    const replyId = `rep-${Date.now()}`;
+    const replyId = `rep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await pgPool.query(
       `INSERT INTO ticket_replies (id, ticket_id, sender_email, sender_role, message, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW())`,
       [replyId, ticketId, senderEmail.toLowerCase().trim(), senderRole, message]
     );
-
-    if (senderRole === 'admin') {
-      await pgPool.query("UPDATE tickets SET status = 'replied' WHERE id = $1 AND status = 'open'", [ticketId]);
-    }
-    await this.logAudit(senderEmail, 'REPLY_TICKET', ticketId, `Added reply message`);
+    await pgPool.query(
+      `UPDATE tickets SET updated_at = NOW(), status = CASE
+         WHEN $2 = 'admin' THEN 'replied'
+         WHEN status IN ('replied', 'resolved') THEN 'open'
+         ELSE status
+       END WHERE id = $1`,
+      [ticketId, senderRole],
+    );
+    await this.logAudit(senderEmail, 'REPLY_TICKET', ticketId, 'Added reply message');
     return { id: replyId, ticketId, senderEmail, senderRole, message, timestamp: new Date().toISOString() };
   }
 
   async updateTicketStatus(ticketId: string, status: string, userEmail: string) {
-    await pgPool.query('UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2', [status, ticketId]);
+    const result = await pgPool.query('UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [status, ticketId]);
+    if (result.rowCount === 0) throw new Error('Support ticket not found');
     await this.logAudit(userEmail, 'UPDATE_TICKET_STATUS', ticketId, `Ticket status updated to ${status}`);
     return { success: true, ticketId, status };
+  }
+
+  async updateTicketPriority(ticketId: string, priority: string, userEmail: string) {
+    const result = await pgPool.query('UPDATE tickets SET priority = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [priority, ticketId]);
+    if (result.rowCount === 0) throw new Error('Support ticket not found');
+    await this.logAudit(userEmail, 'UPDATE_TICKET_PRIORITY', ticketId, `Ticket priority updated to ${priority}`);
+    return { success: true, ticketId, priority };
+  }
+
+  async assignTicket(ticketId: string, assigneeEmail: string | null, userEmail: string) {
+    const normalized = assigneeEmail?.trim().toLowerCase() || null;
+    const result = await pgPool.query('UPDATE tickets SET assigned_to = $1, updated_at = NOW() WHERE id = $2 RETURNING id', [normalized, ticketId]);
+    if (result.rowCount === 0) throw new Error('Support ticket not found');
+    await this.logAudit(userEmail, 'ASSIGN_TICKET', ticketId, normalized ? `Assigned ticket to ${normalized}` : 'Removed ticket assignment');
+    return { success: true, ticketId, assignedTo: normalized };
+  }
+
+  async markTicketRead(ticketId: string, viewerEmail: string, viewerRole: 'admin' | 'client') {
+    const column = viewerRole === 'admin' ? 'last_admin_read_at' : 'last_client_read_at';
+    const ownerCondition = viewerRole === 'admin' ? '' : ' AND user_email = $2';
+    const result = await pgPool.query(`UPDATE tickets SET ${column} = NOW() WHERE id = $1${ownerCondition} RETURNING id`, viewerRole === 'admin' ? [ticketId] : [ticketId, viewerEmail.toLowerCase().trim()]);
+    if (result.rowCount === 0) throw new Error('Support ticket not found');
+    return { success: true, ticketId, viewerRole };
+  }
+
+  async getSupportAgents() {
+    const result = await pgPool.query("SELECT email, name, role FROM accounts WHERE role IN ('admin', 'administrator', 'moderator') ORDER BY name NULLS LAST, email ASC");
+    return result.rows.map(row => ({ email: row.email, name: row.name, role: row.role }));
   }
 
   // MODALS & TELEMETRY

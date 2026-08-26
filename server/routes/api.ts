@@ -517,10 +517,22 @@ const ticketStatuses = new Set(['open', 'in-progress', 'replied', 'resolved', 'c
 apiRouter.get('/support/tickets', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const filterEmail = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '') ? undefined : userEmail;
-
-  const tickets = await dbService.getSupportTickets(filterEmail);
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+  const filterEmail = isAdmin ? undefined : userEmail;
+  const tickets = await dbService.getSupportTickets(filterEmail, {
+    search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    status: typeof req.query.status === 'string' ? req.query.status : undefined,
+    priority: typeof req.query.priority === 'string' ? req.query.priority : undefined,
+    assignedTo: isAdmin && typeof req.query.assignedTo === 'string' ? req.query.assignedTo : undefined,
+    viewerEmail: userEmail,
+    viewerRole: isAdmin ? 'admin' : 'client',
+  });
   res.json({ success: true, count: tickets.length, data: tickets });
+});
+
+apiRouter.get('/support/agents', requireAdmin, async (_req, res) => {
+  const agents = await dbService.getSupportAgents();
+  res.json({ success: true, count: agents.length, data: agents });
 });
 
 apiRouter.post('/support/tickets', async (req, res) => {
@@ -548,6 +560,19 @@ apiRouter.get('/support/tickets/:id', async (req, res) => {
   }
 });
 
+apiRouter.post('/support/tickets/:id/read', async (req, res) => {
+  const viewerEmail = req.authUser?.email;
+  if (!viewerEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const details = await dbService.getTicketDetails(req.params.id);
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+  const ownsTicket = String(details?.ticket?.userEmail || '').toLowerCase() === viewerEmail.toLowerCase();
+  if (!details || (!isAdmin && !ownsTicket)) {
+    return res.status(404).json({ success: false, error: `Support ticket ${req.params.id} not found` });
+  }
+  const result = await dbService.markTicketRead(req.params.id, viewerEmail, isAdmin ? 'admin' : 'client');
+  res.json({ success: true, data: result });
+});
+
 apiRouter.post('/support/tickets/:id/replies', async (req, res) => {
   const senderEmail = req.authUser?.email;
   if (!senderEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -572,17 +597,29 @@ apiRouter.put('/support/tickets/:id/status', requireAdmin, async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const { status } = req.body;
-
-  if (!status) {
-    return res.status(400).json({ success: false, error: 'Status is required' });
-  }
-
+  if (!status) return res.status(400).json({ success: false, error: 'Status is required' });
   const statusValue = String(status).trim();
-  if (!ticketStatuses.has(statusValue)) {
-    return res.status(400).json({ success: false, error: 'Invalid ticket status' });
-  }
+  if (!ticketStatuses.has(statusValue)) return res.status(400).json({ success: false, error: 'Invalid ticket status' });
   const result = await dbService.updateTicketStatus(String(req.params.id), statusValue, userEmail);
   res.json({ success: true, message: `Ticket ${req.params.id} status updated to ${statusValue}`, data: result });
+});
+
+apiRouter.put('/support/tickets/:id/priority', requireAdmin, async (req, res) => {
+  const userEmail = req.authUser?.email;
+  const priority = String(req.body?.priority || '').trim();
+  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  if (!['low', 'medium', 'high', 'urgent'].includes(priority)) return res.status(400).json({ success: false, error: 'Invalid ticket priority' });
+  const result = await dbService.updateTicketPriority(String(req.params.id), priority, userEmail);
+  res.json({ success: true, message: `Ticket ${req.params.id} priority updated to ${priority}`, data: result });
+});
+
+apiRouter.put('/support/tickets/:id/assignment', requireAdmin, async (req, res) => {
+  const userEmail = req.authUser?.email;
+  const assigneeEmail = req.body?.assigneeEmail === null || req.body?.assigneeEmail === '' ? null : String(req.body?.assigneeEmail || '').trim();
+  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  if (assigneeEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assigneeEmail)) return res.status(400).json({ success: false, error: 'A valid assignee email is required' });
+  const result = await dbService.assignTicket(String(req.params.id), assigneeEmail, userEmail);
+  res.json({ success: true, message: assigneeEmail ? `Ticket assigned to ${assigneeEmail}` : 'Ticket assignment removed', data: result });
 });
 
 // 9g. POST /api/v1/user/change-email (Change primary email with referential integrity)
