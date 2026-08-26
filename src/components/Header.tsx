@@ -286,14 +286,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span>Upgrade</span>
         </button>
 
-        {/* REFER A FRIEND LINK */}
-        <button 
-          onClick={() => onOpenModal('refer')}
-          className="header-referral-control header-link cursor-pointer"
-        >
-          <span>Refer a friend</span>
-        </button>
-
         {/* USER PROFILE BUTTON — Live user name from PostgreSQL */}
         <div className="header-user-menu-wrap relative">
           <button 
