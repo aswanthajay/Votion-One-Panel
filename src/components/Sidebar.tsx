@@ -225,7 +225,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {isCollapsed && (
           <button 
-            className="w-[30px] h-[30px] flex items-center justify-center hover:bg-[#f4f5f5] text-[#1a1a1a] rounded transition-colors"
+            className="collapsed-sidebar-control w-[30px] h-[30px] flex items-center justify-center text-[#1a1a1a] rounded transition-colors"
             onClick={() => onOpenCmdModal()}
             title="Search (Ctrl+K)"
           >
@@ -236,7 +236,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         <button
-          className="w-[30px] h-[30px] shrink-0 flex items-center justify-center text-[#1a1a1a] hover:bg-[#f4f5f5] rounded transition-colors cursor-pointer"
+          className="collapsed-sidebar-control w-[30px] h-[30px] shrink-0 flex items-center justify-center text-[#1a1a1a] rounded transition-colors cursor-pointer"
           onClick={onToggleCollapse}
           title="Toggle Side Menu"
         >

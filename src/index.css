@@ -1523,11 +1523,24 @@ body {
 
 /* Sidebar controls use the legacy gray-10 hover token; keep that token from
    becoming a light flash on the dark shell. */
-[data-theme="dark"] .app-sidenav .sidenav-toggle-btn:hover,
-[data-theme="dark"] .app-sidenav .search-collapsed-btn:hover {
+[data-theme="dark"] .app-sidenav
+.sidenav-toggle-btn:hover,
+[data-theme="dark"] .app-sidenav
+.search-collapsed-btn:hover,
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-top-sticky > button:hover:not(.mobile-sidebar-close) {
   background-color: #161616 !important;
+  background-image: none !important;
   color: #ededed !important;
+  opacity: 1 !important;
 }
+
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-top-sticky > button:focus-visible {
+  background-color: #1c1c1c !important;
+  background-image: none !important;
+  color: #ededed !important;
+  opacity: 1 !important;
+}
+
 
 [data-theme="dark"] .app-sidenav .sidenav-toggle-btn:focus-visible,
 [data-theme="dark"] .app-sidenav .search-collapsed-btn:focus-visible {
@@ -2938,4 +2951,13 @@ body {
   .billing-finance-fallback-core {
     animation-play-state: paused;
   }
+}
+
+
+/* Final collapsed-icon hover guard: prevent legacy light utility classes from flashing white. */
+[data-theme="dark"] .app-sidenav.collapsed .collapsed-sidebar-control:hover,
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-link:hover {
+  background-color: #161616 !important;
+  background-image: none !important;
+  color: #ededed !important;
 }
