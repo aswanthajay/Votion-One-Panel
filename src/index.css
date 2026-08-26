@@ -1632,3 +1632,30 @@ body {
 [data-theme="dark"] .overview-dashboard [class~="bg-[#f0fdf4]"] {
   background-color: #0d2a1b !important;
 }
+
+
+/* Primary actions use the dark-theme inverse action token; keep destructive
+   actions explicitly red rather than inheriting the normal action treatment. */
+[data-theme="dark"] .btn-primary {
+  background-color: #ededed !important;
+  border-color: #ededed !important;
+  color: #000000 !important;
+}
+
+[data-theme="dark"] .btn-primary:hover:not(:disabled) {
+  background-color: #ffffff !important;
+  border-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+[data-theme="dark"] .theme-destructive-button {
+  background-color: #b42318 !important;
+  border-color: #b42318 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .theme-destructive-button:hover:not(:disabled) {
+  background-color: #84251e !important;
+  border-color: #84251e !important;
+  color: #ffffff !important;
+}
