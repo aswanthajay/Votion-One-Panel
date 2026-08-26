@@ -171,6 +171,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
       }
     }
 
+    const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
     const metadata = mapProxmoxVmMetadata(config, resourceType, guestAgentInterfaces as any);
     res.json({ success: true, data: metadata });
   } catch {
