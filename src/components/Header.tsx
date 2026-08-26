@@ -84,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
   const activeBadgeCount = runningTasks.length;
 
   return (
-    <header className={`app-header ${currentView === 'overview' && userRole === 'admin' ? 'header-overview-context' : ''}`}>
+    <header className={`app-header ${currentView === 'overview' ? 'header-overview-context' : ''}`}>
       <div className="header-left">
         {/* VOTION Box Logo */}
         <button 

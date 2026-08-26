@@ -419,7 +419,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
 
   /* ---------------- render ---------------- */
   return (
-    <div className="overview-dashboard flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] overflow-hidden font-sans w-full">
+    <div className="overview-dashboard overview-client-page flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] overflow-hidden font-sans w-full">
       {/* ================= TOP BAR (house app-header style) ================= */}
       <header className="overview-header app-header !px-5 sm:!px-7 min-w-0 overflow-hidden" style={{ height: '56px' }}>
         <div className="flex-1 min-w-0 flex items-baseline gap-5 overflow-hidden">

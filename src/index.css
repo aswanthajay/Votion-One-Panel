@@ -2032,3 +2032,11 @@ body {
   position: relative;
   z-index: 0;
 }
+
+
+/* Client user Overview contains its own internal header; keep the global header
+   and Alerts popover above this route-local stacking context. */
+.overview-client-page {
+  position: relative;
+  z-index: 0;
+}
