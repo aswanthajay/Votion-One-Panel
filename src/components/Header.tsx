@@ -92,7 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
           className="brand-logo cursor-pointer" 
           title="Votion One™ Platform"
         >
-          <div className="border-[3px] border-[#1a1a1a] bg-white px-3 py-0.5 text-base font-extrabold lowercase tracking-tight flex items-center justify-center">votion</div>
+          <div className="theme-brand-logo border-[3px] border-[#1a1a1a] bg-white px-3 py-0.5 text-base font-extrabold lowercase tracking-tight flex items-center justify-center">votion</div>
         </button>
 
         {/* WORKSPACE / COMPANY SELECTOR DROPDOWN */}
