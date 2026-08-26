@@ -665,17 +665,27 @@ button {
   transform: rotate(180deg);
 }
 
-.app-sidenav.collapsed .sidenav-section-label,
+.app-sidenav.collapsed .sidenav-section-label {
+  display: none;
+}
+
 .app-sidenav.collapsed .sidenav-twiddle,
-.app-sidenav.collapsed .sidenav-link-text,
-.app-sidenav.collapsed .sidenav-subitems {
+.app-sidenav.collapsed .sidenav-link-text {
   opacity: 0;
   width: 0;
-  padding-left: 0;
-  padding-right: 0;
   pointer-events: none;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.app-sidenav.collapsed .sidenav-subitems {
+  display: none;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 .app-sidenav.collapsed .sidenav-link {
