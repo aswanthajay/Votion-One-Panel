@@ -1493,3 +1493,142 @@ body {
   color: #ededed !important;
   border-color: #2b2b2b !important;
 }
+
+
+/* Remaining dark-mode component surfaces. These scoped overrides preserve the
+   existing light design while preventing legacy hardcoded white surfaces from
+   becoming white-on-white in dark mode. */
+[data-theme="dark"] .btn-secondary {
+  background-color: #161616 !important;
+  border-color: #3f3f46 !important;
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+  background-color: #242424 !important;
+  border-color: #71717a !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .tile-white,
+[data-theme="dark"] .ink-block-wrapper,
+[data-theme="dark"] .ink-block-header,
+[data-theme="dark"] .vm-instance-card {
+  background-color: #0d0d0d !important;
+  border-color: #2f2f35 !important;
+  color: #ededed;
+}
+
+[data-theme="dark"] .ink-block-header {
+  border-bottom-color: #2f2f35 !important;
+}
+
+[data-theme="dark"] .overview-dashboard,
+[data-theme="dark"] .overview-dashboard .overview-ops-rail {
+  background-color: #000000 !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="bg-white"],
+[data-theme="dark"] .app-content [class~="bg-white"],
+[data-theme="dark"] .app-content [class~="bg-[#fbfaf9]"],
+[data-theme="dark"] .app-content [class~="bg-[#f9fafa]"],
+[data-theme="dark"] .app-content [class~="bg-[#f5f6f6]"] {
+  background-color: #121212 !important;
+  color: #ededed;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="bg-white"].btn-secondary,
+[data-theme="dark"] .app-content [class~="bg-white"].btn-secondary {
+  background-color: #161616 !important;
+}
+
+[data-theme="dark"] .app-content input,
+[data-theme="dark"] .app-content select,
+[data-theme="dark"] .app-content textarea,
+[data-theme="dark"] .overview-dashboard input,
+[data-theme="dark"] .overview-dashboard select,
+[data-theme="dark"] .overview-dashboard textarea {
+  background-color: #0a0a0a !important;
+  border-color: #3f3f46 !important;
+  color: #ededed !important;
+  color-scheme: dark;
+}
+
+[data-theme="dark"] .app-content input::placeholder,
+[data-theme="dark"] .overview-dashboard input::placeholder,
+[data-theme="dark"] .overview-dashboard textarea::placeholder {
+  color: #8a8a93 !important;
+}
+
+[data-theme="dark"] .app-content option,
+[data-theme="dark"] .overview-dashboard option {
+  background-color: #0a0a0a;
+  color: #ededed;
+}
+
+[data-theme="dark"] .vm-instance-card-body,
+[data-theme="dark"] .vm-metadata-panel {
+  background-color: #0d0d0d !important;
+  border-color: #2f2f35 !important;
+  color: #ededed;
+}
+
+[data-theme="dark"] .vm-instance-card .vm-usage-grid > div > div:last-child {
+  background-color: #2a2a2a !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="border-[#dedfdf]"],
+[data-theme="dark"] .app-content [class~="border-[#dedfdf]"],
+[data-theme="dark"] .vm-instance-card [class~="border-[#dedfdf]"] {
+  border-color: #2f2f35 !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="divide-[#dedfdf]"] > :not([hidden]) ~ :not([hidden]),
+[data-theme="dark"] .app-content [class~="divide-[#dedfdf]"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2f2f35 !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="hover:bg-[#fbfaf9]"]:hover,
+[data-theme="dark"] .app-content [class~="hover:bg-[#f9fafa]"]:hover,
+[data-theme="dark"] .app-content [class~="hover:bg-[#f4f5f5]"]:hover {
+  background-color: #1b1b1b !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="text-[#1a1a1a]"],
+[data-theme="dark"] .app-content [class~="text-[#1a1a1a]"],
+[data-theme="dark"] .vm-instance-card [class~="text-[#1a1a1a]"] {
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="text-[#656b6b]"],
+[data-theme="dark"] .app-content [class~="text-[#656b6b]"],
+[data-theme="dark"] .vm-instance-card [class~="text-[#656b6b]"] {
+  color: #a1a1aa !important;
+}
+
+[data-theme="dark"] .overview-dashboard [class~="text-[#8a9090]"],
+[data-theme="dark"] .app-content [class~="text-[#8a9090]"],
+[data-theme="dark"] .vm-instance-card [class~="text-[#8a9090]"] {
+  color: #a1a1aa !important;
+}
+
+[data-theme="dark"] .app-content [class~="bg-[#fffaf0]"],
+[data-theme="dark"] .app-content [class~="bg-[#fff8e8]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#fffaf0]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#fff8e8]"] {
+  background-color: #2f230c !important;
+}
+
+[data-theme="dark"] .app-content [class~="bg-[#fff7f6]"],
+[data-theme="dark"] .app-content [class~="bg-[#fff1ef]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#fff7f6]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#fff1ef]"] {
+  background-color: #321313 !important;
+}
+
+[data-theme="dark"] .app-content [class~="bg-[#eef9f4]"],
+[data-theme="dark"] .app-content [class~="bg-[#f0fdf4]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#eef9f4]"],
+[data-theme="dark"] .overview-dashboard [class~="bg-[#f0fdf4]"] {
+  background-color: #0d2a1b !important;
+}
