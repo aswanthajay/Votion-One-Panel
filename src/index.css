@@ -1030,6 +1030,15 @@ body {
   border-color: var(--theme-border);
 }
 
+/* Collapsed navigation sits directly against the black application canvas. */
+[data-theme="dark"] .app-body,
+[data-theme="dark"] .app-sidenav.collapsed,
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-top-sticky,
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-nav-groups,
+[data-theme="dark"] .app-sidenav.collapsed .sidenav-subitems {
+  background-color: var(--theme-bg) !important;
+}
+
 [data-theme="dark"] .ink-block-header,
 [data-theme="dark"] .ink-table thead,
 [data-theme="dark"] .ink-table-wrapper thead,
