@@ -53,10 +53,11 @@ export const Header: React.FC<HeaderProps> = ({
   useEffect(() => {
     const loadHeaderData = async () => {
       try {
-        const [profile, tasks, proxmoxConns] = await Promise.all([
+        const [profile, tasks, proxmoxConns, supportTickets] = await Promise.all([
           apiClient.getUserProfile(),
           apiClient.getTasks(),
           apiClient.getProxmoxConnections().catch(() => []),
+          apiClient.getSupportTickets().catch(() => []),
         ]);
         if (profile) {
           setCurrentUserName(profile.name || profile.email || 'Account');
@@ -67,6 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
         if (proxmoxConns && Array.isArray(proxmoxConns)) {
           setLocations(proxmoxConns);
         }
+        setInboxCount(Array.isArray(supportTickets) ? supportTickets.filter(ticket => ticket.unread).length : 0);
       } catch {
         // Fallback: read from localStorage
         const email = apiClient.getUserEmail();

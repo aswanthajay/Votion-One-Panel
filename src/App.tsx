@@ -296,6 +296,7 @@ const AppShell: React.FC = () => {
             <InteractiveModals
               activeModal={activeModal}
               onClose={() => startTransition(() => setActiveModal(null))}
+              userRole={activeRole}
             />
           </Suspense>
         )}

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient, ApiSupportTicket, ApiTicketReply } from '../services/apiClient';
+import { apiClient, ApiSupportTicket, ApiTicketReply, ApiSupportAgent, SupportTicketPriority, SupportTicketStatus } from '../services/apiClient';
 
 interface InteractiveModalsProps {
   activeModal: string | null;
   onClose: () => void;
+  userRole: 'admin' | 'client';
 }
 
-export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModal, onClose }) => {
+export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModal, onClose, userRole }) => {
   const [modalData, setModalData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   
@@ -19,11 +20,18 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [ticketSearch, setTicketSearch] = useState('');
+  const [ticketStatusFilter, setTicketStatusFilter] = useState('all');
+  const [ticketPriorityFilter, setTicketPriorityFilter] = useState('all');
+  const [ticketAssignmentFilter, setTicketAssignmentFilter] = useState('all');
+  const [supportAgents, setSupportAgents] = useState<ApiSupportAgent[]>([]);
+  const [isUpdatingTicketMeta, setIsUpdatingTicketMeta] = useState(false);
 
   // New Ticket Form State
   const [ticketSubject, setTicketSubject] = useState('');
   const [ticketCategory, setTicketCategory] = useState('Quota Upgrade');
-  const [ticketPriority, setTicketPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
+  const [ticketPriority, setTicketPriority] = useState<SupportTicketPriority>('medium');
+  const [ticketInitialMessage, setTicketInitialMessage] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -37,6 +45,10 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     try {
       const tickets = await apiClient.getSupportTickets();
       setTicketsList(tickets);
+      if (userRole === 'admin') {
+        const agents = await apiClient.getSupportAgents().catch(() => []);
+        setSupportAgents(agents);
+      }
     } catch (err) {
       setTicketsList([]);
       setErrorMessage(err instanceof Error ? err.message : 'Unable to load support tickets.');
@@ -72,10 +84,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
         } else if (activeModal === 'terms') {
           const res = await apiClient.getTerms();
           setModalData(res);
-        } else if (activeModal === 'inbox') {
-          const res = await apiClient.getTasks();
-          setModalData(res);
-        } else if (activeModal === 'support' || activeModal === 'help') {
+        } else if (activeModal === 'inbox' || activeModal === 'support' || activeModal === 'help') {
           await loadTickets();
         }
       } catch (err) {
@@ -86,7 +95,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     };
 
     fetchModalData();
-  }, [activeModal]);
+  }, [activeModal, userRole]);
 
   if (!activeModal) return null;
 
@@ -98,6 +107,8 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     try {
       const details = await apiClient.getTicketDetails(ticket.id);
       if (details) {
+        await apiClient.markTicketRead(ticket.id).catch(() => undefined);
+        setTicketsList(previous => previous.map(item => item.id === ticket.id ? { ...item, unread: false } : item));
         setTicketReplies(details.replies);
         setViewMode('details');
       } else {
@@ -121,9 +132,10 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
-      const res = await apiClient.createSupportTicket(ticketSubject.trim(), ticketCategory, ticketPriority);
+      const res = await apiClient.createSupportTicket(ticketSubject.trim(), ticketCategory, ticketPriority, undefined, ticketInitialMessage.trim() || undefined);
       showToast(res.message || 'Support ticket created successfully.');
       setTicketSubject('');
+      setTicketInitialMessage('');
       setViewMode('list');
       await loadTickets();
     } catch (err) {
@@ -147,6 +159,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
       const res = await apiClient.addTicketReply(selectedTicket.id, replyMessage.trim());
       if (!res.data) throw new Error('The reply was not returned by the server.');
       setTicketReplies(previous => [...previous, res.data]);
+      setSelectedTicket(previous => previous ? { ...previous, status: userRole === 'admin' ? 'replied' : 'open', unread: false } : previous);
       setReplyMessage('');
       showToast('Reply posted to support thread');
     } catch (err) {
@@ -157,20 +170,65 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   };
 
   // Update Ticket Status
-  const handleUpdateStatus = async (status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed') => {
+  const handleUpdateStatus = async (status: SupportTicketStatus) => {
     if (!selectedTicket) return;
     setIsUpdatingStatus(true);
     setErrorMessage(null);
     try {
       await apiClient.updateTicketStatus(selectedTicket.id, status);
-      setSelectedTicket({ ...selectedTicket, status });
+      setSelectedTicket(previous => previous ? { ...previous, status } : previous);
+      setTicketsList(previous => previous.map(item => item.id === selectedTicket.id ? { ...item, status } : item));
       showToast(`Ticket status updated to ${status}`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Unable to update ticket status.');
     } finally {
       setIsUpdatingStatus(false);
     }
+    };
+
+  const handleUpdatePriority = async (priority: SupportTicketPriority) => {
+    if (!selectedTicket || userRole !== 'admin') return;
+    setIsUpdatingTicketMeta(true);
+    setErrorMessage(null);
+    try {
+      await apiClient.updateTicketPriority(selectedTicket.id, priority);
+      setSelectedTicket(previous => previous ? { ...previous, priority } : previous);
+      setTicketsList(previous => previous.map(item => item.id === selectedTicket.id ? { ...item, priority } : item));
+      showToast(`Priority updated to ${priority}`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to update ticket priority.');
+    } finally {
+      setIsUpdatingTicketMeta(false);
+    }
   };
+
+  const handleAssignTicket = async (assigneeEmail: string | null) => {
+    if (!selectedTicket || userRole !== 'admin') return;
+    setIsUpdatingTicketMeta(true);
+    setErrorMessage(null);
+    try {
+      await apiClient.assignTicket(selectedTicket.id, assigneeEmail);
+      setSelectedTicket(previous => previous ? { ...previous, assignedTo: assigneeEmail } : previous);
+      setTicketsList(previous => previous.map(item => item.id === selectedTicket.id ? { ...item, assignedTo: assigneeEmail } : item));
+      showToast(assigneeEmail ? `Assigned to ${assigneeEmail}` : 'Ticket moved to the unassigned queue');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to update ticket assignment.');
+    } finally {
+      setIsUpdatingTicketMeta(false);
+    }
+  };
+
+  const filteredTickets = ticketsList.filter(ticket => {
+    const query = ticketSearch.trim().toLowerCase();
+    const matchesSearch = !query || [ticket.id, ticket.subject, ticket.category, ticket.userEmail || ''].some(value => value.toLowerCase().includes(query));
+    const matchesStatus = ticketStatusFilter === 'all' || ticket.status === ticketStatusFilter;
+    const matchesPriority = ticketPriorityFilter === 'all' || ticket.priority === ticketPriorityFilter;
+    const matchesAssignment = ticketAssignmentFilter === 'all' || (ticketAssignmentFilter === 'unassigned' ? !ticket.assignedTo : ticket.assignedTo === ticketAssignmentFilter);
+    return matchesSearch && matchesStatus && matchesPriority && matchesAssignment;
+  });
+
+  const openTicketCount = ticketsList.filter(ticket => ['open', 'in-progress', 'replied'].includes(ticket.status)).length;
+  const unreadTicketCount = ticketsList.filter(ticket => ticket.unread).length;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
@@ -189,7 +247,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
         <div className="flex items-center justify-between border-b border-[#dedfdf] pb-3">
           <h3 className="text-base font-bold text-[#1a1a1a] capitalize flex items-center gap-2">
             <span>{activeModal.replace('-', ' ')}</span>
-            {(activeModal === 'support' || activeModal === 'help') && viewMode !== 'list' && (
+            {(activeModal === 'inbox' || activeModal === 'support' || activeModal === 'help') && viewMode !== 'list' && (
               <button onClick={() => setViewMode('list')} className="text-xs text-[#2563eb] hover:underline font-normal">
                 ← Back to tickets list
               </button>
@@ -213,170 +271,63 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
         ) : (
           <>
             {/* SUPPORT CENTER MODAL */}
-            {(activeModal === 'support' || activeModal === 'help') && (
+            {(activeModal === 'inbox' || activeModal === 'support' || activeModal === 'help') && (
               <div className="flex flex-col gap-4">
                 
-                {/* MODE 1: TICKETS LIST VIEW */}
+                {/* TICKET QUEUE / CLIENT INBOX */}
                 {viewMode === 'list' && (
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-[#656b6b]">Direct support ticketing and live message thread with VOTION Engineers.</p>
-                      <button onClick={() => setViewMode('create')} className="btn-primary py-1 px-3 text-xs cursor-pointer">
-                        + New Support Ticket
-                      </button>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-semibold text-[#1a1a1a]">{activeModal === 'inbox' ? 'Your support conversations' : userRole === 'admin' ? 'Support operations queue' : 'Direct support with Votion engineers'}</p>
+                        <p className="mt-1 text-[#656b6b]">{activeModal === 'inbox' ? 'Review replies, respond to open conversations, and keep your requests moving.' : userRole === 'admin' ? 'Prioritize, assign, resolve, and reply to every customer conversation from one queue.' : 'Open a request and continue the conversation from this inbox.'}</p>
+                      </div>
+                      <button type="button" onClick={() => setViewMode('create')} className="btn-primary shrink-0 py-1.5 px-3 text-xs cursor-pointer">New ticket</button>
                     </div>
 
-                    <div className="divide-y divide-[#dedfdf] border border-[#dedfdf] rounded-lg overflow-hidden max-h-[360px] overflow-y-auto">
-                      {ticketsList.length === 0 ? (
-                        <div className="p-6 text-center text-[#656b6b]">No support tickets found. Click "+ New Support Ticket" to open one.</div>
-                      ) : (
-                        ticketsList.map(t => (
-                          <div 
-                            key={t.id} 
-                            onClick={() => handleSelectTicket(t)}
-                            className="p-3.5 flex items-center justify-between hover:bg-[#fbfaf9] cursor-pointer transition-colors"
-                          >
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-[#1a1a1a]">{t.id}</span>
-                                <span className="font-semibold text-[#1a1a1a]">{t.subject}</span>
-                              </div>
-                              <div className="text-[11px] text-[#656b6b] mt-0.5">
-                                Category: {t.category} | Created by: {t.userEmail}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                t.priority === 'urgent' ? 'bg-[#fef2f2] text-[#dc2626]' : 'bg-[#f1f1f1] text-[#656b6b]'
-                              }`}>
-                                {t.priority}
-                              </span>
-                              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                                t.status === 'open' ? 'bg-[#fef3c7] text-[#b45309]' :
-                                t.status === 'in-progress' ? 'bg-[#dbeafe] text-[#1d4ed8]' :
-                                'bg-[#dcfce7] text-[#15803d]'
-                              }`}>
-                                {t.status}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      )}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-[#dedfdf] bg-[#fbfaf9] px-3 py-2"><div className="text-[10px] uppercase tracking-[0.12em] text-[#656b6b]">Total</div><div className="mt-1 text-base font-bold text-[#1a1a1a]">{ticketsList.length}</div></div>
+                      <div className="rounded-lg border border-[#dedfdf] bg-[#fbfaf9] px-3 py-2"><div className="text-[10px] uppercase tracking-[0.12em] text-[#656b6b]">Open</div><div className="mt-1 text-base font-bold text-[#1a1a1a]">{openTicketCount}</div></div>
+                      <div className="rounded-lg border border-[#dedfdf] bg-[#fbfaf9] px-3 py-2"><div className="text-[10px] uppercase tracking-[0.12em] text-[#656b6b]">Needs attention</div><div className="mt-1 text-base font-bold text-[#1a1a1a]">{unreadTicketCount}</div></div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-[1.5fr_1fr_1fr_1fr]">
+                      <input type="search" value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} placeholder="Search ticket, subject, customer…" className="w-full rounded-lg border border-[#dedfdf] bg-ink-card px-3 py-2 text-xs outline-none focus:border-[#2563eb]" />
+                      <select value={ticketStatusFilter} onChange={(e) => setTicketStatusFilter(e.target.value)} className="rounded-lg border border-[#dedfdf] bg-ink-card px-3 py-2 text-xs outline-none"><option value="all">All statuses</option><option value="open">Open</option><option value="in-progress">In progress</option><option value="replied">Replied</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select>
+                      <select value={ticketPriorityFilter} onChange={(e) => setTicketPriorityFilter(e.target.value)} className="rounded-lg border border-[#dedfdf] bg-ink-card px-3 py-2 text-xs outline-none"><option value="all">All priorities</option><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+                      {userRole === 'admin' ? <select value={ticketAssignmentFilter} onChange={(e) => setTicketAssignmentFilter(e.target.value)} className="rounded-lg border border-[#dedfdf] bg-ink-card px-3 py-2 text-xs outline-none"><option value="all">All assignees</option><option value="unassigned">Unassigned</option>{supportAgents.map(agent => <option key={agent.email} value={agent.email}>{agent.name || agent.email}</option>)}</select> : <div className="hidden md:block" />}
+                    </div>
+
+                    <div className="divide-y divide-[#dedfdf] overflow-hidden rounded-lg border border-[#dedfdf] max-h-[390px] overflow-y-auto">
+                      {loading ? <div className="space-y-3 p-5" aria-busy="true"><div className="h-4 w-2/3 animate-pulse rounded bg-[#f1f1f1]" /><div className="h-4 w-full animate-pulse rounded bg-[#f1f1f1]" /><div className="h-4 w-4/5 animate-pulse rounded bg-[#f1f1f1]" /></div> : filteredTickets.length === 0 ? <div className="p-8 text-center"><p className="font-semibold text-[#1a1a1a]">{ticketsList.length === 0 ? 'No support conversations yet' : 'No tickets match these filters'}</p><p className="mt-1 text-[#656b6b]">{ticketsList.length === 0 ? 'Create a ticket to start a documented support thread.' : 'Adjust the filters or search term to see more results.'}</p></div> : filteredTickets.map(ticket => (
+                        <button type="button" key={ticket.id} onClick={() => handleSelectTicket(ticket)} className={`flex w-full items-start justify-between gap-3 p-3.5 text-left transition-colors hover:bg-[#fbfaf9] ${ticket.unread ? 'bg-[#f7fbff]' : ''}`}>
+                          <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="font-mono text-[10px] font-bold text-[#656b6b]">{ticket.ticket_number || ticket.id}</span>{ticket.unread && <span className="h-1.5 w-1.5 rounded-full bg-[#2563eb]" aria-label="Unread" />}<span className="truncate font-semibold text-[#1a1a1a]">{ticket.subject}</span></span><span className="mt-1 block truncate text-[11px] text-[#656b6b]">{userRole === 'admin' ? ticket.userEmail : ticket.category}{ticket.vmid ? ` · VM ${ticket.vmid}` : ''} · {ticket.replyCount || 0} repl{ticket.replyCount === 1 ? 'y' : 'ies'}</span></span>
+                          <span className="flex shrink-0 flex-col items-end gap-1"><span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${ticket.priority === 'urgent' ? 'bg-[#fef2f2] text-[#dc2626]' : ticket.priority === 'high' ? 'bg-[#fff7ed] text-[#c2410c]' : 'bg-[#f1f1f1] text-[#656b6b]'}`}>{ticket.priority}</span><span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${ticket.status === 'open' ? 'bg-[#fef3c7] text-[#b45309]' : ticket.status === 'in-progress' ? 'bg-[#dbeafe] text-[#1d4ed8]' : ticket.status === 'replied' ? 'bg-[#e0e7ff] text-[#4338ca]' : 'bg-[#dcfce7] text-[#15803d]'}`}>{ticket.status}</span></span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
 
-                {/* MODE 2: CREATE NEW TICKET FORM */}
+                {/* CREATE NEW TICKET */}
                 {viewMode === 'create' && (
                   <form onSubmit={handleSupportTicketSubmit} className="flex flex-col gap-3">
-                    <p className="text-[#656b6b]">Submit a direct support ticket to VOTION Cloud Engineers.</p>
-                    <div>
-                      <label className="block font-semibold mb-1">Ticket Subject</label>
-                      <input 
-                        type="text" 
-                        value={ticketSubject} 
-                        onChange={(e) => setTicketSubject(e.target.value)} 
-                        placeholder="e.g. Request Instance 105 CPU Quota Increase" 
-                        className="w-full p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a]" 
-                        required 
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block font-semibold mb-1">Category</label>
-                        <select 
-                          value={ticketCategory} 
-                          onChange={(e) => setTicketCategory(e.target.value)} 
-                          className="w-full p-2 border border-[#dedfdf] rounded outline-none"
-                        >
-                          <option value="Quota Upgrade">Quota Upgrade</option>
-                          <option value="Network Firewall">Network Firewall</option>
-                          <option value="Storage & ZFS">Storage & ZFS</option>
-                          <option value="General">General Inquiries</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block font-semibold mb-1">Priority</label>
-                        <select 
-                          value={ticketPriority} 
-                          onChange={(e) => setTicketPriority(e.target.value as any)} 
-                          className="w-full p-2 border border-[#dedfdf] rounded outline-none"
-                        >
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                          <option value="urgent">Urgent SLA</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2 border-t border-[#dedfdf]">
-                      <button type="button" onClick={() => setViewMode('list')} className="btn-secondary">Cancel</button>
-                      <button type="submit" disabled={isSubmitting} className="btn-primary disabled:opacity-50">{isSubmitting ? 'Creating Ticket…' : 'Create Support Ticket'}</button>
-                    </div>
+                    <div><p className="font-semibold text-[#1a1a1a]">Open a support ticket</p><p className="mt-1 text-[#656b6b]">Give the operations team enough context to resolve the request without back-and-forth.</p></div>
+                    <div><label className="mb-1 block font-semibold">Subject</label><input type="text" value={ticketSubject} onChange={(e) => setTicketSubject(e.target.value)} placeholder="Describe the request in one line" className="w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2.5 outline-none focus:border-[#2563eb]" required maxLength={255} /></div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2"><div><label className="mb-1 block font-semibold">Category</label><select value={ticketCategory} onChange={(e) => setTicketCategory(e.target.value)} className="w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2.5 outline-none"><option value="Quota Upgrade">Quota upgrade</option><option value="Network Firewall">Network & firewall</option><option value="Storage & ZFS">Storage & ZFS</option><option value="Billing">Billing</option><option value="General">General inquiry</option></select></div><div><label className="mb-1 block font-semibold">Priority</label><select value={ticketPriority} onChange={(e) => setTicketPriority(e.target.value as SupportTicketPriority)} className="w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2.5 outline-none"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div></div>
+                    <div><label className="mb-1 block font-semibold">Message</label><textarea value={ticketInitialMessage} onChange={(e) => setTicketInitialMessage(e.target.value)} placeholder="Include relevant instance IDs, symptoms, and the outcome you need." className="min-h-28 w-full resize-y rounded-lg border border-[#dedfdf] bg-ink-card p-2.5 outline-none focus:border-[#2563eb]" required maxLength={5000} /></div>
+                    <div className="flex justify-end gap-2 border-t border-[#dedfdf] pt-3"><button type="button" onClick={() => setViewMode('list')} className="btn-secondary">Cancel</button><button type="submit" disabled={isSubmitting} className="btn-primary disabled:opacity-50">{isSubmitting ? 'Creating ticket…' : 'Create ticket'}</button></div>
                   </form>
                 )}
 
-                {/* MODE 3: TICKET DETAILS & LIVE MESSAGE THREAD */}
+                {/* TICKET DETAILS & THREAD */}
                 {viewMode === 'details' && selectedTicket && (
                   <div className="flex flex-col gap-4">
-                    <div className="p-3 bg-[#fbfaf9] border border-[#dedfdf] rounded-lg flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-sm text-[#1a1a1a]">{selectedTicket.id} — {selectedTicket.subject}</div>
-                        <div className="text-[11px] text-[#656b6b] mt-0.5">Category: {selectedTicket.category} | Priority: {selectedTicket.priority}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={selectedTicket.status}
-                          onChange={(e) => handleUpdateStatus(e.target.value as 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed')}
-                          disabled={isUpdatingStatus}
-                          className="p-1 border border-[#dedfdf] rounded text-xs outline-none bg-ink-card font-semibold disabled:opacity-50"
-                        >
-                          <option value="open">open</option>
-                          <option value="in-progress">in-progress</option>
-                          <option value="replied">replied</option>
-                          <option value="resolved">resolved</option>
-                          <option value="closed">closed</option>
-                        </select>
-                      </div>
+                    <div className="rounded-lg border border-[#dedfdf] bg-[#fbfaf9] p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="truncate text-sm font-bold text-[#1a1a1a]">{selectedTicket.ticket_number || selectedTicket.id} — {selectedTicket.subject}</div><div className="mt-1 text-[11px] text-[#656b6b]">{selectedTicket.category}{selectedTicket.vmid ? ` · VM ${selectedTicket.vmid}` : ''}{userRole === 'admin' && selectedTicket.userEmail ? ` · ${selectedTicket.userEmail}` : ''}</div></div><span className={`rounded px-2 py-1 text-[10px] font-semibold uppercase ${selectedTicket.status === 'open' ? 'bg-[#fef3c7] text-[#b45309]' : selectedTicket.status === 'in-progress' ? 'bg-[#dbeafe] text-[#1d4ed8]' : selectedTicket.status === 'replied' ? 'bg-[#e0e7ff] text-[#4338ca]' : 'bg-[#dcfce7] text-[#15803d]'}`}>{selectedTicket.status}</span></div>
+                      {userRole === 'admin' && <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2"><label className="text-[11px] font-semibold text-[#656b6b]">Status<select value={selectedTicket.status} onChange={(e) => handleUpdateStatus(e.target.value as SupportTicketStatus)} disabled={isUpdatingStatus} className="mt-1 w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2 text-xs font-semibold"><option value="open">Open</option><option value="in-progress">In progress</option><option value="replied">Replied</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><label className="text-[11px] font-semibold text-[#656b6b]">Priority<select value={selectedTicket.priority} onChange={(e) => handleUpdatePriority(e.target.value as SupportTicketPriority)} disabled={isUpdatingTicketMeta} className="mt-1 w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2 text-xs font-semibold"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></label><label className="text-[11px] font-semibold text-[#656b6b] md:col-span-2">Assignee<select value={selectedTicket.assignedTo || ''} onChange={(e) => handleAssignTicket(e.target.value || null)} disabled={isUpdatingTicketMeta} className="mt-1 w-full rounded-lg border border-[#dedfdf] bg-ink-card p-2 text-xs font-semibold"><option value="">Unassigned</option>{supportAgents.map(agent => <option key={agent.email} value={agent.email}>{agent.name || agent.email}</option>)}</select></label></div>}
                     </div>
-
-                    {/* Replies Thread */}
-                    <div className="flex flex-col gap-3 max-h-[260px] overflow-y-auto p-2 border border-[#dedfdf] rounded-lg bg-ink-card">
-                      {ticketReplies.length === 0 && (
-                        <p className="p-3 text-center text-xs text-[#656b6b]">No replies yet. Send a reply to continue the conversation.</p>
-                      )}
-                      {ticketReplies.map(r => (
-                        <div 
-                          key={r.id} 
-                          className={`p-3 rounded-lg flex flex-col gap-1 text-xs max-w-[85%] ${
-                            r.senderRole === 'admin' 
-                              ? 'bg-[#f1f1f1] border border-[#dedfdf] self-start text-[#1a1a1a]' 
-                              : 'bg-[#1a1a1a] text-white self-end'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-4 text-[10px] opacity-80 border-b border-current/20 pb-1 mb-1">
-                            <span className="font-bold">{r.senderEmail} ({r.senderRole.toUpperCase()})</span>
-                            <span>{new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                          <p className="leading-relaxed">{r.message}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Live Reply Message Box */}
-                    <form onSubmit={handleSendReply} className="flex gap-2">
-                      <input 
-                        type="text" 
-                        value={replyMessage} 
-                        onChange={(e) => setReplyMessage(e.target.value)} 
-                        placeholder="Type a reply message to support..." 
-                        className="flex-1 p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a]" 
-                        required 
-                      />
-                      <button type="submit" disabled={isSubmitting} className="btn-primary py-2 px-4 cursor-pointer disabled:opacity-50">
-                        {isSubmitting ? 'Sending…' : 'Send Reply'}
-                      </button>
-                    </form>
+                    <div className="flex max-h-[300px] flex-col gap-3 overflow-y-auto rounded-lg border border-[#dedfdf] bg-ink-card p-3" aria-live="polite">{ticketReplies.length === 0 ? <p className="p-3 text-center text-xs text-[#656b6b]">No replies yet. Send the first message to continue this conversation.</p> : ticketReplies.map(reply => <div key={reply.id} className={`max-w-[88%] rounded-lg border p-3 text-xs ${reply.senderRole === 'admin' ? 'self-start border-[#dedfdf] bg-[#f1f1f1] text-[#1a1a1a]' : 'self-end border-[#1a1a1a] bg-[#1a1a1a] text-white'}`}><div className="mb-1 flex items-center justify-between gap-4 border-b border-current/20 pb-1 text-[10px] opacity-75"><span className="font-semibold">{reply.senderRole === 'admin' ? 'Votion support' : reply.senderEmail}</span><time dateTime={reply.timestamp}>{new Date(reply.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</time></div><p className="whitespace-pre-wrap leading-relaxed">{reply.message}</p></div>)}</div>
+                    <form onSubmit={handleSendReply} className="flex flex-col gap-2"><textarea value={replyMessage} onChange={(e) => setReplyMessage(e.target.value)} placeholder={selectedTicket.status === 'closed' ? 'This ticket is closed. Reopen it from the admin queue before replying.' : 'Write a reply…'} disabled={selectedTicket.status === 'closed'} className="min-h-20 w-full resize-y rounded-lg border border-[#dedfdf] bg-ink-card p-2.5 outline-none focus:border-[#2563eb] disabled:cursor-not-allowed disabled:opacity-60" required maxLength={5000} /><div className="flex items-center justify-between gap-2"><span className="text-[10px] text-[#656b6b]">Replies are recorded in the ticket timeline.</span><button type="submit" disabled={isSubmitting || selectedTicket.status === 'closed'} className="btn-primary px-4 py-2 disabled:opacity-50">{isSubmitting ? 'Sending…' : 'Send reply'}</button></div></form>
                   </div>
                 )}
 

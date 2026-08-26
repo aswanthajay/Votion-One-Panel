@@ -358,15 +358,31 @@ export interface ApiBillingSuspensionAction {
   vm_name?: string;
 }
 
+export type SupportTicketStatus = 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed';
+export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
+
 export interface ApiSupportTicket {
   id: string;
+  ticket_number?: string;
   subject: string;
   category: string;
-  status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: SupportTicketStatus;
+  priority: SupportTicketPriority;
   vmid?: number;
   userEmail?: string;
+  assignedTo?: string | null;
   createdAt: string;
+  updatedAt?: string;
+  replyCount?: number;
+  lastReplyAt?: string;
+  lastReplyRole?: 'admin' | 'client' | null;
+  unread?: boolean;
+}
+
+export interface ApiSupportAgent {
+  email: string;
+  name?: string;
+  role: string;
 }
 
 export interface ApiTicketReply {
@@ -931,8 +947,17 @@ class ApiClient {
   /**
    * SUPPORT TICKET SYSTEM METHODS
    */
-  async getSupportTickets(): Promise<ApiSupportTicket[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets`, { headers: this.getHeaders() });
+  async getSupportTickets(filters: { search?: string; status?: string; priority?: string; assignedTo?: string } = {}): Promise<ApiSupportTicket[]> {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets${suffix}`, { headers: this.getHeaders() });
+    const data = await this.readTicketResponse(res);
+    return Array.isArray(data.data) ? data.data : [];
+  }
+
+  async getSupportAgents(): Promise<ApiSupportAgent[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/agents`, { headers: this.getHeaders() });
     const data = await this.readTicketResponse(res);
     return Array.isArray(data.data) ? data.data : [];
   }
@@ -943,11 +968,11 @@ class ApiClient {
     return data.data || null;
   }
 
-  async createSupportTicket(subject: string, category: string, priority: 'low' | 'medium' | 'high' | 'urgent', vmid?: number) {
+  async createSupportTicket(subject: string, category: string, priority: SupportTicketPriority, vmid?: number, message?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/support/tickets`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ subject, category, priority, vmid }),
+      body: JSON.stringify({ subject, category, priority, vmid, message }),
     });
     return await this.readTicketResponse(res);
   }
@@ -961,11 +986,37 @@ class ApiClient {
     return await this.readTicketResponse(res);
   }
 
-  async updateTicketStatus(ticketId: string, status: 'open' | 'in-progress' | 'replied' | 'resolved' | 'closed') {
+  async updateTicketStatus(ticketId: string, status: SupportTicketStatus) {
     const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/status`, {
       method: 'PUT',
       headers: this.getHeaders(),
       body: JSON.stringify({ status }),
+    });
+    return await this.readTicketResponse(res);
+  }
+
+  async updateTicketPriority(ticketId: string, priority: SupportTicketPriority) {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/priority`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ priority }),
+    });
+    return await this.readTicketResponse(res);
+  }
+
+  async assignTicket(ticketId: string, assigneeEmail: string | null) {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/assignment`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ assigneeEmail }),
+    });
+    return await this.readTicketResponse(res);
+  }
+
+  async markTicketRead(ticketId: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}/read`, {
+      method: 'POST',
+      headers: this.getHeaders(),
     });
     return await this.readTicketResponse(res);
   }

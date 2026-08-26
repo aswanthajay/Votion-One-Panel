@@ -538,15 +538,20 @@ apiRouter.get('/support/agents', requireAdmin, async (_req, res) => {
 apiRouter.post('/support/tickets', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { subject, category, priority, vmid } = req.body;
+  const { subject, category, priority, vmid, message } = req.body;
 
   if (!subject) {
     return res.status(400).json({ success: false, error: 'Subject is required' });
   }
 
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
-  const ticket = await dbService.createSupportTicket(subject, category || 'General', priority || 'medium', parsedVmid, userEmail);
-  res.json({ success: true, message: `Support ticket ${ticket.ticket.id} created in PostgreSQL`, data: ticket });
+  const ticket = await dbService.createSupportTicket(subject.trim(), category || 'General', priority || 'medium', parsedVmid, userEmail);
+  const ticketId = ticket?.ticket?.id;
+  if (message && String(message).trim() && ticketId) {
+    await dbService.addTicketReply(ticketId, userEmail, String(message).trim(), 'client');
+  }
+  const details = ticketId ? await dbService.getTicketDetails(ticketId) : ticket;
+  res.json({ success: true, message: `Support ticket ${ticketId || ''} created in PostgreSQL`.trim(), data: details });
 });
 
 apiRouter.get('/support/tickets/:id', async (req, res) => {
