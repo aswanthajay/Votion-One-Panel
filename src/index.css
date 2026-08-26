@@ -2269,6 +2269,14 @@ body {
   z-index: 999;
 }
 
+/* The client Overview owns a second, route-local heading. It must remain in
+   normal flow and must not inherit the global shell header’s sticky offset. */
+.overview-dashboard .overview-header {
+  position: relative;
+  top: auto;
+  z-index: 0;
+}
+
 .app-sidenav {
   top: calc(var(--app-switcher-height) + var(--ink-header-size-height));
   height: calc(100vh - var(--app-switcher-height) - var(--ink-header-size-height));
