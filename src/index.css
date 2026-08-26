@@ -1710,3 +1710,103 @@ body {
 [data-theme="dark"] .telemetry-tooltip-row strong {
   color: var(--theme-text) !important;
 }
+
+
+/* Tasks popover: explicit theme surfaces prevent undefined ink tokens from
+   inheriting the dark palette onto a light panel. */
+.tasks-dropdown-menu {
+  background-color: #ffffff;
+  color: var(--color-dark-ink);
+  border: 1px solid var(--color-subtle-gray);
+}
+
+.tasks-header {
+  background-color: var(--color-light-gray);
+  color: var(--color-dark-ink) !important;
+  border-bottom-color: var(--color-subtle-gray);
+}
+
+.tasks-empty-state p {
+  color: var(--color-dark-ink);
+}
+
+.tasks-empty-state > span:last-child {
+  color: var(--color-text-subtle);
+}
+
+.task-item {
+  color: var(--color-dark-ink);
+}
+
+.task-item:hover {
+  background-color: var(--color-light-gray);
+}
+
+.task-title-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.task-progress-bar {
+  width: 100%;
+  height: 4px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: var(--color-subtle-gray);
+}
+
+.task-progress-fill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
+  background-color: var(--color-accent-blue);
+  transition: width 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+[data-theme="dark"] .tasks-dropdown-menu {
+  background-color: #0a0a0a !important;
+  color: var(--theme-text) !important;
+  border-color: var(--theme-border) !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55) !important;
+}
+
+[data-theme="dark"] .tasks-header {
+  background-color: #161616 !important;
+  color: var(--theme-text) !important;
+  border-bottom-color: var(--theme-border) !important;
+}
+
+[data-theme="dark"] .tasks-empty-state p,
+[data-theme="dark"] .task-item {
+  color: var(--theme-text) !important;
+}
+
+[data-theme="dark"] .tasks-empty-state > span:last-child {
+  color: var(--theme-text-muted) !important;
+}
+
+[data-theme="dark"] .tasks-empty-mark {
+  border-color: #3f7d57;
+  color: #86efac;
+}
+
+[data-theme="dark"] .task-item:hover {
+  background-color: #161616 !important;
+}
+
+[data-theme="dark"] .task-progress-bar {
+  background-color: #2b2b2b;
+}
+
+[data-theme="dark"] .task-progress-fill {
+  background-color: var(--theme-accent);
+}
+
+[data-theme="dark"] .tasks-dropdown-menu [class~="text-[#b45309]"] {
+  color: #f3c56b !important;
+}
