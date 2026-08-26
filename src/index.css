@@ -2244,6 +2244,25 @@ body {
 }
 
 
+/* Keep the product bar visible while scrolling. The header and sidebar sit
+   beneath it so sticky surfaces never overlap one another. */
+#app-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  isolation: isolate;
+}
+
+.app-header {
+  top: var(--app-switcher-height);
+  z-index: 999;
+}
+
+.app-sidenav {
+  top: calc(var(--app-switcher-height) + var(--ink-header-size-height));
+  height: calc(100vh - var(--app-switcher-height) - var(--ink-header-size-height));
+}
+
 /* Metadata error state: the light-theme deep red is too dark on dark cards. */
 [data-theme="dark"] .theme-metadata-error {
   color: #fca5a5 !important;
