@@ -293,7 +293,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
       <Grid numItemsSm={1} numItemsMd={2} numItemsLg={4} className="gap-6 sm:gap-8 pb-6 border-b border-[#f0f0f0]">
         <div className="telemetry-memory-distribution col-span-1 flex flex-col justify-center">
           <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-6">Memory Distribution</h4>
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex flex-col items-center justify-center">
             <DonutChart
               data={[
                 { name: 'Used RAM', value: Number(memUsedGb.toFixed(2)) },
@@ -303,8 +303,25 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
               index="name"
               colors={['zinc', 'stone']}
               valueFormatter={(val) => Number(val).toFixed(1) + ' GB'}
+              showTooltip={false}
               className="h-32"
             />
+            <div className="telemetry-memory-legend" aria-label="Memory distribution values">
+              <div className="telemetry-memory-legend-item">
+                <span className="telemetry-memory-legend-label">
+                  <i className="telemetry-memory-legend-swatch telemetry-memory-legend-used" />
+                  Used RAM
+                </span>
+                <strong>{memUsedGb.toFixed(1)} GB</strong>
+              </div>
+              <div className="telemetry-memory-legend-item">
+                <span className="telemetry-memory-legend-label">
+                  <i className="telemetry-memory-legend-swatch telemetry-memory-legend-free" />
+                  Free RAM
+                </span>
+                <strong>{Math.max(memFreeGb, 0).toFixed(1)} GB</strong>
+              </div>
+            </div>
           </div>
         </div>
 

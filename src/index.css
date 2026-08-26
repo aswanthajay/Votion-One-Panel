@@ -2168,12 +2168,79 @@ body {
 }
 
 
-/* Memory distribution donut: Tremor renders its center value as SVG text,
-   which otherwise keeps the light-theme near-black fill in Dark mode. */
+/* Memory distribution: keep the data legend outside the donut so it cannot
+   collide with Tremor's center total label at narrow card widths. */
+.telemetry-memory-legend {
+  width: min(100%, 230px);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.telemetry-memory-legend-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  border-top: 1px solid #dedfdf;
+  padding-top: 6px;
+  color: #656b6b;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.telemetry-memory-legend-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.telemetry-memory-legend-item strong {
+  color: #1a1a1a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-transform: none;
+}
+
+.telemetry-memory-legend-swatch {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+}
+
+.telemetry-memory-legend-used {
+  background: #71717a;
+}
+
+.telemetry-memory-legend-free {
+  background: #a8a29e;
+}
+
+/* Tremor renders the donut total as SVG text, so keep it readable in Dark mode. */
 [data-theme="dark"] .telemetry-memory-distribution .recharts-text,
 [data-theme="dark"] .telemetry-memory-distribution .recharts-pie-label-text,
 [data-theme="dark"] .telemetry-memory-distribution svg text {
   fill: #ededed !important;
+}
+
+[data-theme="dark"] .telemetry-memory-legend-item {
+  border-top-color: #3f3f46;
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .telemetry-memory-legend-item strong {
+  color: #ededed;
 }
 
 
