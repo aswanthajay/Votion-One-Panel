@@ -43,7 +43,7 @@ export const VmMetadataPanel: React.FC<VmMetadataPanelProps> = ({ metadata, isLo
     )}
 
     {!isLoading && error && !metadata && (
-      <div className="pt-4 text-xs text-[#84251e]" role="alert">
+      <div className="theme-metadata-error pt-4 text-xs text-[#84251e]" role="alert">
         Unable to load instance details. {error}
       </div>
     )}

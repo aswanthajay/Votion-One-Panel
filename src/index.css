@@ -2175,3 +2175,9 @@ body {
 [data-theme="dark"] .telemetry-memory-distribution svg text {
   fill: #ededed !important;
 }
+
+
+/* Metadata error state: the light-theme deep red is too dark on dark cards. */
+[data-theme="dark"] .theme-metadata-error {
+  color: #fca5a5 !important;
+}
