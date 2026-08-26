@@ -233,7 +233,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
   };
 
   return (
-    <main className="app-content p-3 sm:p-5 md:p-8 max-w-[1400px] mx-auto min-h-screen">
+    <main className="app-content overview-admin-page p-3 sm:p-5 md:p-8 max-w-[1400px] mx-auto min-h-screen">
       {toastMessage && (
         <div
           role="status"

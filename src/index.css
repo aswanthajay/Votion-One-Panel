@@ -2017,3 +2017,18 @@ body {
     max-width: calc(100vw - 16px);
   }
 }
+
+
+/* Admin Overview has route-local alert surfaces; keep the global header above them. */
+.app-header.header-overview-context {
+  z-index: 1000;
+}
+
+.app-header.header-overview-context .notification-panel {
+  z-index: 1100 !important;
+}
+
+.overview-admin-page {
+  position: relative;
+  z-index: 0;
+}
