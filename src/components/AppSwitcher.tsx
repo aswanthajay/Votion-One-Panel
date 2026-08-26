@@ -4,7 +4,7 @@ export const AppSwitcher: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div id="app-switcher" className="bg-[#1a1a1a] text-white text-xs h-9 leading-9 relative z-[100]">
+    <div id="app-switcher" className="theme-app-switcher bg-[#1a1a1a] text-white text-xs h-9 leading-9 relative z-[100]">
       <div className="flex items-center justify-between px-[18px] h-full">
         <div 
           onClick={() => setIsOpen(!isOpen)}
@@ -27,7 +27,7 @@ export const AppSwitcher: React.FC = () => {
       </div>
 
       {isOpen && (
-        <div className="bg-[#1a1a1a] border-b border-[#656b6b] p-6 pb-10 absolute top-9 left-0 right-0 z-[99] shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200 ease-out origin-top">
+        <div className="theme-app-switcher-drawer bg-[#1a1a1a] border-b border-[#656b6b] p-6 pb-10 absolute top-9 left-0 right-0 z-[99] shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200 ease-out origin-top">
           <div className="max-w-[1200px] mx-auto">
             <div className="text-base font-semibold mb-3 text-white">VOTION Product Suite</div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-4">

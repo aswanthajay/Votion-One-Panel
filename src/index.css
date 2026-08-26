@@ -1467,3 +1467,29 @@ body {
 [data-theme="dark"] .theme-alert-panel [class~="divide-[#f3d19a]"] > :not([hidden]) ~ :not([hidden]) {
   border-color: #7a4b00 !important;
 }
+
+
+/* The product switcher is intentionally a black chrome bar, not an elevated card. */
+[data-theme="dark"] #app-switcher.theme-app-switcher {
+  background-color: #000000 !important;
+  color: #ededed !important;
+}
+
+[data-theme="dark"] #app-switcher.theme-app-switcher > div:first-child {
+  background-color: transparent !important;
+}
+
+[data-theme="dark"] #app-switcher.theme-app-switcher [class~="text-[#a7aaaa]"] {
+  color: #a1a1aa !important;
+}
+
+[data-theme="dark"] #app-switcher.theme-app-switcher [class~="text-white"],
+[data-theme="dark"] #app-switcher.theme-app-switcher [class~="text-[#fff]"] {
+  color: #ededed !important;
+}
+
+[data-theme="dark"] #app-switcher.theme-app-switcher .theme-app-switcher-drawer {
+  background-color: #050505 !important;
+  color: #ededed !important;
+  border-color: #2b2b2b !important;
+}
