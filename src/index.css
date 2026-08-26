@@ -1659,3 +1659,54 @@ body {
   border-color: #84251e !important;
   color: #ffffff !important;
 }
+
+
+/* Additional dark-mode state coverage for legacy utility colors. */
+[data-theme="dark"] [class~="bg-[#e5e7e7]"],
+[data-theme="dark"] [class~="bg-[#f0f0f0]"],
+[data-theme="dark"] [class~="bg-[#f1f1f1]"] {
+  background-color: #1f1f1f !important;
+}
+
+[data-theme="dark"] [class~="border-[#f0f0f0]"],
+[data-theme="dark"] [class~="border-[#e0e1e1]"] {
+  border-color: var(--theme-border) !important;
+}
+
+[data-theme="dark"] [class~="text-[#888]"],
+[data-theme="dark"] [class~="text-[#888888]"],
+[data-theme="dark"] [class~="text-[#9a9a9a]"],
+[data-theme="dark"] [class~="text-[#a0a1a2]"] {
+  color: var(--theme-text-muted) !important;
+}
+
+[data-theme="dark"] input:-webkit-autofill,
+[data-theme="dark"] input:-webkit-autofill:hover,
+[data-theme="dark"] input:-webkit-autofill:focus,
+[data-theme="dark"] textarea:-webkit-autofill,
+[data-theme="dark"] select:-webkit-autofill {
+  -webkit-text-fill-color: var(--theme-text) !important;
+  -webkit-box-shadow: 0 0 0 1000px #0a0a0a inset !important;
+  box-shadow: 0 0 0 1000px #0a0a0a inset !important;
+  caret-color: var(--theme-text);
+}
+
+[data-theme="dark"] .btn-primary:focus-visible,
+[data-theme="dark"] .btn-secondary:focus-visible,
+[data-theme="dark"] .theme-destructive-button:focus-visible {
+  outline: 2px solid var(--theme-accent) !important;
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .telemetry-tooltip {
+  background-color: #0a0a0a !important;
+  border: 1px solid var(--theme-border-strong) !important;
+  color: var(--theme-text) !important;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+[data-theme="dark"] .telemetry-tooltip-time,
+[data-theme="dark"] .telemetry-tooltip-label,
+[data-theme="dark"] .telemetry-tooltip-row strong {
+  color: var(--theme-text) !important;
+}

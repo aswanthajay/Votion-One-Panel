@@ -163,7 +163,7 @@ export const UserManagement: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="p-8 text-white">Loading users...</div>;
+    return <div className="p-8 text-[#656b6b]" role="status" aria-busy="true">Loading users...</div>;
   }
 
   return (
@@ -263,7 +263,7 @@ export const UserManagement: React.FC = () => {
                 const id = deleteTarget;
                 setDeleteTarget(null);
                 await handleDeleteUser(id);
-              }} className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] flex-1 py-2 cursor-pointer">Delete</button>
+              }} className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] flex-1 py-2 cursor-pointer">Delete</button>
             </div>
           </div>
         </div>

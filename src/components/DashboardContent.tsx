@@ -538,7 +538,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
                       <button onClick={() => { setSelectedVmForAction(vm); setModalType('extend-expiry'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Extend</button>
                       <button onClick={() => { setSelectedVmForAction(vm); setModalType('reinstall-os'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Request OS</button>
                       <button onClick={() => { setSelectedVmForAction(vm); setTargetAccountEmail(vm.ownerEmail); setModalType('assign-vm'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Assign</button>
-                      <button onClick={() => setConfirmTarget(vm.vmid)} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap !text-[#dc2626] !border-[#fecaca] hover:!bg-[#fef2f2]">Remove</button>
+                      <button onClick={() => setConfirmTarget(vm.vmid)} className="theme-destructive-button btn-secondary py-1 px-2 text-[11px] whitespace-nowrap !text-[#dc2626] !border-[#fecaca] hover:!bg-[#fef2f2]">Remove</button>
                     </div>
                   </td>
                 </tr>
@@ -566,7 +566,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
                 } catch (e) {
                   showToast(`Failed to remove VM ${vmid}.`);
                 }
-              }} className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] flex-1 py-2 cursor-pointer">Remove VM</button>
+              }} className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] flex-1 py-2 cursor-pointer">Remove VM</button>
             </div>
           </div>
         </div>
@@ -633,7 +633,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
               </div>
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] mt-2">
                 <button type="button" onClick={() => setModalType(null)} className="btn-secondary">Cancel</button>
-                <button type="submit" className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c]">Submit for Approval</button>
+                <button type="submit" className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c]">Submit for Approval</button>
               </div>
             </form>
           </div>

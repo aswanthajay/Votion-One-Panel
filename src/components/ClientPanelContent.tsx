@@ -280,7 +280,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     return (
       <main className="app-content px-12 py-10 flex flex-col" style={{ maxWidth: '1440px', margin: '0 auto', minHeight: 'calc(100vh - 120px)' }}>
         {toastMessage && (
-          <div className="mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
+          <div className="theme-toast mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
               <span>{toastMessage}</span>
@@ -290,7 +290,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
         )}
         
         <div className="flex justify-between items-end mb-8">
-          <h1 style={{ fontSize: '36px', fontFamily: 'var(--ink-font-global-family-prominent)', fontWeight: 400, color: '#1a1a1a' }}>Manage instances</h1>
+          <h1 className="page-heading">Manage instances</h1>
           <div className="flex gap-8 text-[13px]">
             <div className="flex flex-col items-end">
                   <div className="flex items-center gap-1.5 text-black" aria-live="polite">
@@ -438,7 +438,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
+        <div className="theme-toast mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
             <span>{toastMessage}</span>
@@ -459,7 +459,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               </div>
             </div>
           </div>
-          <button onClick={() => onOpenModal('support')} className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] cursor-pointer">
+          <button onClick={() => onOpenModal('support')} className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] cursor-pointer">
             Open Billing Ticket
           </button>
         </div>

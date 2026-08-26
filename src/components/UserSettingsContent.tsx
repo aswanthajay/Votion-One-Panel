@@ -835,7 +835,7 @@ export const UserSettingsContent: React.FC = () => {
                   await handleToggle2FAState(false); 
                   setActiveModal(null); 
                 }} 
-                className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] w-1/2 py-2 cursor-pointer"
+                className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] w-1/2 py-2 cursor-pointer"
               >
                 Disable 2FA
               </button>
@@ -966,7 +966,7 @@ export const UserSettingsContent: React.FC = () => {
               }
               setActiveRemoteSession(null);
               setActiveModal(null);
-            }} className="btn-primary bg-[#dc2626] hover:bg-[#b91c1c] w-full py-2 cursor-pointer">Disconnect Session</button>
+            }} className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] w-full py-2 cursor-pointer">Disconnect Session</button>
           </div>
         </div>
       )}
