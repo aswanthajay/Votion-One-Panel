@@ -2049,3 +2049,26 @@ body {
   color: #ededed !important;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
+
+
+/* Telemetry charts: Recharts uses presentation attributes for axis labels and
+   grid lines, so explicit dark selectors are required to override them. */
+[data-theme="dark"] .telemetry-cpu-history .recharts-cartesian-axis-tick-value,
+[data-theme="dark"] .telemetry-cpu-history .recharts-text,
+[data-theme="dark"] .telemetry-trend-area-chart .recharts-cartesian-axis-tick-value,
+[data-theme="dark"] .telemetry-trend-area-chart .recharts-text {
+  fill: #a1a1aa !important;
+}
+
+[data-theme="dark"] .telemetry-cpu-history .recharts-cartesian-axis-line,
+[data-theme="dark"] .telemetry-cpu-history .recharts-cartesian-axis-tick-line,
+[data-theme="dark"] .telemetry-trend-area-chart .recharts-cartesian-axis-line,
+[data-theme="dark"] .telemetry-trend-area-chart .recharts-cartesian-axis-tick-line {
+  stroke: #52525b !important;
+}
+
+[data-theme="dark"] .telemetry-cpu-history .recharts-cartesian-grid line,
+[data-theme="dark"] .telemetry-trend-area-chart .recharts-cartesian-grid line {
+  stroke: #3f3f46 !important;
+  opacity: 0.9;
+}

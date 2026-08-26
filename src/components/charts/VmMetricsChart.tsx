@@ -392,7 +392,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
         </div>
       </Grid>
 
-      <div className="flex flex-col mb-4">
+      <div className="telemetry-cpu-history flex flex-col mb-4">
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">CPU Compute History (24h)</h4>
         <AreaChart
           className="h-48 mt-4"
