@@ -97,7 +97,8 @@ body {
   padding: 0 24px;
   position: sticky;
   top: 0;
-  z-index: 40;
+  z-index: 300;
+  isolation: isolate;
 }
 
 .header-left,
@@ -776,6 +777,7 @@ body {
   padding: 0 !important;
   border-radius: 8px !important;
   box-shadow: 0 12px 28px rgba(26, 26, 26, 0.13) !important;
+  z-index: 320 !important;
 }
 
 .tasks-header {
