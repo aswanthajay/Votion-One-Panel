@@ -2267,3 +2267,214 @@ body {
 [data-theme="dark"] .theme-metadata-error {
   color: #fca5a5 !important;
 }
+
+.billing-finance-visual {
+  position: relative;
+  width: min(320px, 36vw);
+  min-width: 250px;
+  height: 150px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid #dedfdf;
+  border-radius: 8px;
+  background: radial-gradient(circle at 50% 48%, #ffffff 0, #f7f7f5 68%, #ededeb 100%);
+}
+
+.billing-finance-visual canvas {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.billing-finance-visual-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  perspective: 650px;
+  pointer-events: none;
+}
+
+.billing-finance-fallback-horizon {
+  position: absolute;
+  right: 12%;
+  bottom: 26px;
+  left: 12%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(139, 94, 0, 0.42), transparent);
+  box-shadow: 0 0 18px rgba(139, 94, 0, 0.18);
+}
+
+.billing-finance-fallback-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 106px;
+  height: 106px;
+  border: 1px solid rgba(139, 94, 0, 0.58);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotateX(64deg) rotateZ(-18deg);
+  animation: billingFinanceOrbit 12s linear infinite;
+}
+
+.billing-finance-fallback-ring-two {
+  width: 132px;
+  height: 132px;
+  border-color: rgba(37, 99, 235, 0.4);
+  transform: translate(-50%, -50%) rotateX(64deg) rotateZ(38deg);
+  animation-duration: 17s;
+  animation-direction: reverse;
+}
+
+.billing-finance-fallback-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(139, 94, 0, 0.65);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff, #d4a84f 38%, #8b5e00 100%);
+  box-shadow: 0 0 24px rgba(139, 94, 0, 0.28);
+  transform: translate(-50%, -50%);
+  animation: billingFinancePulse 2.8s ease-in-out infinite;
+}
+
+.billing-finance-fallback-bars {
+  position: absolute;
+  right: 18%;
+  bottom: 27px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 34px;
+  transform: skewY(-12deg);
+}
+
+.billing-finance-fallback-bars i {
+  display: block;
+  width: 5px;
+  height: 18px;
+  border-radius: 1px 1px 0 0;
+  background: #2563eb;
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.25);
+  animation: billingFinanceBars 2.4s ease-in-out infinite;
+}
+
+.billing-finance-fallback-bars i:nth-child(2) { height: 25px; animation-delay: -0.45s; }
+.billing-finance-fallback-bars i:nth-child(3) { height: 15px; animation-delay: -0.9s; }
+.billing-finance-fallback-bars i:nth-child(4) { height: 31px; background: #8b5e00; animation-delay: -1.35s; }
+.billing-finance-fallback-bars i:nth-child(5) { height: 22px; animation-delay: -1.8s; }
+
+@keyframes billingFinanceOrbit {
+  from { transform: translate(-50%, -50%) rotateX(64deg) rotateZ(-18deg) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotateX(64deg) rotateZ(-18deg) rotate(360deg); }
+}
+
+@keyframes billingFinancePulse {
+  0%, 100% { opacity: 0.76; transform: translate(-50%, -50%) scale(0.94); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@keyframes billingFinanceBars {
+  0%, 100% { opacity: 0.58; transform: scaleY(0.82); transform-origin: bottom; }
+  50% { opacity: 1; transform: scaleY(1.08); transform-origin: bottom; }
+}
+
+.billing-finance-visual::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: '';
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.24), transparent 42%, rgba(139, 94, 0, 0.08));
+}
+
+.billing-finance-visual-label {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #656b6b;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.billing-finance-visual-label strong {
+  color: #8b5e00;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+[data-theme="dark"] .billing-finance-visual {
+  border-color: #2b2b2b;
+  background: radial-gradient(circle at 50% 48%, #171717 0, #0b0b0b 68%, #050505 100%);
+}
+
+[data-theme="dark"] .billing-finance-fallback-horizon {
+  background: linear-gradient(90deg, transparent, rgba(243, 197, 107, 0.58), transparent);
+  box-shadow: 0 0 18px rgba(243, 197, 107, 0.22);
+}
+
+[data-theme="dark"] .billing-finance-fallback-ring {
+  border-color: rgba(243, 197, 107, 0.62);
+}
+
+[data-theme="dark"] .billing-finance-fallback-ring-two {
+  border-color: rgba(161, 161, 170, 0.42);
+}
+
+[data-theme="dark"] .billing-finance-fallback-core {
+  border-color: rgba(243, 197, 107, 0.75);
+  background: radial-gradient(circle at 35% 30%, #ededed, #f3c56b 38%, #8b5e00 100%);
+  box-shadow: 0 0 24px rgba(243, 197, 107, 0.3);
+}
+
+[data-theme="dark"] .billing-finance-fallback-bars i {
+  background: #a1a1aa;
+  box-shadow: 0 0 8px rgba(161, 161, 170, 0.22);
+}
+
+[data-theme="dark"] .billing-finance-fallback-bars i:nth-child(4) {
+  background: #f3c56b;
+}
+
+[data-theme="dark"] .billing-finance-visual::after {
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.05), transparent 42%, rgba(243, 197, 107, 0.08));
+}
+
+[data-theme="dark"] .billing-finance-visual-label {
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .billing-finance-visual-label strong {
+  color: #f3c56b;
+}
+
+@media (max-width: 1023px) {
+  .billing-finance-visual {
+    width: 100%;
+    min-width: 0;
+    height: 132px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .billing-finance-visual canvas {
+    opacity: 0.9;
+  }
+
+  .billing-finance-fallback-ring,
+  .billing-finance-fallback-core,
+  .billing-finance-fallback-bars i {
+    animation-play-state: paused;
+  }
+}
