@@ -2166,3 +2166,12 @@ body {
 [data-theme="dark"] .theme-reimage-request-card [class~="text-[#b42318]"] {
   color: #fca5a5 !important;
 }
+
+
+/* Memory distribution donut: Tremor renders its center value as SVG text,
+   which otherwise keeps the light-theme near-black fill in Dark mode. */
+[data-theme="dark"] .telemetry-memory-distribution .recharts-text,
+[data-theme="dark"] .telemetry-memory-distribution .recharts-pie-label-text,
+[data-theme="dark"] .telemetry-memory-distribution svg text {
+  fill: #ededed !important;
+}

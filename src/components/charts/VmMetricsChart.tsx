@@ -291,7 +291,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
       )}
 
       <Grid numItemsSm={1} numItemsMd={2} numItemsLg={4} className="gap-6 sm:gap-8 pb-6 border-b border-[#f0f0f0]">
-        <div className="col-span-1 flex flex-col justify-center">
+        <div className="telemetry-memory-distribution col-span-1 flex flex-col justify-center">
           <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-6">Memory Distribution</h4>
           <div className="flex-1 flex items-center justify-center">
             <DonutChart
