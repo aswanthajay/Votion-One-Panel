@@ -641,10 +641,14 @@ button {
    COLLAPSED SIDENAV STYLES (Clean alignment for 60px collapsed width)
    ========================================================================== */
 .app-sidenav.collapsed .sidenav-top-sticky {
-  padding: 12px 0;
+  padding: 8px 0 0;
   justify-content: center;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
+}
+
+.app-sidenav.collapsed .sidenav-nav-groups {
+  padding-top: 0;
 }
 
 .app-sidenav.collapsed .search-input-wrap {
