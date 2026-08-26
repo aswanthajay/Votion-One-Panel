@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient, ApiAccount } from '../services/apiClient';
+import { getStoredThemeMode, setThemeMode, ThemeMode } from '../theme';
 
 export const UserSettingsContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'security' | 'signature'>('security');
+  const [activeTab, setActiveTab] = useState<'security' | 'signature' | 'appearance'>('security');
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
   const [openActionRow, setOpenActionRow] = useState<string | null>(null);
 
   // Dynamic User Profile State loaded directly from PostgreSQL via Express API
@@ -53,6 +55,23 @@ export const UserSettingsContent: React.FC = () => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  const handleThemeModeChange = (mode: ThemeMode) => {
+    setThemeModeState(mode);
+    setThemeMode(mode);
+    showToast(`Appearance set to ${mode === 'system' ? 'System default' : mode === 'dark' ? 'Dark' : 'Light'}.`);
+  };
+
+  useEffect(() => {
+    const handleStorage = () => setThemeModeState(getStoredThemeMode());
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    window.addEventListener('storage', handleStorage);
+    media?.addEventListener('change', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      media?.removeEventListener('change', handleStorage);
+    };
+  }, []);
 
   // STEP 3.1: Load Live User Profile Details from GET /api/v1/user/profile
   const loadUserProfile = async () => {
@@ -180,7 +199,7 @@ export const UserSettingsContent: React.FC = () => {
     <main className="app-content">
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
+        <div className="theme-toast mb-6 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg flex items-center justify-between shadow-lg">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse"></span>
             <span>{toastMessage}</span>
@@ -208,6 +227,12 @@ export const UserSettingsContent: React.FC = () => {
             className={`user-settings-subnav-link cursor-pointer ${activeTab === 'signature' ? 'active' : ''}`}
           >
             Name and signature
+          </button>
+          <button
+            onClick={() => setActiveTab('appearance')}
+            className={`user-settings-subnav-link cursor-pointer ${activeTab === 'appearance' ? 'active' : ''}`}
+          >
+            Appearance
           </button>
         </nav>
 
@@ -450,6 +475,51 @@ export const UserSettingsContent: React.FC = () => {
                 </div>
               </section>
             </>
+          ) : activeTab === 'appearance' ? (
+            <section className="ink-block-wrapper appearance-settings-panel">
+              <div className="ink-block-header">
+                <h2 className="ink-block-title">Appearance</h2>
+                <p className="ink-description-text">Choose how Votion One™ looks on this device. System follows your operating system preference.</p>
+              </div>
+              <div className="p-6">
+                <div className="appearance-setting-row">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#1a1a1a]">Theme preference</h3>
+                    <p className="mt-1 text-xs leading-5 text-[#656b6b]">Your selection is saved locally and applies across this browser.</p>
+                  </div>
+                  <label className="appearance-select-label">
+                    <span className="sr-only">Theme preference</span>
+                    <select
+                      value={themeMode}
+                      onChange={(event) => handleThemeModeChange(event.target.value as ThemeMode)}
+                      className="appearance-select"
+                    >
+                      <option value="system">System</option>
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="appearance-mode-grid" role="group" aria-label="Theme preference options">
+                  {([
+                    ['system', 'System', 'Follow the device appearance'],
+                    ['light', 'Light', 'Use the current light interface'],
+                    ['dark', 'Dark', 'Use a deep black interface'],
+                  ] as const).map(([mode, label, description]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => handleThemeModeChange(mode)}
+                      className={`appearance-mode-card ${themeMode === mode ? 'is-selected' : ''}`}
+                      aria-pressed={themeMode === mode}
+                    >
+                      <span className="appearance-mode-card-title">{label}</span>
+                      <span className="appearance-mode-card-description">{description}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
           ) : (
             /* NAME AND SIGNATURE TAB */
             <section className="ink-block-wrapper">

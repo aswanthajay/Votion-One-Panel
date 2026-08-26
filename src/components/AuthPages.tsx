@@ -173,7 +173,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     'w-full px-0 py-2.5 bg-transparent border-0 border-b border-[#111111] outline-none text-sm text-[#1a1a1a] placeholder-transparent focus:border-[#1a1a1a] transition-colors';
 
   return (
-    <div className="relative min-h-screen w-full font-sans bg-[#ffffff] overflow-hidden">
+    <div className="auth-page relative min-h-screen w-full font-sans bg-[#ffffff] overflow-hidden">
       <div className="absolute inset-0 z-0 opacity-[0.12]"><Suspense fallback={<div className="absolute inset-0 bg-[#0b0f14]" aria-hidden="true" />}><ThreeBackground /></Suspense></div>
 
       {/* ================= LEFT BLACK EDITORIAL PANEL ================= */}
@@ -302,7 +302,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
       </div>
 
       {/* ================= RIGHT WHITE LOGIN PANEL ================= */}
-      <div className="min-h-screen w-full lg:w-[58%] lg:ml-auto flex flex-col justify-between py-12 px-6 sm:px-12 relative z-20 bg-white">
+      <div className="auth-page-panel min-h-screen w-full lg:w-[58%] lg:ml-auto flex flex-col justify-between py-12 px-6 sm:px-12 relative z-20 bg-white">
         {/* Mobile brand (only visible on small screens) */}
         <div className="lg:hidden flex items-center gap-2 mb-8">
           <div className="text-lg font-bold lowercase tracking-tight font-mono">votion</div>
@@ -593,7 +593,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
         </div>
 
         {/* Footer links, Carta-style */}
-        <div className="w-full max-w-[380px] mx-auto mt-12 flex items-center justify-between text-[11px] text-[#656b6b]">
+        <div className="auth-page-footer w-full max-w-[380px] mx-auto mt-12 flex items-center justify-between text-[11px] text-[#656b6b]">
           <div>&copy; 2026 Votion One™ Platform</div>
           <button type="button" className="hover:opacity-70 underline underline-offset-2">
             View latest updates

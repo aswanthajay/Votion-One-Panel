@@ -1,34 +1,43 @@
 /*
-  STELLAR PANEL THEME SYSTEM
-  ==========================
-  Persistable dark mode with three modes: 'light' | 'dark' | 'system'.
-  'system' tracks the OS preference via prefers-color-scheme and updates live.
-
-  Mechanism:
-  - Mode is saved to localStorage key 'votion_theme'.
-  - The resolved effective theme ('light' | 'dark') is applied as
-    data-theme="dark" on <html>, which switches the CSS variable layer
-    (see src/index.css + styles.css [data-theme="dark"] blocks).
-  - A storage event listener across tabs keeps all open tabs in sync.
+  VOTION ONE THEME SYSTEM
+  ========================
+  Persistable theme preference with three modes: 'light' | 'dark' | 'system'.
+  The system mode follows the operating-system preference via prefers-color-scheme.
 */
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+type EffectiveTheme = 'light' | 'dark';
+
 const STORAGE_KEY = 'votion_theme';
 const ATTR = 'data-theme';
+const MEDIA_QUERY = '(prefers-color-scheme: dark)';
+let initialized = false;
 
-/** Resolve the effective theme from a mode, honoring the OS preference. */
-function resolve(mode: ThemeMode): 'light' | 'dark' {
+/** Resolve the effective theme from a preference mode. */
+function resolve(mode: ThemeMode): EffectiveTheme {
   if (mode === 'dark') return 'dark';
   if (mode === 'light') return 'light';
   if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return window.matchMedia(MEDIA_QUERY).matches ? 'dark' : 'light';
   }
   return 'light';
 }
 
-/** Apply the resolved theme to <html> (synchronous, works before React mounts). */
+function updateThemeColor(theme: EffectiveTheme) {
+  if (typeof document === 'undefined') return;
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.content = theme === 'dark' ? '#000000' : '#ffffff';
+}
+
+/** Apply the resolved theme to <html> synchronously. */
 function applyTheme(mode: ThemeMode) {
+  if (typeof document === 'undefined') return;
   const effective = resolve(mode);
   const html = document.documentElement;
   if (effective === 'dark') {
@@ -36,39 +45,44 @@ function applyTheme(mode: ThemeMode) {
   } else {
     html.removeAttribute(ATTR);
   }
+  html.style.colorScheme = effective;
+  updateThemeColor(effective);
 }
 
-/** Read the saved mode (or default to 'system'). */
+/** Read the saved preference, defaulting to system detection. */
 export function getStoredThemeMode(): ThemeMode {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === 'light' || raw === 'dark' || raw === 'system') return raw;
-  } catch {}
+  } catch {
+    // Private browsing or storage restrictions should not prevent theme usage.
+  }
   return 'system';
 }
 
-/** Save a mode and apply it immediately. */
+/** Save a preference and apply it immediately. */
 export function setThemeMode(mode: ThemeMode) {
   try {
     localStorage.setItem(STORAGE_KEY, mode);
-  } catch {}
+  } catch {
+    // The active tab still receives the requested theme when storage is unavailable.
+  }
   applyTheme(mode);
 }
 
-/** Synchronous bootstrap: call this once before React mounts to eliminate FOUC. */
+/** Synchronous bootstrap called before React mounts to eliminate theme flicker. */
 export function initTheme() {
-  const mode = getStoredThemeMode();
-  applyTheme(mode);
-  if (mode === 'system' && typeof window !== 'undefined' && window.matchMedia) {
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      applyTheme('system');
-    });
-  }
-  if (typeof window !== 'undefined') {
-    window.addEventListener('storage', (e) => {
-      if (e.key === STORAGE_KEY && e.newValue !== null) {
-        applyTheme(getStoredThemeMode());
-      }
-    });
-  }
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  applyTheme(getStoredThemeMode());
+  if (initialized) return;
+  initialized = true;
+
+  const media = window.matchMedia?.(MEDIA_QUERY);
+  media?.addEventListener('change', () => {
+    if (getStoredThemeMode() === 'system') applyTheme('system');
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORAGE_KEY) applyTheme(getStoredThemeMode());
+  });
 }
