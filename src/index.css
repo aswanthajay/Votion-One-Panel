@@ -1582,6 +1582,7 @@ body {
 
   .header-left .brand-logo {
     min-width: 0;
+    min-height: 44px;
     flex: 0 1 auto;
   }
 
@@ -1772,8 +1773,18 @@ body {
   .app-content button,
   .app-content a,
   .overview-dashboard button,
-  .overview-dashboard a {
+  .overview-dashboard a,
+  body > #root .fixed.inset-0 button,
+  body > #root .fixed.inset-0 a {
+    min-width: 44px;
     min-height: 44px;
+  }
+
+  body > #root .fixed.inset-0 input:not([type="checkbox"]):not([type="radio"]),
+  body > #root .fixed.inset-0 select,
+  body > #root .fixed.inset-0 textarea {
+    min-height: 44px;
+    font-size: 16px !important;
   }
 
   input[type="checkbox"],

@@ -253,7 +253,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
               </button>
             )}
           </h3>
-          <button onClick={onClose} className="text-[#656b6b] hover:text-[#1a1a1a] font-bold text-sm cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close dialog" className="text-[#656b6b] hover:text-[#1a1a1a] font-bold text-sm cursor-pointer">
             ✕
           </button>
         </div>
