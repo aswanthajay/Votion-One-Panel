@@ -174,7 +174,7 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
   const vmName = (vmid?: number) => vms.find(v => v.vmid === vmid)?.name || `VMID ${vmid ?? '-'}`;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[50] flex items-center justify-center p-4 overflow-y-auto">
+    <div className="alert-rules-modal fixed inset-0 bg-black/60 backdrop-blur-sm z-[1500] flex items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-2xl bg-white border border-[#dedfdf] rounded-xl shadow-2xl flex flex-col max-h-[90vh] my-8">
         <div className="flex items-center justify-between border-b border-[#dedfdf] px-6 py-4 shrink-0">
           <div>
