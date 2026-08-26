@@ -10,6 +10,7 @@ interface HeaderProps {
   onToggleRole: () => void;
   onOpenModal: (modalName: string) => void;
   onOpenAlertRules?: () => void;
+  onToggleMobileSidebar: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -19,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleRole,
   onOpenModal,
   onOpenAlertRules,
+  onToggleMobileSidebar,
 }) => {
   const [tasksOpen, setTasksOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -88,6 +90,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className={`app-header ${currentView === 'overview' ? 'header-overview-context' : ''}`}>
       <div className="header-left">
+        <button type="button" className="mobile-menu-trigger" onClick={onToggleMobileSidebar} aria-label="Open navigation menu" title="Open navigation menu">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
         {/* VOTION Box Logo */}
         <button 
           onClick={() => onNavigate('overview')}

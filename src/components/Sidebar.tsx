@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 interface SidebarProps {
   isCollapsed: boolean;
+  isMobileOpen: boolean;
   onToggleCollapse: () => void;
   onOpenCmdModal: (query?: string) => void;
   searchQuery: string;
@@ -9,6 +10,7 @@ interface SidebarProps {
   currentView: string;
   onNavigate: (view: any) => void;
   userRole: 'admin' | 'client';
+  onCloseMobile: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -20,6 +22,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentView,
   onNavigate,
   userRole,
+  isMobileOpen,
+  onCloseMobile,
 }) => {
   const [essentialsOpen, setEssentialsOpen] = useState(true);
 
@@ -191,9 +195,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isEssentialsMatch = !q || 'essentials'.includes(q) || filteredSublinks.length > 0;
 
   return (
-    <aside className={`app-sidenav ${isCollapsed ? 'collapsed' : ''} max-md:hidden`}>
+    <aside className={`app-sidenav ${isCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
       {/* Top Search & Toggle */}
       <div className="sidenav-top-sticky flex items-center justify-between gap-1 w-full p-[14px]">
+        <button type="button" className="mobile-sidebar-close" onClick={onCloseMobile} aria-label="Close navigation menu">×</button>
         {!isCollapsed && (
           <div 
             className="flex flex-1 items-center justify-between bg-[#f4f5f5] rounded h-[30px] px-2.5 cursor-pointer relative"

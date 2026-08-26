@@ -314,7 +314,7 @@ export const BillingOperationsPanel: React.FC = () => {
   const profitabilityStatusClass = (status: string) => status === 'profitable' ? 'text-[#176b52] bg-[#eef9f4] border-[#b8e3cf]' : status === 'loss' ? 'text-[#8d3028] bg-[#fff1ef] border-[#f0c0bb]' : status === 'configure_costs' ? 'text-[#8b5e00] bg-[#fff8e8] border-[#f3d19a]' : 'text-[#656b6b] bg-[#f4f5f5] border-[#dedfdf]';
 
   return (
-    <main className="app-content min-h-full px-4 py-5 sm:px-6 lg:px-8" aria-busy={loading}>
+    <main className="app-content billing-operations-panel min-h-full px-4 py-5 sm:px-6 lg:px-8" aria-busy={loading}>
       <div className="mx-auto w-full">
         <header className="ink-block-wrapper !mb-6 flex flex-col gap-5 p-6 lg:flex-row lg:items-center lg:justify-between">
           <div>

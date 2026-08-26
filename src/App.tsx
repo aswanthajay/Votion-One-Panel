@@ -171,6 +171,7 @@ const AppShell: React.FC = () => {
     return savedRole === 'admin' ? 'admin' : 'client';
   });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
   const [cmdInitialQuery, setCmdInitialQuery] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -217,7 +218,10 @@ const AppShell: React.FC = () => {
     const path = typeof view === 'string' && view in VIEW_PATHS
       ? VIEW_PATHS[view as ViewMode]
       : VIEW_PATHS.dashboard;
-    startTransition(() => navigate(`${path}?role=${activeRole}`));
+    startTransition(() => {
+      setIsMobileSidebarOpen(false);
+      navigate(`${path}?role=${activeRole}`);
+    });
   };
 
   const handleToggleRole = () => {
@@ -240,10 +244,12 @@ const AppShell: React.FC = () => {
           onToggleRole={handleToggleRole}
           onOpenModal={handleOpenModal}
           onOpenAlertRules={() => startTransition(() => setAlertRulesOpen(true))}
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(previous => !previous)}
         />
         <div className="app-body">
           <Sidebar
             isCollapsed={isSidebarCollapsed}
+            isMobileOpen={isMobileSidebarOpen}
             onToggleCollapse={() => setIsSidebarCollapsed(previous => !previous)}
             onOpenCmdModal={handleOpenCmdModal}
             searchQuery={searchQuery}
@@ -251,7 +257,16 @@ const AppShell: React.FC = () => {
             currentView={currentView}
             onNavigate={handleNavigate}
             userRole={activeRole}
+            onCloseMobile={() => setIsMobileSidebarOpen(false)}
           />
+          {isMobileSidebarOpen && (
+            <button
+              type="button"
+              className="mobile-sidebar-backdrop"
+              aria-label="Close navigation menu"
+              onClick={() => setIsMobileSidebarOpen(false)}
+            />
+          )}
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
