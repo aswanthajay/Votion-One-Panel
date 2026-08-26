@@ -2253,6 +2253,17 @@ body {
   isolation: isolate;
 }
 
+#app-switcher .theme-app-switcher-drawer {
+  position: fixed;
+  top: var(--app-switcher-height);
+  right: 0;
+  left: 0;
+  z-index: 1200;
+  max-height: calc(100dvh - var(--app-switcher-height));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .app-header {
   top: var(--app-switcher-height);
   z-index: 999;
