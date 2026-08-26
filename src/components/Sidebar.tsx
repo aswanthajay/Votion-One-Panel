@@ -126,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       key: 'instances-qemu',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M18.8 6.55a5.55 5.55 0 1 1-11.1 0 5.55 5.55 0 0 1 11.1 0ZM13.25 3a3.55 3.55 0 1 0 0 7.1 3.55 3.55 0 0 0 0-7.1ZM1 13.9a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1ZM6.3 17.5a1 1 0 0 1 1-1h9.4a1 1 0 1 1 0 2H7.3a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
+          <path clipRule="evenodd" d="M4 2.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5v2h3a1 1 0 1 1 0 2H7a1 1 0 1 1 0-2h3v-2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Zm0 2v9h14v-9H4Zm2 2h2v2H6v-2Zm0 3h2v2H6v-2Zm4-3h6v2h-6v-2Zm0 3h4v2h-4v-2Z" fillRule="evenodd"></path>
         </svg>
       )
     },
