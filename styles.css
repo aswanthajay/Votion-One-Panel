@@ -2064,3 +2064,246 @@ button {
   font-weight: 700;
   white-space: nowrap;
 }
+
+
+/* VM detail refinement: clearer record hierarchy and quieter operational surfaces. */
+.vm-instance-shell {
+  margin-bottom: 32px;
+}
+
+.vm-instance-card {
+  border-radius: 12px;
+  background: var(--theme-surface);
+  box-shadow: 0 12px 30px rgba(26, 26, 26, 0.06);
+}
+
+.vm-instance-card-body {
+  gap: 24px;
+  padding: 26px;
+}
+
+.vm-instance-header {
+  align-items: flex-start;
+  gap: 28px;
+  padding-bottom: 22px;
+}
+
+.vm-instance-header .vm-power-actions {
+  margin-top: 2px;
+}
+
+.vm-identity-kicker {
+  gap: 9px;
+  font-size: 9px;
+}
+
+.vm-identity-name-row {
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.vm-identity-name {
+  font-size: 26px;
+}
+
+.vm-instance-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  background: var(--theme-surface-muted);
+  padding: 5px 9px;
+  font-size: 9px;
+}
+
+.vm-instance-status::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.vm-instance-status-running {
+  border-color: #b7dec9;
+  background: #eef9f4;
+  color: #23613b;
+}
+
+.vm-instance-status-starting,
+.vm-instance-status-stopping,
+.vm-instance-status-rebooting {
+  border-color: #d9c58a;
+  background: #fffaf0;
+  color: #765d13;
+}
+
+.vm-identity-meta {
+  gap: 20px 34px;
+  margin-top: 20px;
+}
+
+.vm-identity-meta > div {
+  min-width: 124px;
+}
+
+.vm-usage-grid {
+  gap: 16px;
+  padding-bottom: 22px;
+}
+
+.vm-usage-grid > div {
+  border: 1px solid var(--theme-border);
+  border-radius: 8px;
+  background: var(--theme-surface-raised);
+  padding: 14px 16px;
+}
+
+.vm-usage-grid > div + div {
+  padding-left: 16px;
+}
+
+.vm-usage-grid > div > div:first-child {
+  margin-bottom: 10px;
+}
+
+.vm-management-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--theme-border);
+  scrollbar-width: none;
+}
+
+.vm-management-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.vm-management-tab {
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 0 12px 10px;
+  color: var(--theme-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.vm-management-tab:hover {
+  background: var(--theme-surface-muted);
+  color: var(--theme-text);
+}
+
+.vm-management-tab.is-active {
+  border-bottom-color: var(--theme-text);
+  color: var(--theme-text);
+}
+
+.vm-management-tab:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: -2px;
+}
+
+.theme-metadata-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  border: 1px solid var(--theme-danger);
+  border-radius: 8px;
+  background: var(--theme-surface-muted);
+  padding: 14px;
+}
+
+.theme-metadata-error-mark {
+  display: inline-flex;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--theme-danger);
+  color: var(--theme-text-inverse);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.theme-metadata-error-title {
+  color: var(--theme-danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theme-metadata-error-detail {
+  margin-top: 4px;
+  color: var(--theme-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.vm-instance-back-button {
+  min-height: 40px;
+}
+
+@media (max-width: 760px) {
+  .vm-instance-card-body {
+    gap: 20px;
+    padding: 18px;
+  }
+
+  .vm-instance-header {
+    gap: 18px;
+  }
+
+  .vm-identity-name {
+    font-size: 23px;
+  }
+
+  .vm-identity-meta {
+    gap: 16px 20px;
+  }
+
+  .vm-usage-grid > div {
+    padding: 13px 14px;
+  }
+
+  .vm-usage-grid > div + div {
+    padding-left: 14px;
+  }
+
+  .vm-management-tabs {
+    margin-inline: -18px;
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .vm-management-tab {
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+}
+
+
+/* Command strip refinement: give primary controls enough visual weight in the record header. */
+.vm-power-button-group {
+  border-radius: 6px;
+}
+
+.vm-power-action {
+  min-height: 34px;
+  padding: 8px 14px;
+}
+
+@media (max-width: 760px) {
+  .vm-power-action {
+    min-height: 44px;
+    padding: 0 10px;
+  }
+}

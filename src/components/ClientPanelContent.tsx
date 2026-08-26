@@ -429,7 +429,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       <div className="mb-5 md:mb-8">
         <button 
           onClick={() => setViewMode('table')}
-          className="text-[17px] text-[#2563eb] hover:text-[#1d4ed8] flex items-center gap-2 transition-colors cursor-pointer"
+          className="vm-instance-back-button text-[17px] text-[#2563eb] hover:text-[#1d4ed8] flex items-center gap-2 transition-colors cursor-pointer"
         >
           <span className="text-xl font-light leading-none relative -top-[1px] font-sans">←</span>
           <span className="underline decoration-1 underline-offset-4 font-normal">Manage instances</span>
@@ -469,7 +469,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       <section className="vm-instance-shell">
         <div className="vm-instance-card">
           {selectedVm ? (
-              <div className="vm-instance-card-body">
+              <div className="vm-instance-card-body" aria-label="Selected instance details">
               
               {/* PANEL HEADER & POWER CONTROLS */}
               <div className="vm-instance-header">
@@ -557,40 +557,58 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               <VmMetadataPanel metadata={vmMetadata} isLoading={isMetadataLoading} error={metadataError} />
 
               {/* MANAGEMENT TABS */}
-            <div className="flex border-b border-[#dedfdf] text-xs gap-6 font-semibold">
+            <div className="vm-management-tabs" role="tablist" aria-label="Instance management tools">
               <button 
                 onClick={() => setActiveTab('metrics')} 
-                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'metrics' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'metrics'}
+                className={`vm-management-tab ${activeTab === 'metrics' ? 'is-active' : ''}`}
               >
                 Telemetry & Metrics
               </button>
               <button 
                 onClick={() => setActiveTab('console')} 
-                className={`pb-2.5 cursor-pointer ${activeTab === 'console' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'console'}
+                className={`vm-management-tab ${activeTab === 'console' ? 'is-active' : ''}`}
               >
                 VNC Web Terminal
               </button>
               <button 
                 onClick={() => setActiveTab('reinstall')} 
-                className={`pb-2.5 cursor-pointer ${activeTab === 'reinstall' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'reinstall'}
+                className={`vm-management-tab ${activeTab === 'reinstall' ? 'is-active' : ''}`}
               >
                 OS Re-Imaging Request
               </button>
               <button 
                 onClick={() => setActiveTab('ticket')} 
-                className={`pb-2.5 cursor-pointer ${activeTab === 'ticket' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'ticket'}
+                className={`vm-management-tab ${activeTab === 'ticket' ? 'is-active' : ''}`}
               >
                 Open Ticket for VMID {selectedVm.vmid}
               </button>
               <button 
                 onClick={() => setActiveTab('firewall')} 
-                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'firewall' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'firewall'}
+                className={`vm-management-tab ${activeTab === 'firewall' ? 'is-active' : ''}`}
               >
                 Network Firewall
               </button>
               <button 
                 onClick={() => setActiveTab('backups')} 
-                className={`pb-2.5 cursor-pointer flex items-center gap-1 ${activeTab === 'backups' ? 'text-[#1a1a1a] border-b-2 border-[#1a1a1a]' : 'text-[#656b6b]'}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'backups'}
+                className={`vm-management-tab ${activeTab === 'backups' ? 'is-active' : ''}`}
               >
                 Snapshot Backups
               </button>
