@@ -96,7 +96,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
     'text-[#b45309] bg-[#fffbeb] border-[#fde68a]';
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="header-notification-wrap relative" ref={ref}>
       <button
         onClick={onToggle}
         className={`header-notification-control relative cursor-pointer ${open ? 'is-open' : ''}`}
