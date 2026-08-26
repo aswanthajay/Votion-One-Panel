@@ -630,16 +630,16 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                 {isReimageLoading ? (
                   <div className="h-20 animate-pulse rounded-lg bg-[#f3f4f4]" aria-busy="true" aria-label="Loading reimage request status" />
                 ) : latestReimageRequest ? (
-                  <div className={`rounded-lg border p-4 ${latestReimageRequest.status === 'pending' ? 'border-[#f3c56b] bg-[#fffaf0]' : latestReimageRequest.status === 'approved' ? 'border-[#b7dfcf] bg-[#f1fbf7]' : 'border-[#dedfdf] bg-[#fbfaf9]'}`}>
+                  <div className={`theme-reimage-request-card rounded-lg border p-4 ${latestReimageRequest.status === 'pending' ? 'border-[#f3c56b] bg-[#fffaf0]' : latestReimageRequest.status === 'approved' ? 'border-[#b7dfcf] bg-[#f1fbf7]' : 'border-[#dedfdf] bg-[#fbfaf9]'}`}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Latest request</p>
-                        <p className="mt-1 font-mono text-xs text-[#1a1a1a]">{latestReimageRequest.id}</p>
+                        <p className="theme-reimage-request-label text-[11px] font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Latest request</p>
+                        <p className="theme-reimage-request-id mt-1 font-mono text-xs text-[#1a1a1a]">{latestReimageRequest.id}</p>
                       </div>
-                      <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold capitalize text-[#1a1a1a]">{latestReimageRequest.status}</span>
+                      <span className={`theme-reimage-request-status status-${latestReimageRequest.status} rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold capitalize text-[#1a1a1a]`}>{latestReimageRequest.status}</span>
                     </div>
-                    <p className="mt-3 text-xs text-[#1a1a1a]">{latestReimageRequest.requestedOs}</p>
-                    <p className="mt-1 text-xs leading-5 text-[#656b6b]">
+                    <p className="theme-reimage-request-os mt-3 text-xs text-[#1a1a1a]">{latestReimageRequest.requestedOs}</p>
+                    <p className="theme-reimage-request-description mt-1 text-xs leading-5 text-[#656b6b]">
                       {latestReimageRequest.status === 'pending'
                         ? 'An administrator must review this request. No reimage has started.'
                         : latestReimageRequest.status === 'approved'

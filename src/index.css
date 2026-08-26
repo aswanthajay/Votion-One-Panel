@@ -2072,3 +2072,97 @@ body {
   stroke: #3f3f46 !important;
   opacity: 0.9;
 }
+
+
+/* VNC console toolbar: the session row must not fall back to a light surface
+   while the console is waiting for its relay connection. */
+[data-theme="dark"] .theme-vnc-toolbar {
+  background: #111111 !important;
+  color: #ededed !important;
+  border-bottom: 1px solid #2b2b2b !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-status-label {
+  color: #a1a1aa !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-status-value,
+[data-theme="dark"] .theme-vnc-toolbar .vnc-session-context {
+  color: #d4d4d8 !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #d4d4d8 !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button:hover:not(:disabled),
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button:focus-visible {
+  border-color: #52525b;
+  background: #242424;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button:disabled {
+  color: #71717a !important;
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button-danger {
+  color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .theme-vnc-toolbar .vnc-toolbar-button-disconnect {
+  color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card {
+  border-color: #3f3f46 !important;
+  background: #111111 !important;
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-label,
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-description {
+  color: #a1a1aa !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-id,
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-os {
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-status {
+  border: 1px solid #52525b;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-status.status-approved {
+  background: #ededed !important;
+  color: #000000 !important;
+  border-color: #ededed !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-status.status-pending {
+  background: #3b2a0c !important;
+  color: #f3c56b !important;
+  border-color: #8a651c !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-status.status-rejected {
+  background: #3a1717 !important;
+  color: #fca5a5 !important;
+  border-color: #7f1d1d !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card .theme-reimage-request-status.status-cancelled {
+  background: #242424 !important;
+  color: #d4d4d8 !important;
+  border-color: #52525b !important;
+}
+
+[data-theme="dark"] .theme-reimage-request-card [class~="text-[#b42318]"] {
+  color: #fca5a5 !important;
+}

@@ -313,7 +313,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
             </div>
           </div>
         )}
-      <div className="vnc-console-header">
+      <div className="vnc-console-header theme-vnc-toolbar">
         <div className="vnc-session-status" role="status" aria-live="polite">
           <span className={`vnc-status-indicator ${isConnected ? 'is-connected' : status.includes('failed') ? 'is-failed' : 'is-pending'}`} aria-hidden="true" />
           <span className="vnc-status-label">Console session</span>
@@ -325,7 +325,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
           <button onClick={pasteClipboard} disabled={!isConnected || viewOnly} title="Paste the local clipboard into the guest" className="vnc-toolbar-button" type="button">Paste</button>
           <button onClick={() => setShowShortcuts(value => !value)} title="Show keyboard shortcuts" className="vnc-toolbar-button" type="button">Shortcuts</button>
           <button onClick={() => void toggleFullscreen()} title="Toggle fullscreen (Ctrl+F)" className="vnc-toolbar-button" type="button">{isFullscreen ? 'Exit full screen' : 'Full screen'}</button>
-          <button onClick={disconnectSession} disabled={!isConnected && status === 'Disconnected'} title="Close the current VNC session" className="vnc-toolbar-button !text-[#991b1b]" type="button">Disconnect</button>
+          <button onClick={disconnectSession} disabled={!isConnected && status === 'Disconnected'} title="Close the current VNC session" className="vnc-toolbar-button vnc-toolbar-button-disconnect !text-[#991b1b]" type="button">Disconnect</button>
         </div>
       </div>
 
