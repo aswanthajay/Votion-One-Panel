@@ -1512,6 +1512,22 @@ body {
   color: #ffffff !important;
 }
 
+/* Sidebar controls use the legacy gray-10 hover token; keep that token from
+   becoming a light flash on the dark shell. */
+[data-theme="dark"] .app-sidenav .sidenav-toggle-btn:hover,
+[data-theme="dark"] .app-sidenav .search-collapsed-btn:hover {
+  background-color: #161616 !important;
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .app-sidenav .sidenav-toggle-btn:focus-visible,
+[data-theme="dark"] .app-sidenav .search-collapsed-btn:focus-visible {
+  background-color: #1f1f1f !important;
+  color: #ffffff !important;
+  outline: 2px solid #71717a;
+  outline-offset: 2px;
+}
+
 [data-theme="dark"] .tile-white,
 [data-theme="dark"] .ink-block-wrapper,
 [data-theme="dark"] .ink-block-header,
