@@ -353,25 +353,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </li>
         )}
 
-        {/* Login Page Link in MORE section */}
-        {(!q || 'login page'.includes(q) || 'auth'.includes(q)) && (
-          <li className="sidenav-item">
-            <div 
-              onClick={() => onNavigate('login')}
-              className={`sidenav-link cursor-pointer ${currentView === 'login' ? 'active' : ''}`}
-              title="Login Page"
-            >
-              <div className="sidenav-link-left">
-                <span className="sidenav-icon">
-                  <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-                    <path clipRule="evenodd" d="M3 3h10a2 2 0 0 1 2 2v3a1 1 0 1 1-2 0V5H3v14h10v-3a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm13.293 4.293a1 1 0 0 1 1.414 0l4 4a1 1 0 0 1 0 1.414l-4 4a1 1 0 0 1-1.414-1.414L18.586 13H9a1 1 0 1 1 0-2h9.586l-2.293-2.293a1 1 0 0 1 0-1.414Z" fillRule="evenodd"></path>
-                  </svg>
-                </span>
-                <span className="sidenav-link-text">Login Page</span>
-              </div>
-            </div>
-          </li>
-        )}
 
       </ul>
     </aside>
