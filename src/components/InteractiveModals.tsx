@@ -10,6 +10,8 @@ interface InteractiveModalsProps {
 export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModal, onClose, userRole }) => {
   const [modalData, setModalData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalRetry, setModalRetry] = useState(0);
   
   // Support Center Specific State
   const [ticketsList, setTicketsList] = useState<ApiSupportTicket[]>([]);
@@ -60,6 +62,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   useEffect(() => {
     if (!activeModal) {
       setModalData(null);
+      setModalError(null);
       setSelectedTicket(null);
       setViewMode('list');
       setErrorMessage(null);
@@ -68,6 +71,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
 
     const fetchModalData = async () => {
       setLoading(true);
+      setModalError(null);
       try {
         if (activeModal === 'downloads') {
           const res = await apiClient.getDownloads();
@@ -88,14 +92,14 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
           await loadTickets();
         }
       } catch (err) {
-        // Handle error
+        setModalError(err instanceof Error ? err.message : 'Unable to load this menu right now.');
       } finally {
         setLoading(false);
       }
     };
 
     fetchModalData();
-  }, [activeModal, userRole]);
+  }, [activeModal, userRole, modalRetry]);
 
   if (!activeModal) return null;
 
@@ -264,7 +268,15 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
           </div>
         )}
 
-        {loading ? (
+        {modalError ? (
+          <div className="modal-data-error" role="alert">
+            <div>
+              <p className="modal-data-error-title">Unable to load {activeModal === 'downloads' ? 'downloads' : 'upgrade plans'}</p>
+              <p className="modal-data-error-detail">{modalError}</p>
+            </div>
+            <button type="button" className="btn-secondary modal-data-retry" onClick={() => setModalRetry(value => value + 1)}>Retry</button>
+          </div>
+        ) : loading ? (
           <div className="p-8 text-center text-[#656b6b] font-mono">
             Fetching dynamic API data from Express server...
           </div>
@@ -337,20 +349,28 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
             {/* DOWNLOADS MODAL */}
             {activeModal === 'downloads' && (
               <div className="flex flex-col gap-3">
-                <p className="text-[#656b6b]">Official system images and virtual driver downloads.</p>
-                <div className="divide-y divide-[#dedfdf] border border-[#dedfdf] rounded-lg overflow-hidden">
-                  {Array.isArray(modalData) && modalData.map((item: any) => (
-                    <div key={item.id} className="p-3 flex items-center justify-between hover:bg-[#fbfaf9]">
-                      <div>
-                        <div className="font-semibold text-[#1a1a1a] text-xs">{item.name}</div>
-                        <div className="text-[11px] text-[#656b6b]">v{item.version} | Size: {item.size}</div>
-                      </div>
-                      <a href={item.url} download className="btn-secondary py-1 px-3 text-[11px] cursor-pointer">
-                        Download
-                      </a>
-                    </div>
-                  ))}
+                <div>
+                  <p className="font-semibold text-[#1a1a1a]">System images and drivers</p>
+                  <p className="mt-1 text-[#656b6b]">Official files published for Votion-managed instances.</p>
                 </div>
+                {Array.isArray(modalData) && modalData.length > 0 ? (
+                  <div className="divide-y divide-[#dedfdf] overflow-hidden rounded-lg border border-[#dedfdf]">
+                    {modalData.map((item: any) => (
+                      <div key={item.id} className="flex items-center justify-between gap-4 p-3 transition-colors hover:bg-[#fbfaf9]">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold text-[#1a1a1a]">{item.name}</div>
+                          <div className="text-[11px] text-[#656b6b]">{item.version ? `v${item.version}` : 'Current release'}{item.size ? ` · ${item.size}` : ''}</div>
+                        </div>
+                        {item.url ? <a href={item.url} download className="btn-secondary shrink-0 cursor-pointer px-3 py-1 text-[11px]">Download</a> : <span className="text-[11px] text-[#656b6b]">Link unavailable</span>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="modal-empty-state">
+                    <p className="font-semibold text-[#1a1a1a]">No downloads are published yet</p>
+                    <p className="mt-1 text-[#656b6b]">When system images or drivers are available, they will appear here.</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -377,39 +397,48 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
             {/* PRICING & UPGRADE MODAL */}
             {(activeModal === 'pricing' || activeModal === 'upgrade') && (
               <div className="flex flex-col gap-4">
-                <p className="text-[#656b6b]">Scale your cluster hardware allocations with dedicated node capacity.</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {Array.isArray(modalData) && modalData.map((plan: any) => (
-                    <div key={plan.id} className={`p-4 border rounded-xl flex flex-col justify-between ${plan.popular ? 'border-[#1a1a1a] bg-[#fbfaf9]' : 'border-[#dedfdf]'}`}>
-                      <div>
-                        {plan.popular && <span className="bg-[#1a1a1a] text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase block mb-2 w-fit">Popular</span>}
-                        <div className="font-bold text-sm text-[#1a1a1a]">{plan.name}</div>
-                        <div className="text-base font-extrabold text-[#1a1a1a] my-2">{plan.price}</div>
-                        <div className="text-[11px] text-[#656b6b] space-y-1">
-                          <div>• {plan.vcpus} Dedicated vCPUs</div>
-                          <div>• {plan.ramGb} GB ECC RAM</div>
-                          <div>• {plan.storageGb} GB NVMe Storage</div>
-                          <div>• {plan.bandwidth} Bandwidth</div>
-                        </div>
-                      </div>
-                      <button onClick={async () => {
-                        try {
-                          const res = await fetch('http://localhost:5000/api/v1/billing/upgrade', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-                            body: JSON.stringify({ planId: plan.id, planName: plan.name }),
-                          });
-                          const data = await res.json();
-                          showToast(data.message || `Upgrade request for ${plan.name} submitted. Our team will contact you.`);
-                        } catch {
-                          showToast(`Upgrade request for ${plan.name} received. Our team will contact you within 24h.`);
-                        }
-                      }} className="btn-primary py-1.5 w-full mt-4 text-[11px] cursor-pointer">
-                        Select Plan
-                      </button>
-                    </div>
-                  ))}
+                <div>
+                  <p className="font-semibold text-[#1a1a1a]">Choose an instance plan</p>
+                  <p className="mt-1 text-[#656b6b]">Submit a request and the Votion operations team will confirm availability, billing, and next steps.</p>
                 </div>
+                {Array.isArray(modalData) && modalData.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {modalData.map((plan: any) => (
+                      <div key={plan.id} className={`flex flex-col justify-between rounded-xl border p-4 ${plan.popular ? 'border-[#1a1a1a] bg-[#fbfaf9]' : 'border-[#dedfdf]'}`}>
+                        <div>
+                          {plan.popular && <span className="mb-2 block w-fit rounded bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-bold uppercase text-white">Recommended</span>}
+                          <div className="text-sm font-bold text-[#1a1a1a]">{plan.name}</div>
+                          <div className="my-2 text-base font-extrabold text-[#1a1a1a]">{plan.price || 'Contact us'}</div>
+                          <div className="space-y-1 text-[11px] text-[#656b6b]">
+                            {plan.vcpus && <div>• {plan.vcpus} dedicated vCPUs</div>}
+                            {plan.ramGb && <div>• {plan.ramGb} GB ECC RAM</div>}
+                            {plan.storageGb && <div>• {plan.storageGb} GB NVMe storage</div>}
+                            {plan.bandwidth && <div>• {plan.bandwidth} bandwidth</div>}
+                          </div>
+                        </div>
+                        <button type="button" disabled={isSubmitting} onClick={async () => {
+                          setIsSubmitting(true);
+                          setErrorMessage(null);
+                          try {
+                            const res = await apiClient.requestUpgrade(plan);
+                            showToast(res.message || `Upgrade request for ${plan.name} submitted.`);
+                          } catch (err) {
+                            setErrorMessage(err instanceof Error ? err.message : 'Unable to submit the upgrade request.');
+                          } finally {
+                            setIsSubmitting(false);
+                          }
+                        }} className="btn-primary mt-4 w-full cursor-pointer py-1.5 text-[11px] disabled:opacity-50">
+                          {isSubmitting ? 'Submitting…' : 'Request upgrade'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="modal-empty-state">
+                    <p className="font-semibold text-[#1a1a1a]">No upgrade plans are available</p>
+                    <p className="mt-1 text-[#656b6b]">Please contact support if you need a custom capacity review.</p>
+                  </div>
+                )}
               </div>
             )}
 

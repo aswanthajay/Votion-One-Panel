@@ -2307,3 +2307,52 @@ button {
     padding: 0 10px;
   }
 }
+
+
+/* Header modal states: explicit feedback for empty catalogs and recoverable API failures. */
+.modal-empty-state {
+  border: 1px dashed var(--theme-border-strong);
+  border-radius: 8px;
+  background: var(--theme-surface-raised);
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.modal-data-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--theme-danger);
+  border-radius: 8px;
+  background: var(--theme-surface-muted);
+  padding: 14px 16px;
+}
+
+.modal-data-error-title {
+  color: var(--theme-danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.modal-data-error-detail {
+  margin-top: 4px;
+  color: var(--theme-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.modal-data-retry {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .modal-data-error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .modal-data-retry {
+    width: 100%;
+  }
+}

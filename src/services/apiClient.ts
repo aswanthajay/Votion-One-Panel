@@ -1156,8 +1156,8 @@ class ApiClient {
    */
   async getDownloads() {
     const res = await this.apiFetch(`${API_BASE_URL}/downloads`, { headers: this.getHeaders() });
-    const data = await res.json();
-    return data.data || [];
+    const data = await this.readApiResponse(res, 'Unable to load downloads.');
+    return Array.isArray(data.data) ? data.data : [];
   }
 
   /**
@@ -1174,8 +1174,8 @@ class ApiClient {
    */
   async getPricing() {
     const res = await this.apiFetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
-    const data = await res.json();
-    return data.data || [];
+    const data = await this.readApiResponse(res, 'Unable to load upgrade plans.');
+    return Array.isArray(data.data) ? data.data : [];
   }
 
   /**
@@ -1192,8 +1192,25 @@ class ApiClient {
    */
   async getTerms() {
     const res = await this.apiFetch(`${API_BASE_URL}/terms`, { headers: this.getHeaders() });
-    const data = await res.json();
+    const data = await this.readApiResponse(res, 'Unable to load terms.');
     return data.data || { title: 'VOTION Terms', sections: [] };
+  }
+
+  async requestUpgrade(plan: { id?: string; name: string; price?: string; vcpus?: number; ramGb?: number; storageGb?: number; bandwidth?: string }) {
+    const details = [
+      plan.price ? `Listed price: ${plan.price}` : null,
+      plan.vcpus ? `Dedicated vCPUs: ${plan.vcpus}` : null,
+      plan.ramGb ? `RAM: ${plan.ramGb} GB` : null,
+      plan.storageGb ? `Storage: ${plan.storageGb} GB` : null,
+      plan.bandwidth ? `Bandwidth: ${plan.bandwidth}` : null,
+    ].filter(Boolean).join('; ');
+    return this.createSupportTicket(
+      `Upgrade request: ${plan.name}`,
+      'Quota Upgrade',
+      'high',
+      undefined,
+      `Please review my request for the ${plan.name} plan.${details ? ` ${details}.` : ''} Please confirm availability, billing, and next steps.`,
+    );
   }
 
   /**
