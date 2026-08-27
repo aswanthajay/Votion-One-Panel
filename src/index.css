@@ -2743,199 +2743,146 @@ body {
   color: #fca5a5 !important;
 }
 
-.billing-finance-visual {
-  position: relative;
-  width: min(270px, 30vw);
-  min-width: 220px;
+.billing-finance-snapshot {
+  display: flex;
+  width: min(290px, 31vw);
+  min-width: 238px;
   height: 126px;
   flex: 0 0 auto;
-  overflow: hidden;
-  border: 1px solid #dedfdf;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--theme-border);
   border-radius: 8px;
-  background: radial-gradient(circle at 50% 46%, #ffffff 0, #fafaf8 70%, #f1f1ef 100%);
+  background: var(--theme-surface);
+  padding: 13px 14px;
 }
 
-.billing-finance-visual canvas {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.billing-finance-visual-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  perspective: 650px;
-  pointer-events: none;
-}
-
-.billing-finance-fallback-horizon {
-  position: absolute;
-  right: 12%;
-  bottom: 26px;
-  left: 12%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(139, 94, 0, 0.42), transparent);
-  box-shadow: 0 0 18px rgba(139, 94, 0, 0.18);
-}
-
-.billing-finance-fallback-ring {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 88px;
-  height: 88px;
-  border: 1px solid rgba(139, 94, 0, 0.42);
-  border-radius: 50%;
-  transform: translate(-50%, -50%) rotateX(68deg) rotateZ(-18deg);
-  animation: billingFinanceOrbit 16s linear infinite;
-}
-
-.billing-finance-fallback-ring-two {
-  width: 132px;
-  height: 132px;
-  border-color: rgba(37, 99, 235, 0.4);
-  transform: translate(-50%, -50%) rotateX(64deg) rotateZ(38deg);
-  animation-duration: 17s;
-  animation-direction: reverse;
-}
-
-.billing-finance-fallback-core {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 25px;
-  height: 25px;
-  border: 1px solid rgba(139, 94, 0, 0.58);
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #ffffff, #d4a84f 40%, #8b5e00 100%);
-  box-shadow: 0 0 18px rgba(139, 94, 0, 0.2);
-  transform: translate(-50%, -50%);
-  animation: billingFinancePulse 3.8s ease-in-out infinite;
-}
-
-.billing-finance-fallback-bars {
-  position: absolute;
-  right: 18%;
-  bottom: 27px;
-  display: flex;
-  align-items: flex-end;
-  gap: 4px;
-  height: 34px;
-  transform: skewY(-12deg);
-}
-
-.billing-finance-fallback-bars i {
-  display: block;
-  width: 5px;
-  height: 18px;
-  border-radius: 1px 1px 0 0;
-  background: #2563eb;
-  box-shadow: 0 0 8px rgba(37, 99, 235, 0.25);
-  animation: billingFinanceBars 2.4s ease-in-out infinite;
-}
-
-.billing-finance-fallback-bars i:nth-child(2) { height: 25px; animation-delay: -0.45s; }
-.billing-finance-fallback-bars i:nth-child(3) { height: 15px; animation-delay: -0.9s; }
-.billing-finance-fallback-bars i:nth-child(4) { height: 31px; background: #8b5e00; animation-delay: -1.35s; }
-.billing-finance-fallback-bars i:nth-child(5) { height: 22px; animation-delay: -1.8s; }
-
-@keyframes billingFinanceOrbit {
-  from { transform: translate(-50%, -50%) rotateX(64deg) rotateZ(-18deg) rotate(0deg); }
-  to { transform: translate(-50%, -50%) rotateX(64deg) rotateZ(-18deg) rotate(360deg); }
-}
-
-@keyframes billingFinancePulse {
-  0%, 100% { opacity: 0.76; transform: translate(-50%, -50%) scale(0.94); }
-  50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
-}
-
-@keyframes billingFinanceBars {
-  0%, 100% { opacity: 0.58; transform: scaleY(0.82); transform-origin: bottom; }
-  50% { opacity: 1; transform: scaleY(1.08); transform-origin: bottom; }
-}
-
-.billing-finance-visual::after {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  content: '';
-  background: linear-gradient(120deg, rgba(255, 255, 255, 0.2), transparent 55%);
-}
-
-.billing-finance-visual-label {
-  position: absolute;
-  z-index: 1;
-  top: 11px;
-  left: 13px;
+.billing-snapshot-header,
+.billing-snapshot-meter-labels,
+.billing-snapshot-stats,
+.billing-snapshot-primary {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: #656b6b;
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.15em;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.billing-snapshot-header {
+  color: var(--theme-text-muted);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.13em;
   line-height: 1;
   text-transform: uppercase;
 }
 
-.billing-finance-visual-label strong {
-  color: #8b5e00;
-  font-size: 6px;
+.billing-snapshot-header strong {
+  color: var(--theme-accent);
+  font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.1em;
 }
 
-[data-theme="dark"] .billing-finance-visual {
-  border-color: #2b2b2b;
-  background: radial-gradient(circle at 50% 48%, #171717 0, #0b0b0b 68%, #050505 100%);
+.billing-snapshot-primary {
+  align-items: flex-end;
 }
 
-[data-theme="dark"] .billing-finance-fallback-horizon {
-  background: linear-gradient(90deg, transparent, rgba(243, 197, 107, 0.58), transparent);
-  box-shadow: 0 0 18px rgba(243, 197, 107, 0.22);
+.billing-snapshot-primary > div:first-child > span,
+.billing-snapshot-meter-labels span,
+.billing-snapshot-stats span {
+  color: var(--theme-text-muted);
+  font-size: 9px;
 }
 
-[data-theme="dark"] .billing-finance-fallback-ring {
-  border-color: rgba(243, 197, 107, 0.62);
+.billing-snapshot-primary > div:first-child > span,
+.billing-snapshot-meter-labels span {
+  letter-spacing: 0.05em;
 }
 
-[data-theme="dark"] .billing-finance-fallback-ring-two {
-  border-color: rgba(161, 161, 170, 0.42);
+.billing-snapshot-margin {
+  display: block;
+  margin-top: 4px;
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
 }
 
-[data-theme="dark"] .billing-finance-fallback-core {
-  border-color: rgba(243, 197, 107, 0.68);
-  background: radial-gradient(circle at 35% 30%, #ededed, #f3c56b 40%, #8b5e00 100%);
-  box-shadow: 0 0 18px rgba(243, 197, 107, 0.22);
+.billing-snapshot-margin-positive { color: var(--theme-success); }
+.billing-snapshot-margin-negative { color: var(--theme-danger); }
+.billing-snapshot-margin-neutral { color: var(--theme-text); }
+
+.billing-snapshot-signal {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--theme-accent) 42%, var(--theme-border));
+  border-radius: 50%;
+  color: var(--theme-accent);
 }
 
-[data-theme="dark"] .billing-finance-fallback-bars i {
-  background: #a1a1aa;
-  box-shadow: 0 0 8px rgba(161, 161, 170, 0.22);
+.billing-snapshot-signal span {
+  width: 8px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
 }
 
-[data-theme="dark"] .billing-finance-fallback-bars i:nth-child(4) {
-  background: #f3c56b;
+.billing-snapshot-meter-track {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--theme-surface-muted);
 }
 
-[data-theme="dark"] .billing-finance-visual::after {
-  background: linear-gradient(115deg, rgba(255, 255, 255, 0.05), transparent 42%, rgba(243, 197, 107, 0.08));
+.billing-snapshot-meter-track span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--theme-accent);
+  transition: width 320ms ease;
 }
 
-[data-theme="dark"] .billing-finance-visual-label {
-  color: #a1a1aa;
+.billing-snapshot-meter-labels {
+  margin-top: 5px;
 }
 
-[data-theme="dark"] .billing-finance-visual-label strong {
-  color: #f3c56b;
+.billing-snapshot-meter-labels strong {
+  color: var(--theme-text);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.billing-snapshot-stats {
+  align-items: flex-end;
+  border-top: 1px solid var(--theme-border);
+  padding-top: 8px;
+}
+
+.billing-snapshot-stats > div {
+  min-width: 0;
+}
+
+.billing-snapshot-stats > div:last-child {
+  text-align: right;
+}
+
+.billing-snapshot-stats strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--theme-text);
+  font-family: var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1023px) {
-  .billing-finance-visual {
+  .billing-finance-snapshot {
     width: 100%;
     min-width: 0;
     height: 132px;
@@ -2943,16 +2890,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .billing-finance-visual canvas {
-    opacity: 0.9;
-  }
-
-  .billing-finance-fallback-ring,
-  .billing-finance-fallback-core {
-    animation-play-state: paused;
+  .billing-snapshot-meter-track span {
+    transition: none;
   }
 }
-
 
 /* Final collapsed-icon hover guard: prevent legacy light utility classes from flashing white. */
 [data-theme="dark"] .app-sidenav.collapsed .collapsed-sidebar-control:hover,

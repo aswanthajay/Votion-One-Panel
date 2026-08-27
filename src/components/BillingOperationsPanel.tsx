@@ -322,7 +322,7 @@ export const BillingOperationsPanel: React.FC = () => {
             <h1 className="page-heading !mb-1">Billing control plane</h1>
             <p className="ink-description-text !mt-0 max-w-3xl">A single operating view for revenue collection, infrastructure cost allocation, dedicated-server economics, and controlled lifecycle policy.</p>
           </div>
-          <FinanceOperationsVisual />
+          <FinanceOperationsVisual summary={summary} loading={loading} />
         </header>
 
         {error && <div role="alert" className="mb-5 rounded-lg border border-[#e4b5b0] bg-[#fff7f6] px-4 py-3 text-sm text-[#8d3028] shadow-sm">{error}</div>}
