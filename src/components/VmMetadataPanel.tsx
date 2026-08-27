@@ -27,7 +27,7 @@ export const VmMetadataPanel: React.FC<VmMetadataPanelProps> = ({ metadata, isLo
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#dedfdf] pb-3">
       <div>
         <h4 id="vm-metadata-title" className="text-sm font-semibold tracking-tight text-[#1a1a1a]">Instance details</h4>
-        <p className="mt-1 text-[11px] text-[#656b6b]">Network identity and hardware reported by Proxmox.</p>
+        <p className="mt-1 text-[11px] text-[#656b6b]">Network identity and hardware information for this server.</p>
       </div>
       {metadata && (
         <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-[#656b6b]">

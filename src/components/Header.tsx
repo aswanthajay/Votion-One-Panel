@@ -58,7 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
         const [profile, tasks, proxmoxConns, supportTickets] = await Promise.all([
           apiClient.getUserProfile(),
           apiClient.getTasks(),
-          apiClient.getProxmoxConnections().catch(() => []),
+          userRole === 'admin' ? apiClient.getProxmoxConnections().catch(() => []) : Promise.resolve([]),
           apiClient.getSupportTickets().catch(() => []),
         ]);
         if (profile) {
@@ -191,7 +191,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       <div className="header-right relative" ref={menuRef}>
         {/* ALERT RULES MANAGEMENT — Admin only */}
-        {onOpenAlertRules && (
+        {userRole === 'admin' && onOpenAlertRules && (
           <button 
             onClick={onOpenAlertRules}
             className="header-alert-control cursor-pointer hidden md:inline-flex"
@@ -315,16 +315,20 @@ export const Header: React.FC<HeaderProps> = ({
           {userMenuOpen && (
             <div className="header-user-menu absolute right-0 top-11 w-56 bg-white border border-[#dedfdf] rounded-lg shadow-xl py-2 z-[350] text-sm text-[#1a1a1a]">
               
-              {/* Role Toggle Link */}
-              <button 
-                onClick={() => { onToggleRole(); setUserMenuOpen(false); }}
-                className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors font-semibold text-[#2563eb] flex items-center justify-between cursor-pointer"
-              >
-                <span>Switch to {userRole === 'admin' ? 'Client View' : 'Admin View'}</span>
-                <span>⇄</span>
-              </button>
+              {userRole === 'admin' && (
+                <>
+                  {/* Role Toggle Link */}
+                  <button 
+                    onClick={() => { onToggleRole(); setUserMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors font-semibold text-[#2563eb] flex items-center justify-between cursor-pointer"
+                  >
+                    <span>Switch to Client View</span>
+                    <span>⇄</span>
+                  </button>
 
-              <div className="my-1 border-t border-[#dedfdf]"></div>
+                  <div className="my-1 border-t border-[#dedfdf]"></div>
+                </>
+              )}
 
               <button 
                 onClick={() => { onNavigate('user-settings'); setUserMenuOpen(false); }}

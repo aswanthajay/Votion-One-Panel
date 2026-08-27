@@ -134,6 +134,14 @@ const uptimeStr = (seconds: number): string => {
   return hrs >= 24 ? `${Math.floor(hrs / 24)}d ${hrs % 24}h` : `${hrs}h ${mins}m`;
 };
 
+const customerAuditDetail = (entry: ApiAuditLog): string => {
+  const detail = String(entry.details || entry.action || '');
+  if (!/proxmox/i.test(detail)) return detail;
+  if (/action accepted|starting|stopping|reboot|shutdown/i.test(detail)) return 'Server service updated';
+  if (/connection|cluster|node/i.test(detail)) return 'Service infrastructure updated';
+  return 'Server service event recorded';
+};
+
 /* ---------------- main ---------------- */
 export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal: (m: string) => void }> = ({ onOpenManage, onOpenModal }) => {
   const [vms, setVms] = useState<ApiVM[]>([]);
@@ -491,8 +499,9 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
             ) : vms.length === 0 ? (
               <div className="px-4 py-10 flex flex-col items-center justify-center text-center max-w-md mx-auto mt-10">
                 <div className="w-12 h-12 bg-white border border-[#dedfdf] rounded-lg mb-4 flex items-center justify-center text-lg shadow-sm">☁️</div>
-                <h3 className="text-sm font-semibold text-[#1a1a1a] mb-1">No instances deployed</h3>
-                <p className="text-[12px] text-[#656b6b] mb-5 leading-relaxed">You haven't allocated any virtual machines to this account yet. Provision instances from the admin panel to start tracking fleet telemetry.</p>
+                <h3 className="text-sm font-semibold text-[#1a1a1a] mb-1">No server purchased yet</h3>
+                <p className="text-[12px] text-[#656b6b] mb-5 leading-relaxed">Purchase a server to get started. Once your order is active, your server details and live service status will appear here.</p>
+                <button type="button" onClick={() => onOpenModal('pricing')} className="btn-secondary !px-4 !py-2 !text-[11px] cursor-pointer">View server plans</button>
               </div>
             ) : (
               <div className="flex flex-col gap-4">
@@ -695,7 +704,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
                   <div key={a.id} className="flex items-start gap-2 text-[11px]">
                     <span className="font-mono text-[10px] text-[#a0a1a2] shrink-0 w-14">{new Date(a.timestamp).toLocaleTimeString('en-GB')}</span>
                     <span className="flex-1">
-                      <span className="text-[#1a1a1a]">{a.details || a.action}</span>
+                      <span className="text-[#1a1a1a]">{customerAuditDetail(a)}</span>
                       {a.status === 'failed' && <span className="text-[9px] font-bold uppercase bg-[#1a1a1a] text-white px-1 py-0.5 rounded ml-1">Failed</span>}
                     </span>
                   </div>

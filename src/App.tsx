@@ -243,7 +243,7 @@ const AppShell: React.FC = () => {
           userRole={activeRole}
           onToggleRole={handleToggleRole}
           onOpenModal={handleOpenModal}
-          onOpenAlertRules={() => startTransition(() => setAlertRulesOpen(true))}
+          onOpenAlertRules={activeRole === 'admin' ? () => startTransition(() => setAlertRulesOpen(true)) : undefined}
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(previous => !previous)}
         />
         <div className="app-body">
@@ -271,18 +271,18 @@ const AppShell: React.FC = () => {
           <Suspense fallback={<RouteLoading />}>
             <Routes>
                             <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} /> :   <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS.dashboard} element={<DashboardContent onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS.dashboard} element={activeRole === 'admin' ? <DashboardContent onOpenModal={handleOpenModal} /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS.instances} element={activeRole === 'admin' ? <DashboardContent pageTitle="Virtual Machines" onOpenModal={handleOpenModal} /> : <ClientPanelRoute onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['instances-qemu']} element={activeRole === 'admin' ? <DashboardContent pageTitle="QEMU Virtual Machines" typeFilter="qemu" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['instances-lxc']} element={activeRole === 'admin' ? <DashboardContent pageTitle="LXC Containers" typeFilter="lxc" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['audit-logs']} element={<ClusterAuditLogs />} />
+              <Route path={VIEW_PATHS['audit-logs']} element={activeRole === 'admin' ? <ClusterAuditLogs /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['operator-reimage']} element={activeRole === 'admin' ? <OperatorReimagePanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['billing-operations']} element={activeRole === 'admin' ? <BillingOperationsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
-              <Route path={VIEW_PATHS['system-settings']} element={<SystemSettings />} />
-              <Route path={VIEW_PATHS['user-management']} element={<UserManagement />} />
-              <Route path={VIEW_PATHS['proxmox-connections']} element={<ProxmoxConnections />} />
+              <Route path={VIEW_PATHS['system-settings']} element={activeRole === 'admin' ? <SystemSettings /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS['user-management']} element={activeRole === 'admin' ? <UserManagement /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS['proxmox-connections']} element={activeRole === 'admin' ? <ProxmoxConnections /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['client-instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
               <Route path={VIEW_PATHS['client-instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />

@@ -102,7 +102,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       } catch (err) {
         if (!cancelled) {
           setVmMetadata(null);
-          setMetadataError(err instanceof Error ? err.message : 'Proxmox metadata is unavailable.');
+          setMetadataError(err instanceof Error ? err.message : 'Server details are currently unavailable.');
         }
       } finally {
         if (!cancelled) setIsMetadataLoading(false);
@@ -641,7 +641,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Approval required</p>
                   <h4 className="mt-1 text-lg font-semibold text-[#1a1a1a]">Request an OS reimage</h4>
                   <p className="mt-1 text-xs leading-5 text-[#656b6b]">
-                    Submit a request for administrator review. This form does not contact Proxmox, change the VM, or begin an operation.
+                    Submit a request for administrator review. This only starts an approval workflow; it does not change your server or begin an operation.
                   </p>
                 </div>
 
@@ -835,7 +835,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               You are requesting <span className="font-semibold text-[#1a1a1a]">{selectedReinstallOs}</span> for VM-{selectedVm.vmid}. The request will be recorded and sent to an administrator for review.
             </p>
             <div className="mt-4 rounded-lg border border-[#f0c36d] bg-[#fffaf0] p-3 text-xs leading-5 text-[#7a4b00]">
-              This approval step will not contact Proxmox or erase data. If approved, a separate, future operator action would still be required before any destructive reimage execution.
+              This approval step does not change your server or erase data. If approved, a separate operator action is still required before any reimage execution.
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button type="button" onClick={() => setShowReimageConfirm(false)} disabled={isReimageSubmitting} className="rounded border border-[#dedfdf] px-4 py-2 text-xs font-semibold text-[#1a1a1a] hover:bg-[#fbfaf9] cursor-pointer disabled:opacity-50">Go back</button>
