@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -259,6 +260,12 @@ const proxmoxProxy = createProxyMiddleware({
 });
 
 app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachProxyConnection, proxmoxProxy);
+
+const distDirectory = path.resolve(process.cwd(), 'dist');
+app.use(express.static(distDirectory, { index: false, fallthrough: true }));
+app.get(/^(?!\/api(?:\/|$)|\/(?:novnc|api2|pve2|proxmox-console)(?:\/|$)).*/, (_req, res) => {
+  res.sendFile(path.join(distDirectory, 'index.html'));
+});
 
 app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (error instanceof ProxmoxProviderUnavailableError) {
