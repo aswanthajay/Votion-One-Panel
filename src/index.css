@@ -2989,3 +2989,47 @@ body {
 [data-theme="dark"] #app-switcher .app-switcher-heading {
   color: #ededed !important;
 }
+
+
+/* Finance snapshot refinement: keep the compact KPI surface within its card. */
+.billing-finance-snapshot {
+  box-sizing: border-box;
+  overflow: hidden;
+  gap: 0;
+  padding: 12px 14px;
+}
+
+.billing-snapshot-primary {
+  align-items: flex-start;
+}
+
+.billing-snapshot-status {
+  align-self: flex-start;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--theme-text-muted);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.billing-snapshot-status-negative {
+  border-color: color-mix(in srgb, var(--theme-danger) 42%, var(--theme-border));
+  color: var(--theme-danger);
+}
+
+.billing-snapshot-status-positive {
+  border-color: color-mix(in srgb, var(--theme-success) 42%, var(--theme-border));
+  color: var(--theme-success);
+}
+
+.billing-snapshot-status-neutral {
+  color: var(--theme-text-muted);
+}
+
+.billing-snapshot-signal {
+  display: none;
+}

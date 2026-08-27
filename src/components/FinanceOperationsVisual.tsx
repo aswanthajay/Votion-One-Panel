@@ -18,6 +18,7 @@ export const FinanceOperationsVisual: React.FC<FinanceOperationsVisualProps> = (
   const collectionRate = billed > 0 ? Math.min(100, Math.max(0, (collected / billed) * 100)) : 0;
   const margin = summary?.projectedInrMarginPercent ?? null;
   const marginTone = margin === null ? 'neutral' : margin < 0 ? 'negative' : 'positive';
+  const marginStatus = margin === null ? 'Awaiting data' : margin < 0 ? 'Review required' : 'On track';
 
   return (
     <section className={`billing-finance-snapshot ${loading ? 'is-loading' : ''}`} aria-label="Finance operations snapshot">
@@ -33,7 +34,7 @@ export const FinanceOperationsVisual: React.FC<FinanceOperationsVisualProps> = (
             {margin === null ? '—' : `${margin.toFixed(1)}%`}
           </strong>
         </div>
-        <div className="billing-snapshot-signal" aria-hidden="true"><span /></div>
+        <span className={`billing-snapshot-status billing-snapshot-status-${marginTone}`}>{marginStatus}</span>
       </div>
 
       <div className="billing-snapshot-meter" aria-label={summary ? `${collectionRate.toFixed(0)} percent of billed revenue collected` : 'Collection data loading'}>
