@@ -2,11 +2,12 @@ import crypto from 'crypto';
 import type { PoolClient } from 'pg';
 import { pgPool } from './database.js';
 
-const INITIAL_ADMIN_EMAIL = 'admin@votioncloud.org';
+export const INITIAL_ADMIN_EMAIL = 'admin@votioncloud.org';
 const ADMIN_ROLES = ['admin', 'administrator', 'moderator'];
 
 export type InitialAdminBootstrapResult =
   | { status: 'created'; email: string }
+  | { status: 'promoted'; email: string }
   | { status: 'already-configured' }
   | { status: 'pending-configuration'; email: string };
 
@@ -67,9 +68,15 @@ export async function bootstrapInitialAdmin(): Promise<InitialAdminBootstrapResu
       [INITIAL_ADMIN_EMAIL],
     );
     if (existingAccount.rowCount) {
-      throw new Error(
-        `${INITIAL_ADMIN_EMAIL} already exists as a non-administrator. Promote it explicitly before starting the application.`,
+      await client.query(
+        `UPDATE accounts
+         SET password_hash = $2, name = $3, role = 'admin', operator_access = true, updated_at = NOW()
+         WHERE email = $1`,
+        [INITIAL_ADMIN_EMAIL, hashPassword(password), 'Votion Administrator'],
       );
+      await client.query('COMMIT');
+      transactionStarted = false;
+      return { status: 'promoted', email: INITIAL_ADMIN_EMAIL };
     }
 
     await client.query(

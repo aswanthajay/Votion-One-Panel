@@ -8,6 +8,8 @@ import QRCode from 'qrcode';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dbService } from '../db/database.js';
+import { INITIAL_ADMIN_EMAIL } from '../db/bootstrapAdmin.js';
+
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
@@ -197,6 +199,12 @@ const handleRegister = async (req: any, res: any) => {
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ success: false, error: 'Enter a valid email address.' });
+  }
+  if (email === INITIAL_ADMIN_EMAIL) {
+    return res.status(403).json({
+      success: false,
+      error: 'This address is reserved for the initial administrator and must be provisioned through secure deployment configuration.',
+    });
   }
   if (password.length < 8) {
     return res.status(400).json({ success: false, error: 'Password must contain at least 8 characters.' });

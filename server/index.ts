@@ -281,6 +281,9 @@ const initialAdminBootstrap = await bootstrapInitialAdmin();
 if (initialAdminBootstrap.status === 'created') {
   log('info', 'startup.initial_admin_created', { email: initialAdminBootstrap.email });
 }
+if (initialAdminBootstrap.status === 'promoted') {
+  log('info', 'startup.initial_admin_promoted', { email: initialAdminBootstrap.email });
+}
 if (initialAdminBootstrap.status === 'pending-configuration') {
   log('warn', 'startup.initial_admin_pending', {
     email: initialAdminBootstrap.email,
