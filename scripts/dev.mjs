@@ -6,7 +6,7 @@ const bin = name => process.platform === 'win32'
   : `node_modules/.bin/${name}`;
 
 const children = [
-  spawn(bin('tsx'), ['server/index.ts'], {
+  spawn(bin('tsx'), ['server/entry.ts'], {
     stdio: 'inherit',
     shell: process.platform === 'win32',
     env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'development' },

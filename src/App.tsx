@@ -32,6 +32,7 @@ const OperatorReimagePanel = lazy(() => import('./components/OperatorReimagePane
 const BillingOperationsPanel = lazy(() => import('./components/BillingOperationsPanel').then(module => ({ default: module.BillingOperationsPanel })));
 const SupportCenter = lazy(() => import('./components/SupportCenter').then(module => ({ default: module.SupportCenter })));
 const LegalPages = lazy(() => import('./components/LegalPages').then(module => ({ default: module.LegalPages })));
+const InstallationWizard = lazy(() => import('./components/InstallationWizard').then(module => ({ default: module.InstallationWizard })));
 
 export type ViewMode =
   | 'overview'
@@ -381,6 +382,10 @@ const AppRouter: React.FC = () => {
     window.addEventListener('votion:auth-expired', handleAuthExpired);
     return () => window.removeEventListener('votion:auth-expired', handleAuthExpired);
   }, [navigate]);
+
+  if (pathname === '/install') {
+    return <Suspense fallback={<div className="min-h-screen bg-white" aria-busy="true" />}><InstallationWizard /></Suspense>;
+  }
 
   if (isAuthPath(pathname)) {
     return <AuthRoute mode={authModeForPath(pathname)} />;

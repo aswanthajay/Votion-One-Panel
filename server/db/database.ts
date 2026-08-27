@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
+import { loadRuntimeConfiguration } from '../services/runtimeConfig.js';
 import {
   decryptCredential,
   encryptCredential,
@@ -11,6 +12,8 @@ import {
   ProxmoxProviderUnavailableError,
 } from '../services/secretBox.js';
 const { Pool } = pg;
+
+loadRuntimeConfiguration();
 
 export type ProxmoxConnectionPublic = {
   id: string;

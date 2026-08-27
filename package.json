@@ -10,11 +10,11 @@
     "build": "npm run typecheck:client && npm run typecheck:server && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "server": "tsx server/index.ts",
+    "server": "tsx server/entry.ts",
     "migrate": "tsx server/db/migrate.ts",
     "db:verify": "tsx server/db/verify.ts",
     "db:verify:fresh": "tsx server/db/verifyFresh.ts",
-    "start": "tsx server/index.ts"
+    "start": "tsx server/entry.ts"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.10",
