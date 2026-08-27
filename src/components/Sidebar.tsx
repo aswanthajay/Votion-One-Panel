@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { apiClient, type ApiNavigationUsage } from '../services/apiClient';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -26,6 +27,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const [essentialsOpen, setEssentialsOpen] = useState(true);
+  const [navigationUsage, setNavigationUsage] = useState<ApiNavigationUsage[]>([]);
+  const [hasLoadedNavigationUsage, setHasLoadedNavigationUsage] = useState(false);
 
   // Distinct SVGs & dedicated view keys corresponding 1:1 to Carta Ink Design System
   const adminNavItems = [
@@ -195,22 +198,62 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const activeNavItems = userRole === 'admin' ? adminNavItems : clientNavItems;
 
+    const defaultClientEssentials = [
+    { title: 'My Virtual Machines', key: 'instances-qemu' },
+    { title: 'VNC Console Access', key: 'client-instances-vnc' },
+    { title: 'Resource Metrics', key: 'client-instances-metrics' },
+    { title: 'Snapshot Backups', key: 'client-instances-backups' },
+    { title: 'Network Firewall', key: 'client-instances-firewall' },
+    { title: 'Support Center', key: 'support' },
+    { title: 'User Profile Settings', key: 'user-settings' },
+  ];
+  const destinationTitles: Record<string, string> = {
+    'instances': 'All Instances',
+    'instances-qemu': 'My Virtual Machines',
+    'instances-lxc': 'LXC Containers',
+    'client-instances-vnc': 'VNC Console Access',
+    'client-instances-metrics': 'Resource Metrics',
+    'client-instances-firewall': 'Network Firewall',
+    'client-instances-backups': 'Snapshot Backups',
+    'support': 'Support Center',
+    'user-settings': 'User Profile Settings',
+  };
+
+  const refreshNavigationUsage = () => {
+    if (userRole !== 'client') return;
+    void apiClient.getNavigationUsage()
+      .then(items => setNavigationUsage(items))
+      .catch(() => setNavigationUsage([]))
+      .finally(() => setHasLoadedNavigationUsage(true));
+  };
+
+  useEffect(() => {
+    setNavigationUsage([]);
+    setHasLoadedNavigationUsage(userRole !== 'client');
+    if (userRole !== 'client') return;
+    refreshNavigationUsage();
+    const handleUsageUpdate = () => refreshNavigationUsage();
+    window.addEventListener('votion-navigation-usage', handleUsageUpdate);
+    return () => window.removeEventListener('votion-navigation-usage', handleUsageUpdate);
+  }, [userRole]);
+
+  const personalizedClientEssentials = navigationUsage
+    .filter(item => item.type === 'vm' || (item.key !== 'overview' && destinationTitles[item.key]))
+    .map(item => item.type === 'vm'
+      ? { title: item.name ? `VM ${item.vmid} · ${item.name}` : `VM ${item.vmid}`, key: `vm:${item.vmid}` }
+      : { title: destinationTitles[item.key], key: item.key })
+    .filter((item, index, items) => items.findIndex(candidate => candidate.key === item.key) === index);
+  const personalizedKeys = new Set(personalizedClientEssentials.map(item => item.key));
+  const clientEssentials = [...personalizedClientEssentials, ...defaultClientEssentials.filter(item => !personalizedKeys.has(item.key))].slice(0, 5);
   const essentialsSublinks = userRole === 'admin' ? [
     { title: 'Virtual Machines', key: 'instances-qemu' },
     { title: 'LXC Containers', key: 'instances-lxc' },
     { title: 'System Settings (SMTP)', key: 'system-settings' },
     { title: 'Manage Users & Roles', key: 'user-management' },
-  ] : [
-    { title: 'My Virtual Machines', key: 'instances-qemu' },
-    { title: 'LXC Containers', key: 'instances-lxc' },
-    { title: 'VNC Console Access', key: 'client-instances-vnc' },
-    { title: 'Resource Bandwidth', key: 'client-instances-metrics' },
-    { title: 'Snapshot Backups', key: 'client-instances-backups' },
-    { title: 'Network Firewall', key: 'client-instances-firewall' },
-    { title: 'User Profile Settings', key: 'user-settings' },
-  ];
+  ] : clientEssentials;
 
   const q = searchQuery.toLowerCase().trim();
+
   const filteredSublinks = essentialsSublinks.filter(s => !q || s.title.toLowerCase().includes(q));
   const isEssentialsMatch = !q || 'essentials'.includes(q) || filteredSublinks.length > 0;
 
@@ -305,7 +348,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <path clipRule="evenodd" d="M13.02 9.23H18l-7.08 11.66-.06.11H9.1v-8.2H4l.23-.38 6.86-11.3.06-.12h1.87z" fillRule="evenodd"></path>
                   </svg>
                 </span>
-                <span className="sidenav-link-text">Essentials</span>
+                                <span className="sidenav-link-text">Essentials</span>
+                {userRole === 'client' && !isCollapsed && hasLoadedNavigationUsage && <span className="sidenav-essentials-caption">Top 5</span>}
+
               </div>
               <svg 
                 className={`sidenav-twiddle ${essentialsOpen || q ? 'open' : ''}`} 

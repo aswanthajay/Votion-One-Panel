@@ -110,7 +110,18 @@ export interface ApiVmMetadata {
   fetchedAt: string;
 }
 
+export interface ApiNavigationUsage {
+  key: string;
+  type: 'destination' | 'vm';
+  vmid: number | null;
+  name: string | null;
+  status: string | null;
+  usageCount: number;
+  lastUsedAt: string;
+}
+
 export interface ApiAccount {
+
   id: number;
   email: string;
   name: string;
@@ -924,9 +935,29 @@ class ApiClient {
     }
   }
 
+    async getNavigationUsage(): Promise<ApiNavigationUsage[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/navigation-usage`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load personalized navigation.');
+    return Array.isArray(data.data) ? data.data as ApiNavigationUsage[] : [];
+  }
+
+  async recordNavigationUsage(item: { itemKey: string; itemType: 'destination' | 'vm'; vmid?: number }) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/navigation-usage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getHeaders() },
+      body: JSON.stringify(item),
+    });
+    if (!res.ok && res.status !== 204) {
+      await this.readApiResponse(res, 'Unable to record navigation usage.');
+      return;
+    }
+    window.dispatchEvent(new Event('votion-navigation-usage'));
+  }
+
   /**
    * Fetch Live User Profile from PostgreSQL
    */
+
   async getUserProfile(email?: string): Promise<ApiAccount | null> {
     const targetEmail = email || this.getUserEmail();
     const res = await this.apiFetch(`${API_BASE_URL}/user/profile?email=${encodeURIComponent(targetEmail)}`, {

@@ -11,9 +11,10 @@ interface ClientPanelContentProps {
   onOpenModal: (modalName: string) => void;
   filter?: string;
   workspaceConnectionId?: string;
+  selectedVmid?: number;
 }
 
-export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId }) => {
+export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId, selectedVmid }) => {
   const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
   const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
   const [vmMetadata, setVmMetadata] = useState<ApiVmMetadata | null>(null);
@@ -67,7 +68,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       const vms = await apiClient.getClientVMs(workspaceConnectionId);
       setClientVMs(vms);
       setLoadError(null);
-      setSelectedVm(previous => vms.find(vm => vm.vmid === previous?.vmid) || vms[0] || null);
+      setSelectedVm(previous => vms.find(vm => vm.vmid === selectedVmid) || vms.find(vm => vm.vmid === previous?.vmid) || vms[0] || null);
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
 
@@ -83,7 +84,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     loadClientVMs();
     const interval = setInterval(loadClientVMs, 5000);
     return () => clearInterval(interval);
-  }, [workspaceConnectionId]);
+  }, [workspaceConnectionId, selectedVmid]);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,7 +369,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             </thead>
             <tbody>
               {displayVMs.map(vm => (
-                <tr key={vm.vmid} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); }}>
+                <tr key={vm.vmid} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined); }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
                   {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">VM-{vm.vmid}</span></td>}
                   {visibleColumns.name && <td className="py-3 px-6 text-[13px] text-[#1a1a1a]">{vm.name}</td>}

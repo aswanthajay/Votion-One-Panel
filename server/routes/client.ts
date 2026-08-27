@@ -23,6 +23,62 @@ async function readPveJson<T>(response: Response): Promise<T | null> {
 export const clientRouter = Router();
 clientRouter.use(requireAuth);
 
+const requireLiveProviderAccess = (_req: any, res: any, next: any) => {
+  if (!isProviderCredentialKeyConfigured()) {
+    return res.status(503).json({
+      success: false,
+      code: 'PROXMOX_PROVIDER_UNAVAILABLE',
+      error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+    });
+  }
+  next();
+};
+
+const CLIENT_NAVIGATION_DESTINATIONS = new Set([
+  'overview',
+  'instances',
+  'instances-qemu',
+  'instances-lxc',
+  'client-instances-vnc',
+  'client-instances-metrics',
+  'client-instances-firewall',
+  'client-instances-backups',
+  'support',
+  'user-settings',
+]);
+
+clientRouter.get('/navigation-usage', async (req: any, res) => {
+  const email = String(req.authUser?.email || '').toLowerCase();
+  if (!email) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  const usage = await dbService.getNavigationUsage(email, 5);
+  res.json({ success: true, data: usage });
+});
+
+clientRouter.post('/navigation-usage', async (req: any, res) => {
+  const email = String(req.authUser?.email || '').toLowerCase();
+  const itemType = req.body?.itemType;
+  const itemKey = String(req.body?.itemKey || '').trim();
+  if (!email || !['destination', 'vm'].includes(itemType)) {
+    return res.status(400).json({ success: false, error: 'Invalid navigation usage event.' });
+  }
+
+  if (itemType === 'destination') {
+    if (!CLIENT_NAVIGATION_DESTINATIONS.has(itemKey)) {
+      return res.status(400).json({ success: false, error: 'Unsupported navigation destination.' });
+    }
+    await dbService.recordNavigationUsage(email, { key: itemKey, type: 'destination' });
+  } else {
+    const vmid = Number(req.body?.vmid);
+    const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid) : null;
+    if (!vm || String(vm.ownerEmail || '').toLowerCase() !== email) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this service.' });
+    }
+    await dbService.recordNavigationUsage(email, { key: `vm:${vmid}`, type: 'vm', vmid });
+  }
+
+  res.status(204).end();
+});
+
 const proxmoxService = new ProxmoxService({
   hostIp: process.env.PVE_HOST || '',
   port: parseInt(process.env.PVE_PORT || '8006', 10),

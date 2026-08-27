@@ -80,6 +80,7 @@ export const REQUIRED_DATABASE_TABLES = [
   'accounts',
   'password_reset_tokens',
   'registration_verification_tokens',
+  'user_navigation_usage',
   'proxmox_connections',
   'nodes',
   'vms',
@@ -818,7 +819,53 @@ export class DatabaseService {
     }
   }
 
+    async recordNavigationUsage(accountEmail: string, item: { key: string; type: 'destination' | 'vm'; vmid?: number }) {
+    const email = accountEmail.toLowerCase().trim();
+    const key = String(item.key || '').trim().slice(0, 120);
+    if (!email || !key || !['destination', 'vm'].includes(item.type)) return;
+    const vmid = item.type === 'vm' ? Number(item.vmid) : null;
+    if (item.type === 'vm' && (!Number.isInteger(vmid) || Number(vmid) <= 0)) return;
+
+    await pgPool.query(
+      `INSERT INTO user_navigation_usage (account_email, item_key, item_type, vmid, usage_count, last_used_at)
+       VALUES ($1, $2, $3, $4, 1, NOW())
+       ON CONFLICT (account_email, item_key) DO UPDATE SET
+         usage_count = user_navigation_usage.usage_count + 1,
+         item_type = EXCLUDED.item_type,
+         vmid = EXCLUDED.vmid,
+         last_used_at = NOW()`,
+      [email, key, item.type, vmid],
+    );
+  }
+
+  async getNavigationUsage(accountEmail: string, limit = 5) {
+    const email = accountEmail.toLowerCase().trim();
+    const resultLimit = Math.max(1, Math.min(5, Math.floor(limit)));
+    const res = await pgPool.query(
+      `SELECT usage.item_key, usage.item_type, usage.vmid, usage.usage_count, usage.last_used_at,
+              CASE WHEN usage.item_type = 'vm' THEN vm.vm_name ELSE NULL END AS vm_name,
+              CASE WHEN usage.item_type = 'vm' THEN vm.status ELSE NULL END AS vm_status
+       FROM user_navigation_usage AS usage
+       LEFT JOIN vms AS vm ON vm.vmid = usage.vmid AND vm.owner_email = usage.account_email
+       WHERE usage.account_email = $1
+         AND (usage.item_type = 'destination' OR vm.vmid IS NOT NULL)
+       ORDER BY usage.usage_count DESC, usage.last_used_at DESC
+       LIMIT $2`,
+      [email, resultLimit],
+    );
+    return res.rows.map(row => ({
+      key: String(row.item_key),
+      type: row.item_type === 'vm' ? 'vm' as const : 'destination' as const,
+      vmid: row.vmid === null ? null : Number(row.vmid),
+      name: row.vm_name ? String(row.vm_name) : null,
+      status: row.vm_status ? String(row.vm_status) : null,
+      usageCount: Number(row.usage_count),
+      lastUsedAt: row.last_used_at,
+    }));
+  }
+
   async updateUserProfile(email: string, updates: any) {
+
     const clean = email.toLowerCase().trim();
     const user = await this.findUserByEmail(clean);
     if (!user) return null;

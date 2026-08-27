@@ -13,6 +13,7 @@ import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastContext';
 import { RouteNotFound } from './components/RouteNotFound';
 import { readWorkspaceScope, saveWorkspaceScope, type WorkspaceScope } from './workspaceScope';
+import { apiClient } from './services/apiClient';
 
 const DashboardContent = lazy(() => import('./components/DashboardContent'));
 const OverviewDashboard = lazy(() => import('./components/OverviewDashboard').then(module => ({ default: module.OverviewDashboard })));
@@ -145,9 +146,16 @@ const ClientPanelRoute: React.FC<{
   filter?: ClientFilter;
   onOpenModal: (modalName: string) => void;
   workspaceConnectionId?: string;
-}> = ({ filter, onOpenModal, workspaceConnectionId }) => (
-  <ClientPanelContent onOpenModal={onOpenModal} filter={filter} workspaceConnectionId={workspaceConnectionId} />
-);
+}> = ({ filter, onOpenModal, workspaceConnectionId }) => {
+  const location = useLocation();
+  const requestedVmid = Number(new URLSearchParams(location.search).get('vmid'));
+  return <ClientPanelContent
+    onOpenModal={onOpenModal}
+    filter={filter}
+    workspaceConnectionId={workspaceConnectionId}
+    selectedVmid={Number.isInteger(requestedVmid) && requestedVmid > 0 ? requestedVmid : undefined}
+  />;
+};
 
 const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
   const navigate = useNavigate();
@@ -222,12 +230,27 @@ const AppShell: React.FC = () => {
   };
 
   const handleNavigate = (view: unknown) => {
-    const path = typeof view === 'string' && view in VIEW_PATHS
-      ? VIEW_PATHS[view as ViewMode]
-      : VIEW_PATHS.dashboard;
+    const requestedView = typeof view === 'string' ? view : '';
+    const requestedVmid = requestedView.startsWith('vm:') ? Number(requestedView.slice(3)) : null;
+    const path = requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0
+      ? VIEW_PATHS.instances
+      : requestedView in VIEW_PATHS
+        ? VIEW_PATHS[requestedView as ViewMode]
+        : VIEW_PATHS.dashboard;
+
+    if (activeRole === 'client') {
+      if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
+        void apiClient.recordNavigationUsage({ itemKey: `vm:${requestedVmid}`, itemType: 'vm', vmid: requestedVmid }).catch(() => undefined);
+      } else if (['overview', 'instances', 'instances-qemu', 'instances-lxc', 'client-instances-vnc', 'client-instances-metrics', 'client-instances-firewall', 'client-instances-backups', 'support', 'user-settings'].includes(requestedView)) {
+        void apiClient.recordNavigationUsage({ itemKey: requestedView, itemType: 'destination' }).catch(() => undefined);
+      }
+    }
+
     startTransition(() => {
       setIsMobileSidebarOpen(false);
-      navigate(`${path}?role=${activeRole}`);
+      const query = new URLSearchParams({ role: activeRole });
+      if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) query.set('vmid', String(requestedVmid));
+      navigate(`${path}?${query.toString()}`);
     });
   };
 
