@@ -707,18 +707,30 @@ export class DatabaseService {
     };
   }
 
-  async registerUser(name: string, email: string, password: string, role: 'admin' | 'client' = 'client') {
+    async registerUser(name: string, email: string, password: string, role: 'admin' | 'client' = 'client') {
     const clean = email.toLowerCase().trim();
     const { hash, salt } = hashPassword(password);
     const storedHash = `${hash}:${salt}`;
     const pin = crypto.randomInt(100000, 1000000).toString();
-
-    const res = await pgPool.query(
-      `INSERT INTO accounts (email, password_hash, name, role, support_pin, two_factor_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, false, NOW()) RETURNING *`,
-      [clean, storedHash, name, role, hashSupportPin(pin)]
-    );
-    return res.rows[0];
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const res = await client.query(
+        `INSERT INTO accounts (email, password_hash, name, role, support_pin, two_factor_active, created_at)
+         VALUES ($1, $2, $3, $4, $5, false, NOW()) RETURNING *`,
+        [clean, storedHash, name, role, hashSupportPin(pin)],
+      );
+      const acceptedTeamInvitations = role === 'client'
+        ? await this.acceptPendingTeamInvitations(client, clean)
+        : 0;
+      await client.query('COMMIT');
+      return { ...res.rows[0], acceptedTeamInvitations };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async isSmtpRegistrationVerificationEnabled() {
@@ -811,9 +823,10 @@ export class DatabaseService {
          VALUES ($1, $2, $3, 'client', $4, false, NOW()) RETURNING *`,
         [cleanEmail, verification.password_hash, verification.name, hashSupportPin(supportPin)],
       );
+      const acceptedTeamInvitations = await this.acceptPendingTeamInvitations(client, cleanEmail);
       await client.query('DELETE FROM registration_verification_tokens WHERE email = $1', [cleanEmail]);
       await client.query('COMMIT');
-      return { success: true, account: account.rows[0] };
+      return { success: true, account: account.rows[0], acceptedTeamInvitations };
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;
@@ -3064,20 +3077,39 @@ export class DatabaseService {
 
   async getSubUsers(vmid: number) {
     const result = await pgPool.query(
-      `SELECT id, vmid, user_email, scope, created_at, updated_at
-       FROM vm_sub_users WHERE vmid = $1 ORDER BY created_at ASC`,
+      `SELECT su.id, su.vmid, su.user_email, su.scope, su.invited_by, su.accepted_at, su.created_at, su.updated_at,
+              a.name AS user_name
+       FROM vm_sub_users su
+       LEFT JOIN accounts a ON a.email = su.user_email
+       WHERE su.vmid = $1
+       ORDER BY su.created_at ASC`,
       [vmid],
     );
     return result.rows;
   }
 
-  async addSubUser(vmid: number, email: string, scope: string) {
+  async getSubUserAccess(vmid: number, email: string) {
     const result = await pgPool.query(
-      `INSERT INTO vm_sub_users (vmid, user_email, scope)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (vmid, user_email) DO UPDATE SET scope = EXCLUDED.scope, updated_at = NOW()
-       RETURNING id, vmid, user_email, scope, created_at, updated_at`,
-      [vmid, email.toLowerCase().trim(), scope],
+      `SELECT id, vmid, user_email, scope, invited_by, accepted_at, created_at, updated_at
+       FROM vm_sub_users
+       WHERE vmid = $1 AND user_email = $2
+       LIMIT 1`,
+      [vmid, email.toLowerCase().trim()],
+    );
+    return result.rows[0] || null;
+  }
+
+  async addSubUser(vmid: number, email: string, scope: string, invitedBy?: string) {
+    const result = await pgPool.query(
+      `INSERT INTO vm_sub_users (vmid, user_email, scope, invited_by, accepted_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (vmid, user_email) DO UPDATE
+         SET scope = EXCLUDED.scope,
+             invited_by = COALESCE(EXCLUDED.invited_by, vm_sub_users.invited_by),
+             accepted_at = COALESCE(vm_sub_users.accepted_at, NOW()),
+             updated_at = NOW()
+       RETURNING id, vmid, user_email, scope, invited_by, accepted_at, created_at, updated_at`,
+      [vmid, email.toLowerCase().trim(), scope, invitedBy?.toLowerCase().trim() || null],
     );
     return result.rows[0];
   }
@@ -3086,7 +3118,7 @@ export class DatabaseService {
     const result = await pgPool.query(
       `UPDATE vm_sub_users SET scope = $1, updated_at = NOW()
        WHERE id = $2 AND vmid = $3
-       RETURNING id, vmid, user_email, scope, created_at, updated_at`,
+       RETURNING id, vmid, user_email, scope, invited_by, accepted_at, created_at, updated_at`,
       [scope, id, vmid],
     );
     return result.rows[0] || null;
@@ -3098,6 +3130,159 @@ export class DatabaseService {
       [id, vmid],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async getTeamAccessOverview(ownerEmail: string) {
+    const cleanOwnerEmail = ownerEmail.toLowerCase().trim();
+    const vms = await this.getVMs(cleanOwnerEmail);
+    const vmids = vms.map((vm) => vm.vmid);
+    if (vmids.length === 0) return { vms, members: [], invitations: [] };
+
+    const [members, invitations] = await Promise.all([
+      pgPool.query(
+        `SELECT su.id, su.vmid, su.user_email, su.scope, su.invited_by, su.accepted_at, su.created_at, su.updated_at,
+                a.name AS user_name
+         FROM vm_sub_users su
+         LEFT JOIN accounts a ON a.email = su.user_email
+         WHERE su.vmid = ANY($1::int[])
+         ORDER BY su.created_at DESC`,
+        [vmids],
+      ),
+      pgPool.query(
+        `SELECT id, vmid, invitee_email, scope, invited_by, expires_at, created_at, sent_at, accepted_at, revoked_at
+         FROM vm_sub_user_invitations
+         WHERE invited_by = $1 AND vmid = ANY($2::int[])
+         ORDER BY created_at DESC`,
+        [cleanOwnerEmail, vmids],
+      ),
+    ]);
+
+    return {
+      vms,
+      members: members.rows.map((row) => ({
+        id: Number(row.id),
+        vmid: Number(row.vmid),
+        userEmail: row.user_email,
+        userName: row.user_name || null,
+        scope: row.scope,
+        invitedBy: row.invited_by || null,
+        acceptedAt: row.accepted_at || null,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+      invitations: invitations.rows.map((row) => ({
+        id: row.id,
+        vmid: Number(row.vmid),
+        inviteeEmail: row.invitee_email,
+        scope: row.scope,
+        invitedBy: row.invited_by,
+        expiresAt: row.expires_at,
+        createdAt: row.created_at,
+        sentAt: row.sent_at || null,
+        acceptedAt: row.accepted_at || null,
+        revokedAt: row.revoked_at || null,
+      })),
+    };
+  }
+
+  async getAccessibleClientVMs(email: string) {
+    const cleanEmail = email.toLowerCase().trim();
+    const owned = await this.getVMs(cleanEmail);
+    const delegated = await pgPool.query<{ vmid: number }>(
+      `SELECT vmid FROM vm_sub_users WHERE user_email = $1 ORDER BY vmid ASC`,
+      [cleanEmail],
+    );
+    const ownedIds = new Set(owned.map((vm) => vm.vmid));
+    const additional = await Promise.all(
+      delegated.rows
+        .map((row) => Number(row.vmid))
+        .filter((vmid) => !ownedIds.has(vmid))
+        .map((vmid) => this.getVMByVMID(vmid)),
+    );
+    return [...owned, ...additional.filter((vm): vm is NonNullable<typeof vm> => Boolean(vm))];
+  }
+
+  async createTeamInvitation(vmid: number, inviteeEmail: string, scope: string, invitedBy: string) {
+    const cleanInvitee = inviteeEmail.toLowerCase().trim();
+    const cleanInviter = invitedBy.toLowerCase().trim();
+    const id = `team-invite-${crypto.randomBytes(12).toString('hex')}`;
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE vm_sub_user_invitations
+         SET revoked_at = NOW()
+         WHERE vmid = $1 AND invitee_email = $2 AND accepted_at IS NULL AND revoked_at IS NULL`,
+        [vmid, cleanInvitee],
+      );
+      const result = await client.query(
+        `INSERT INTO vm_sub_user_invitations (id, vmid, invitee_email, scope, invited_by, expires_at)
+         VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days')
+         RETURNING id, vmid, invitee_email, scope, invited_by, expires_at, created_at, sent_at, accepted_at, revoked_at`,
+        [id, vmid, cleanInvitee, scope, cleanInviter],
+      );
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async markTeamInvitationSent(id: string) {
+    await pgPool.query('UPDATE vm_sub_user_invitations SET sent_at = NOW() WHERE id = $1', [id]);
+  }
+
+  async revokeTeamInvitation(id: string, ownerEmail: string): Promise<boolean> {
+    const result = await pgPool.query(
+      `UPDATE vm_sub_user_invitations
+       SET revoked_at = NOW()
+       WHERE id = $1 AND invited_by = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+       RETURNING id`,
+      [id, ownerEmail.toLowerCase().trim()],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  private async acceptPendingTeamInvitations(client: pg.PoolClient, email: string) {
+    const cleanEmail = email.toLowerCase().trim();
+    const pending = await client.query(
+      `SELECT id, vmid, scope, invited_by
+       FROM vm_sub_user_invitations
+       WHERE invitee_email = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > NOW()
+       FOR UPDATE`,
+      [cleanEmail],
+    );
+
+    for (const invitation of pending.rows) {
+      await client.query(
+        `INSERT INTO vm_sub_users (vmid, user_email, scope, invited_by, accepted_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (vmid, user_email) DO UPDATE
+           SET scope = EXCLUDED.scope, invited_by = EXCLUDED.invited_by, accepted_at = NOW(), updated_at = NOW()`,
+        [invitation.vmid, cleanEmail, invitation.scope, invitation.invited_by],
+      );
+      await client.query('UPDATE vm_sub_user_invitations SET accepted_at = NOW() WHERE id = $1', [invitation.id]);
+    }
+
+    return pending.rows.length;
+  }
+
+  async acceptPendingTeamInvitationsForEmail(email: string) {
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const acceptedCount = await this.acceptPendingTeamInvitations(client, email);
+      await client.query('COMMIT');
+      return acceptedCount;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
 }

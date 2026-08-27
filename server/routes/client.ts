@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { dbService } from '../db/database.js';
+import { emailService } from '../services/email.js';
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { requireAuth } from '../middleware.js';
@@ -44,6 +45,7 @@ const CLIENT_NAVIGATION_DESTINATIONS = new Set([
   'client-instances-firewall',
   'client-instances-backups',
   'support',
+  'team-access',
   'user-settings',
 ]);
 
@@ -70,13 +72,128 @@ clientRouter.post('/navigation-usage', async (req: any, res) => {
   } else {
     const vmid = Number(req.body?.vmid);
     const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid) : null;
-    if (!vm || String(vm.ownerEmail || '').toLowerCase() !== email) {
+    const delegatedAccess = vm ? await dbService.getSubUserAccess(vmid, email) : null;
+    if (!vm || (String(vm.ownerEmail || '').toLowerCase() !== email && !delegatedAccess)) {
       return res.status(403).json({ success: false, error: 'You do not have access to this service.' });
     }
     await dbService.recordNavigationUsage(email, { key: `vm:${vmid}`, type: 'vm', vmid });
   }
 
   res.status(204).end();
+});
+
+const teamAccessScopes = new Set(['readonly', 'power', 'full']);
+const isValidTeamEmail = (value: unknown): value is string => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+clientRouter.get('/team-access', async (req: any, res) => {
+  const ownerEmail = String(req.authUser?.email || '').toLowerCase();
+  if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  const data = await dbService.getTeamAccessOverview(ownerEmail);
+  res.json({ success: true, data });
+});
+
+clientRouter.post('/team-access', async (req: any, res) => {
+  const ownerEmail = String(req.authUser?.email || '').toLowerCase();
+  const memberEmail = typeof req.body?.email === 'string' ? req.body.email.toLowerCase().trim() : '';
+  const vmid = Number(req.body?.vmid);
+  const scope = String(req.body?.scope || '');
+  if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  if (!Number.isInteger(vmid) || vmid <= 0 || !isValidTeamEmail(memberEmail) || !teamAccessScopes.has(scope)) {
+    return res.status(400).json({ success: false, error: 'Provide a valid service, email address, and access level.' });
+  }
+  if (memberEmail === ownerEmail) {
+    return res.status(400).json({ success: false, error: 'You already own this service and do not need delegated access.' });
+  }
+
+  const vm = await dbService.getVMByVMID(vmid);
+  if (!vm || String(vm.ownerEmail || '').toLowerCase() !== ownerEmail) {
+    return res.status(403).json({ success: false, error: 'Only the service owner can grant access.' });
+  }
+
+  const existingAccount = await dbService.findUserByEmail(memberEmail);
+  if (existingAccount) {
+    const member = await dbService.addSubUser(vmid, memberEmail, scope, ownerEmail);
+    await dbService.logAudit(ownerEmail, 'GRANT_TEAM_ACCESS', `VMID ${vmid}`, `Granted ${scope} access to ${memberEmail}`);
+    return res.status(201).json({
+      success: true,
+      data: { kind: 'member', member },
+      message: `${memberEmail} now has ${scope} access to ${vm.name}.`,
+    });
+  }
+
+  const smtpEnabled = await dbService.isSmtpRegistrationVerificationEnabled();
+  if (!smtpEnabled) {
+    return res.status(409).json({
+      success: false,
+      code: 'SMTP_REQUIRED_FOR_INVITATION',
+      error: 'This email address is not registered. Enable SMTP before sending a secure registration invitation.',
+    });
+  }
+
+  const invitation = await dbService.createTeamInvitation(vmid, memberEmail, scope, ownerEmail);
+  const publicAppUrl = String(process.env.PUBLIC_APP_URL || 'http://localhost:5000').replace(/\/$/, '');
+  const delivered = await emailService.sendTeamInvitation(memberEmail, {
+    ownerName: String(req.authUser?.name || ownerEmail),
+    serviceName: String(vm.name || `VM-${vmid}`),
+    vmid,
+    scope: scope as 'readonly' | 'power' | 'full',
+    inviteUrl: `${publicAppUrl}/register`,
+  });
+  if (!delivered) {
+    await dbService.revokeTeamInvitation(invitation.id, ownerEmail);
+    return res.status(503).json({ success: false, error: 'The invitation email could not be delivered. No access has been granted.' });
+  }
+
+  await dbService.markTeamInvitationSent(invitation.id);
+  await dbService.logAudit(ownerEmail, 'INVITE_TEAM_MEMBER', `VMID ${vmid}`, `Invited ${memberEmail} with ${scope} access`);
+  return res.status(202).json({
+    success: true,
+    data: { kind: 'invitation', invitation: { ...invitation, sent_at: new Date().toISOString() } },
+    message: `Invitation sent to ${memberEmail}. Access will activate automatically after they register with this address.`,
+  });
+});
+
+clientRouter.put('/team-access/vms/:vmid/members/:memberId', async (req: any, res) => {
+  const ownerEmail = String(req.authUser?.email || '').toLowerCase();
+  const vmid = Number(req.params.vmid);
+  const memberId = Number(req.params.memberId);
+  const scope = String(req.body?.scope || '');
+  if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  if (!Number.isInteger(vmid) || !Number.isInteger(memberId) || !teamAccessScopes.has(scope)) {
+    return res.status(400).json({ success: false, error: 'Provide a valid service, team member, and access level.' });
+  }
+  const vm = await dbService.getVMByVMID(vmid);
+  if (!vm || String(vm.ownerEmail || '').toLowerCase() !== ownerEmail) {
+    return res.status(403).json({ success: false, error: 'Only the service owner can change team access.' });
+  }
+  const member = await dbService.updateSubUser(memberId, vmid, scope);
+  if (!member) return res.status(404).json({ success: false, error: 'Team member access was not found.' });
+  await dbService.logAudit(ownerEmail, 'UPDATE_TEAM_ACCESS', `VMID ${vmid}`, `Updated ${member.user_email} to ${scope} access`);
+  res.json({ success: true, data: member, message: 'Team member access updated.' });
+});
+
+clientRouter.delete('/team-access/vms/:vmid/members/:memberId', async (req: any, res) => {
+  const ownerEmail = String(req.authUser?.email || '').toLowerCase();
+  const vmid = Number(req.params.vmid);
+  const memberId = Number(req.params.memberId);
+  if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid) : null;
+  if (!vm || String(vm.ownerEmail || '').toLowerCase() !== ownerEmail) {
+    return res.status(403).json({ success: false, error: 'Only the service owner can revoke team access.' });
+  }
+  const removed = await dbService.removeSubUser(memberId, vmid);
+  if (!removed) return res.status(404).json({ success: false, error: 'Team member access was not found.' });
+  await dbService.logAudit(ownerEmail, 'REVOKE_TEAM_ACCESS', `VMID ${vmid}`, `Revoked delegated access record ${memberId}`);
+  res.json({ success: true, message: 'Team member access revoked immediately.' });
+});
+
+clientRouter.delete('/team-access/invitations/:invitationId', async (req: any, res) => {
+  const ownerEmail = String(req.authUser?.email || '').toLowerCase();
+  if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
+  const revoked = await dbService.revokeTeamInvitation(String(req.params.invitationId || ''), ownerEmail);
+  if (!revoked) return res.status(404).json({ success: false, error: 'Pending invitation was not found.' });
+  await dbService.logAudit(ownerEmail, 'REVOKE_TEAM_INVITATION', 'team-access', `Revoked invitation ${String(req.params.invitationId || '')}`);
+  res.json({ success: true, message: 'Pending invitation revoked.' });
 });
 
 const proxmoxService = new ProxmoxService({
@@ -88,6 +205,20 @@ const proxmoxService = new ProxmoxService({
 });
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
+type ClientVmScope = 'readonly' | 'power' | 'full' | 'owner';
+const clientVmScopeRank: Record<ClientVmScope, number> = {
+  readonly: 1,
+  power: 2,
+  full: 3,
+  owner: 4,
+};
+const requireClientVmScope = (requiredScope: ClientVmScope) => (req: any, res: any, next: any) => {
+  const actualScope = req.clientVmScope as ClientVmScope | undefined;
+  if (!actualScope || clientVmScopeRank[actualScope] < clientVmScopeRank[requiredScope]) {
+    return res.status(403).json({ success: false, error: 'Your delegated access level does not permit this action.' });
+  }
+  next();
+};
 
 const getConnectionForVm = async (vm: { proxmoxConnectionId?: string | null }) => {
   const connectionId = vm.proxmoxConnectionId;
@@ -108,12 +239,27 @@ clientRouter.use('/vms/:vmid', async (req, res, next) => {
   const vmid = Number(req.params.vmid);
   const vm = await dbService.getVMByVMID(vmid);
   if (!vm) return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
+
   const user = (req as any).authUser;
+  const userEmail = String(user?.email || '').toLowerCase();
   const isAdmin = Boolean(user && adminRoles.has(user.role));
-  if (!isAdmin && String(vm.ownerEmail).toLowerCase() !== String(user?.email || '').toLowerCase()) {
-    return res.status(403).json({ success: false, error: 'You do not have access to this VM' });
+  const isOwner = String(vm.ownerEmail || '').toLowerCase() === userEmail;
+  let clientVmScope: ClientVmScope | null = isAdmin || isOwner ? 'owner' : null;
+
+  if (!clientVmScope && userEmail) {
+    const delegatedAccess = await dbService.getSubUserAccess(vmid, userEmail);
+    if (delegatedAccess && ['readonly', 'power', 'full'].includes(String(delegatedAccess.scope))) {
+      clientVmScope = delegatedAccess.scope as ClientVmScope;
+    }
   }
+
+  if (!clientVmScope) {
+    return res.status(403).json({ success: false, error: 'You do not have access to this service.' });
+  }
+
   (req as any).authorizedVm = vm;
+  (req as any).clientVmScope = clientVmScope;
+  (req as any).isClientVmOwner = isOwner || isAdmin;
   next();
 });
 
@@ -133,7 +279,7 @@ const parseReimageOs = (value: unknown) => typeof value === 'string' ? value.tri
 
 // Approval-based OS reimage requests. These routes persist workflow state only;
 // they never call Proxmox or mutate the VM's OS/status.
-clientRouter.get('/vms/:vmid/reimage-requests', async (req, res) => {
+clientRouter.get('/vms/:vmid/reimage-requests', requireClientVmScope('owner'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
   const data = await dbService.getReimageRequests({ vmid: vm.vmid });
@@ -144,7 +290,7 @@ clientRouter.get('/vms/:vmid/reimage-requests', async (req, res) => {
   });
 });
 
-clientRouter.post('/vms/:vmid/reimage-requests', async (req, res) => {
+clientRouter.post('/vms/:vmid/reimage-requests', requireClientVmScope('owner'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   const userEmail = (req as any).authUser?.email;
   if (!vm || !userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -169,7 +315,7 @@ clientRouter.post('/vms/:vmid/reimage-requests', async (req, res) => {
   }
 });
 
-clientRouter.post('/vms/:vmid/reimage-requests/:requestId/cancel', async (req, res) => {
+clientRouter.post('/vms/:vmid/reimage-requests/:requestId/cancel', requireClientVmScope('owner'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   const userEmail = (req as any).authUser?.email;
   if (!vm || !userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -192,9 +338,13 @@ clientRouter.get('/vms', async (req, res) => {
     ? req.query.connectionId.trim()
     : undefined;
   const providerAvailable = isProviderCredentialKeyConfigured();
+  const accessibleVms = await dbService.getAccessibleClientVMs(userEmail);
+  const allowedVms = connectionId
+    ? accessibleVms.filter((vm) => vm.proxmoxConnectionId === connectionId)
+    : accessibleVms;
   const vms = providerAvailable
-    ? await proxmoxApi.getLiveVMs(userEmail, connectionId)
-    : await dbService.getVMs(userEmail);
+    ? await proxmoxApi.getLiveVMs(undefined, connectionId, allowedVms.map((vm) => vm.vmid))
+    : allowedVms;
   res.json({ success: true, count: vms.length, data: vms, providerAvailable });
 });
 
@@ -212,7 +362,7 @@ clientRouter.get('/billing/vm-profiles', async (req, res) => {
 });
 
 // 1.5. GET /api/client/vms/:vmid/metadata — Fetch sanitized Cloud-Init and Proxmox VM details
-clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
+clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
 
@@ -263,7 +413,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
 });
 
 // 2. GET /api/client/vms/:vmid/telemetry — Fetch live CPU %, RAM, and Bandwidth usage from Proxmox for VMID
-clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
+clientRouter.get('/vms/:vmid/telemetry', requireClientVmScope('readonly'), async (req, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
   const vm = (req as any).authorizedVm;
 
@@ -314,7 +464,7 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
 });
 
 // 2.5. GET /api/client/vms/:vmid/metrics — Fetch historical telemetry data for charts & aggregations
-clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
+clientRouter.get('/vms/:vmid/metrics', requireClientVmScope('readonly'), async (req, res) => {
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     // Fetch last 48 hours for comparison
@@ -475,7 +625,7 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
 });
 
 // 2.6. GET /api/client/vms/:vmid/export — Export VM telemetry history as CSV or JSON
-clientRouter.get('/vms/:vmid/export', async (req, res) => {
+clientRouter.get('/vms/:vmid/export', requireClientVmScope('readonly'), async (req, res) => {
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     const format = (req.query.format as string) || 'json';
@@ -515,7 +665,7 @@ clientRouter.get('/vms/:vmid/export', async (req, res) => {
 
 // 3. POST /api/client/vms/:vmid/power — Accept action (start | stop | shutdown | reboot)
 // STRICT SAFETY CHECK: If is_suspended === true, BLOCK request and return HTTP 403
-clientRouter.post('/vms/:vmid/power', async (req, res) => {
+clientRouter.post('/vms/:vmid/power', requireClientVmScope('power'), async (req, res) => {
   const userEmail = (req as any).authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const vmid = parseInt(String(req.params.vmid), 10);
@@ -556,7 +706,7 @@ clientRouter.post('/vms/:vmid/power', async (req, res) => {
 // --- FIREWALL ENDPOINTS ---
 
 // GET /api/v1/client/vms/:vmid/firewall — uses Proxmox live rules when a connection exists, otherwise falls back to the local rule store so the panel stays functional
-clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
+clientRouter.get('/vms/:vmid/firewall', requireClientVmScope('readonly'), async (req, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
   try {
     const vm = (req as any).authorizedVm;
@@ -601,7 +751,7 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
 });
 
 // POST /api/v1/client/vms/:vmid/firewall/toggle
-clientRouter.post('/vms/:vmid/firewall/toggle', async (req, res) => {
+clientRouter.post('/vms/:vmid/firewall/toggle', requireClientVmScope('full'), async (req, res) => {
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     const { enable } = req.body;
@@ -633,7 +783,7 @@ clientRouter.post('/vms/:vmid/firewall/toggle', async (req, res) => {
 });
 
 // POST /api/v1/client/vms/:vmid/firewall
-clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
+clientRouter.post('/vms/:vmid/firewall', requireClientVmScope('full'), async (req, res) => {
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     const { action, type, proto, dport, enable, comment } = req.body;
@@ -673,7 +823,7 @@ clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
 });
 
 // DELETE /api/v1/client/vms/:vmid/firewall/:pos
-clientRouter.delete('/vms/:vmid/firewall/:pos', async (req, res) => {
+clientRouter.delete('/vms/:vmid/firewall/:pos', requireClientVmScope('full'), async (req, res) => {
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     const pos = parseInt(String(req.params.pos), 10);

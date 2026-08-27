@@ -120,6 +120,39 @@ export interface ApiNavigationUsage {
   lastUsedAt: string;
 }
 
+export type ApiTeamAccessScope = 'readonly' | 'power' | 'full';
+
+export interface ApiTeamAccessMember {
+  id: number;
+  vmid: number;
+  userEmail: string;
+  userName?: string | null;
+  scope: ApiTeamAccessScope;
+  invitedBy?: string | null;
+  acceptedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiTeamInvitation {
+  id: string;
+  vmid: number;
+  inviteeEmail: string;
+  scope: ApiTeamAccessScope;
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+  sentAt?: string | null;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+}
+
+export interface ApiTeamAccessOverview {
+  vms: ApiVM[];
+  members: ApiTeamAccessMember[];
+  invitations: ApiTeamInvitation[];
+}
+
 export interface ApiAccount {
 
   id: number;
@@ -550,6 +583,50 @@ class ApiClient {
   async getClientVMs(connectionId?: string): Promise<ApiVM[]> {
     const { vms } = await this.getClientVmInventory(connectionId);
     return vms;
+  }
+
+  async getTeamAccessOverview(): Promise<ApiTeamAccessOverview> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load team access.');
+    return data.data as ApiTeamAccessOverview;
+  }
+
+  async grantTeamAccess(input: { vmid: number; email: string; scope: ApiTeamAccessScope }): Promise<{ kind: 'member' | 'invitation'; message: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await this.readApiResponse(res, 'Unable to grant team access.');
+    return { kind: data.data?.kind, message: data.message || 'Team access updated.' };
+  }
+
+  async updateTeamAccess(vmid: number, memberId: number, scope: ApiTeamAccessScope): Promise<{ message: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access/vms/${vmid}/members/${memberId}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ scope }),
+    });
+    const data = await this.readApiResponse(res, 'Unable to update team access.');
+    return { message: data.message || 'Team member access updated.' };
+  }
+
+  async revokeTeamAccess(vmid: number, memberId: number): Promise<{ message: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access/vms/${vmid}/members/${memberId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    const data = await this.readApiResponse(res, 'Unable to revoke team access.');
+    return { message: data.message || 'Team member access revoked.' };
+  }
+
+  async revokeTeamInvitation(invitationId: string): Promise<{ message: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access/invitations/${encodeURIComponent(invitationId)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+    const data = await this.readApiResponse(res, 'Unable to revoke the pending invitation.');
+    return { message: data.message || 'Pending invitation revoked.' };
   }
 
   async getVmReimageRequests(vmid: number): Promise<ApiReimageRequest[]> {

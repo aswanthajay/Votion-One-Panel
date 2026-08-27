@@ -431,8 +431,10 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
   /**
    * Get VMs for a specific user, enriched with real-time telemetry from Proxmox
    */
-    async getLiveVMs(ownerEmail?: string, proxmoxConnectionId?: string) {
-    const vms = await dbService.getVMs(ownerEmail, undefined, proxmoxConnectionId);
+    async getLiveVMs(ownerEmail?: string, proxmoxConnectionId?: string, allowedVmids?: number[]) {
+    const allowedVmidSet = allowedVmids ? new Set(allowedVmids.map((vmid) => Number(vmid))) : null;
+    const vms = (await dbService.getVMs(ownerEmail, undefined, proxmoxConnectionId))
+      .filter((vm) => !allowedVmidSet || allowedVmidSet.has(vm.vmid));
     const connections = await dbService.getProxmoxConnectionCredentials();
     const conns = Array.isArray(connections) ? connections : [];
     if (conns.length === 0) return vms;

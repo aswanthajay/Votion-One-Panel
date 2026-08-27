@@ -314,6 +314,36 @@ class EmailService {
     });
   }
 
+  async sendTeamInvitation(to: string, details: { ownerName: string; serviceName: string; vmid: number; scope: 'readonly' | 'power' | 'full'; inviteUrl: string }) {
+    const scopeLabel = {
+      readonly: 'Viewer',
+      power: 'Operator',
+      full: 'Manager',
+    }[details.scope];
+    return this.sendBrandedTemplate({
+      to,
+      templateKey: 'team_invitation',
+      fallbackSubject: '{ownerName} invited you to Votion One™',
+      fallbackBody: '<p style="margin: 0 0 16px;">{ownerName} has invited you to collaborate on {serviceName} in Votion One™.</p><p style="margin: 0;">Create your own account with this email address to activate access. Your permissions are limited to the service shown below and can be changed or revoked by the service owner at any time.</p>',
+      variables: {
+        ownerName: details.ownerName,
+        serviceName: details.serviceName,
+        vmid: details.vmid,
+        scope: scopeLabel,
+      },
+      eyebrow: 'Team access invitation',
+      title: 'You have been invited to collaborate',
+      preheader: `${details.ownerName} invited you to a Votion One™ service workspace.`,
+      action: { label: 'Create your account', url: details.inviteUrl },
+      metadata: [
+        { label: 'Service', value: details.serviceName },
+        { label: 'Reference', value: `VM-${details.vmid}` },
+        { label: 'Access level', value: scopeLabel },
+      ],
+      securityNote: 'This invitation is valid for seven days and is tied to this email address. Never forward the invitation link. If you were not expecting this invitation, you may safely ignore it.',
+    });
+  }
+
   async sendBillingReminder(to: string, details: { title: string; message: string; invoiceId: string; vmid: number; dueText: string; outstandingCents: number; currency: string }) {
     const portalUrl = getPortalUrl();
     return this.sendBrandedTemplate({

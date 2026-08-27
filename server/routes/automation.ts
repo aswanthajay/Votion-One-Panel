@@ -7,18 +7,41 @@ import { dbService } from '../db/database.js';
 
 export const automationRouter = Router();
 
-/** Owner-or-admin gate: VM must belong to the caller, or caller must be admin. */
-async function assertVmAccess(req: KeyedRequest, res: any, vmid: number): Promise<any | null> {
-  const email = req.authUser?.email;
+type TeamAccessScope = 'readonly' | 'power' | 'full' | 'owner';
+const teamAccessScopeRank: Record<TeamAccessScope, number> = {
+  readonly: 1,
+  power: 2,
+  full: 3,
+  owner: 4,
+};
+
+/** Owner-or-admin gate with scoped, per-service delegated access for normal clients. */
+async function assertVmAccess(
+  req: KeyedRequest,
+  res: any,
+  vmid: number,
+  requiredScope: TeamAccessScope = 'readonly',
+  ownerOnly = false,
+): Promise<any | null> {
+  const email = req.authUser?.email?.toLowerCase();
   if (!email) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const vm = await dbService.getVMByVMID(vmid);
+  if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
+
   const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
-  if (!isAdmin) {
-    const vm = await dbService.getVMByVMID(vmid);
-    if (!vm || vm.ownerEmail?.toLowerCase() !== email.toLowerCase()) {
-      return res.status(403).json({ success: false, error: 'You do not have access to this VM' });
-    }
+  const isOwner = vm.ownerEmail?.toLowerCase() === email;
+  if (isAdmin || isOwner) return null;
+  if (ownerOnly) {
+    return res.status(403).json({ success: false, error: 'Only the service owner can manage team access.' });
   }
-  return null; // authorized
+
+  const delegatedAccess = await dbService.getSubUserAccess(vmid, email);
+  const actualScope = String(delegatedAccess?.scope || '') as TeamAccessScope;
+  if (!delegatedAccess || !teamAccessScopeRank[actualScope] || teamAccessScopeRank[actualScope] < teamAccessScopeRank[requiredScope]) {
+    return res.status(403).json({ success: false, error: 'Your delegated access level does not permit this action.' });
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------
@@ -26,7 +49,7 @@ async function assertVmAccess(req: KeyedRequest, res: any, vmid: number): Promis
 // ---------------------------------------------------------------
 automationRouter.post('/vms/:vmid/reinstall', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   const { targetOS, userpass, cipassword, hostname, sshkeys } = req.body || {};
   if (!targetOS) {
     return res.status(400).json({ success: false, error: 'Target OS specification (targetOS) is required' });
@@ -49,7 +72,7 @@ automationRouter.post('/vms/:vmid/reinstall', authOrApiKey, requireScope('full')
 // ---------------------------------------------------------------
 automationRouter.post('/vms/:vmid/rescue/enter', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   try {
     const r = await dbService.runTask(req.authUser!.email, `Rescue Mode — Enter — VMID ${vmid}`, `Booting VMID ${vmid} into rescue environment`, 'high', async (updateProgress) => {
       await updateProgress(30, 'Mounting rescue ISO');
@@ -65,7 +88,7 @@ automationRouter.post('/vms/:vmid/rescue/enter', authOrApiKey, requireScope('ful
 
 automationRouter.post('/vms/:vmid/rescue/exit', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   try {
     const r = await dbService.runTask(req.authUser!.email, `Rescue Mode — Exit — VMID ${vmid}`, `Restoring normal boot for VMID ${vmid}`, 'medium', async (updateProgress) => {
       await updateProgress(30, 'Restoring original boot device');
@@ -84,7 +107,7 @@ automationRouter.post('/vms/:vmid/rescue/exit', authOrApiKey, requireScope('full
 // ---------------------------------------------------------------
 automationRouter.post('/vms/:vmid/backups', authOrApiKey, requireScope('power'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'power')) return;
   try {
     const r = await dbService.runTask(req.authUser!.email, `Full Backup — VMID ${vmid}`, `vzdump backup started on VMID ${vmid}`, 'medium', async (updateProgress) => {
       const r = await automationService.triggerBackup(vmid, req.authUser!.email);
@@ -100,7 +123,7 @@ automationRouter.post('/vms/:vmid/backups', authOrApiKey, requireScope('power'),
 
 automationRouter.get('/vms/:vmid/backups', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   try {
     const r = await automationService.listBackups(vmid);
     res.json({ success: true, data: r });
@@ -111,7 +134,7 @@ automationRouter.get('/vms/:vmid/backups', authOrApiKey, requireScope('read'), a
 
 automationRouter.post('/vms/:vmid/backups/:volid/restore', authOrApiKey, requireAdmin, async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   const { targetStorage } = req.body || {};
   if (!targetStorage) return res.status(400).json({ success: false, error: 'targetStorage is required (restore lands on this storage)' });
   try {
@@ -133,7 +156,7 @@ automationRouter.post('/vms/:vmid/backups/:volid/restore', authOrApiKey, require
 // ---------------------------------------------------------------
 automationRouter.get('/vms/:vmid/rrd', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   const timeframe = ['minute', 'hour', 'day', 'week', 'month', 'year'].includes(String(req.query.timeframe || ''))
     ? String(req.query.timeframe) : 'hour';
   try {
@@ -146,7 +169,7 @@ automationRouter.get('/vms/:vmid/rrd', authOrApiKey, requireScope('read'), async
 
 automationRouter.get('/vms/:vmid/bandwidth', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   try {
     const r = await automationService.getMonthlyBandwidth(vmid);
     res.json({ success: true, data: r });
@@ -157,7 +180,7 @@ automationRouter.get('/vms/:vmid/bandwidth', authOrApiKey, requireScope('read'),
 
 automationRouter.get('/vms/:vmid/quota', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   try {
     const quotaGb = await dbService.getVmBandwidthQuota(vmid);
     res.json({ success: true, data: { vmid, bandwidthQuotaGb: quotaGb } });
@@ -168,7 +191,7 @@ automationRouter.get('/vms/:vmid/quota', authOrApiKey, requireScope('read'), asy
 
 automationRouter.put('/vms/:vmid/quota', authOrApiKey, requireAdmin, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   const { bandwidthGb } = req.body || {};
   if (!bandwidthGb || Number(bandwidthGb) < 1) {
     return res.status(400).json({ success: false, error: 'bandwidthGb must be at least 1' });
@@ -184,7 +207,7 @@ automationRouter.put('/vms/:vmid/quota', authOrApiKey, requireAdmin, requireScop
 // Rescue readiness check (non-destructive: lists storages + ISOs)
 automationRouter.get('/vms/:vmid/rescue/check', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   try {
     const r = await automationService.checkRescueReadiness(vmid);
     res.json({ success: true, ...r });
@@ -196,7 +219,7 @@ automationRouter.get('/vms/:vmid/rescue/check', authOrApiKey, requireScope('read
 // rDNS history for a single VM
 automationRouter.get('/vms/:vmid/rdns-requests', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'readonly')) return;
   try {
     const queue = await dbService.getRdnsQueue();
     const filtered = (queue || []).filter((r: any) => Number(r.vmid) === vmid);
@@ -220,7 +243,7 @@ automationRouter.get('/rdns/queue', authOrApiKey, requireAdmin, async (req: Keye
 
 automationRouter.post('/vms/:vmid/rdns', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'full')) return;
   const { ip, ptr } = req.body || {};
   if (!ip || !ptr) return res.status(400).json({ success: false, error: 'ip and ptr are required' });
   try {
@@ -261,7 +284,7 @@ automationRouter.get('/apps/catalog', authOrApiKey, requireScope('read'), async 
 automationRouter.post('/apps/:appId/deploy', authOrApiKey, requireScope('power'), async (req: KeyedRequest, res) => {
   const vmid = Number(req.body?.vmid);
   if (!vmid) return res.status(400).json({ success: false, error: 'Body field "vmid" (target VM) is required' });
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'power')) return;
   try {
     const r = await dbService.runTask(req.authUser!.email, `Deploy ${String(req.params.appId)} — VMID ${vmid}`, `Cloning app template and provisioning on VMID ${vmid}`, 'medium', async (updateProgress) => {
       await updateProgress(20, 'Preparing app template');
@@ -320,20 +343,24 @@ automationRouter.delete('/user/api-keys/:id', authOrApiKey, async (req: KeyedReq
 // ---------------------------------------------------------------
 automationRouter.get('/vms/:vmid/sub-users', authOrApiKey, requireScope('read'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'owner', true)) return;
   const subs = await dbService.getSubUsers(vmid);
   res.json({ success: true, data: subs });
 });
 
 automationRouter.post('/vms/:vmid/sub-users', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'owner', true)) return;
   const { email, scope } = req.body || {};
   if (!email || !['readonly', 'power', 'full'].includes(String(scope || ''))) {
     return res.status(400).json({ success: false, error: 'email and scope (readonly|power|full) are required' });
   }
+  const existingAccount = await dbService.findUserByEmail(String(email));
+  if (!existingAccount) {
+    return res.status(409).json({ success: false, error: 'This email address is not registered. Send an SMTP invitation from Team Access instead.' });
+  }
   try {
-    const row = await dbService.addSubUser(vmid, email, scope);
+    const row = await dbService.addSubUser(vmid, email, scope, req.authUser!.email);
     res.json({ success: true, message: `Delegated ${scope} access on VMID ${vmid} to ${email}`, data: row });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message || 'Failed to add sub-user' });
@@ -342,7 +369,7 @@ automationRouter.post('/vms/:vmid/sub-users', authOrApiKey, requireScope('full')
 
 automationRouter.put('/vms/:vmid/sub-users/:id', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'owner', true)) return;
   const id = parseInt(String(req.params.id), 10);
   const { scope } = req.body || {};
   if (!['readonly', 'power', 'full'].includes(String(scope || ''))) {
@@ -355,7 +382,7 @@ automationRouter.put('/vms/:vmid/sub-users/:id', authOrApiKey, requireScope('ful
 
 automationRouter.delete('/vms/:vmid/sub-users/:id', authOrApiKey, requireScope('full'), async (req: KeyedRequest, res) => {
   const vmid = parseInt(String(req.params.vmid), 10);
-  if (await assertVmAccess(req, res, vmid)) return;
+  if (await assertVmAccess(req, res, vmid, 'owner', true)) return;
   const id = parseInt(String(req.params.id), 10);
   const removed = await dbService.removeSubUser(id, vmid);
   if (!removed) return res.status(404).json({ success: false, error: 'Sub-user not found on this VM' });

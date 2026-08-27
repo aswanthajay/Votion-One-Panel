@@ -19,6 +19,7 @@ const DashboardContent = lazy(() => import('./components/DashboardContent'));
 const OverviewDashboard = lazy(() => import('./components/OverviewDashboard').then(module => ({ default: module.OverviewDashboard })));
 const ClientPanelContent = lazy(() => import('./components/ClientPanelContent').then(module => ({ default: module.ClientPanelContent })));
 const UserSettingsContent = lazy(() => import('./components/UserSettingsContent').then(module => ({ default: module.UserSettingsContent })));
+const TeamAccessContent = lazy(() => import('./components/TeamAccessContent').then(module => ({ default: module.TeamAccessContent })));
 const AuthPages = lazy(() => import('./components/AuthPages').then(module => ({ default: module.AuthPages })));
 const CommandPalette = lazy(() => import('./components/CommandPalette').then(module => ({ default: module.CommandPalette })));
 const InteractiveModals = lazy(() => import('./components/InteractiveModals').then(module => ({ default: module.InteractiveModals })));
@@ -58,6 +59,7 @@ export type ViewMode =
   | 'billing-operations'
   | 'support'
   | 'user-settings'
+  | 'team-access'
   | 'system-settings'
   | 'proxmox-connections'
   | 'user-management';
@@ -91,6 +93,7 @@ const VIEW_PATHS: Record<ViewMode, string> = {
   'billing-operations': '/billing-operations',
   support: '/support',
   'user-settings': '/user-settings',
+  'team-access': '/team-access',
   'system-settings': '/system-settings',
   'proxmox-connections': '/proxmox-connections',
   'user-management': '/user-management',
@@ -263,7 +266,7 @@ const AppShell: React.FC = () => {
     if (activeRole === 'client') {
       if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
         void apiClient.recordNavigationUsage({ itemKey: `vm:${requestedVmid}`, itemType: 'vm', vmid: requestedVmid }).catch(() => undefined);
-      } else if (['overview', 'instances', 'instances-qemu', 'instances-lxc', 'client-instances-vnc', 'client-instances-metrics', 'client-instances-firewall', 'client-instances-backups', 'support', 'user-settings'].includes(requestedView)) {
+      } else if (['overview', 'instances', 'instances-qemu', 'instances-lxc', 'client-instances-vnc', 'client-instances-metrics', 'client-instances-firewall', 'client-instances-backups', 'support', 'user-settings', 'team-access'].includes(requestedView)) {
         void apiClient.recordNavigationUsage({ itemKey: requestedView, itemType: 'destination' }).catch(() => undefined);
       }
     }
@@ -341,6 +344,7 @@ const AppShell: React.FC = () => {
               <Route path={VIEW_PATHS['billing-operations']} element={activeRole === 'admin' ? <BillingOperationsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS.support} element={<SupportCenter userRole={activeRole} />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
+              <Route path={VIEW_PATHS['team-access']} element={activeRole === 'client' ? <TeamAccessContent /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['system-settings']} element={activeRole === 'admin' ? <SystemSettings /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-management']} element={activeRole === 'admin' ? <UserManagement /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['proxmox-connections']} element={activeRole === 'admin' ? <ProxmoxConnections /> : <Navigate to={VIEW_PATHS.overview} replace />} />

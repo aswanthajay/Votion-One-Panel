@@ -175,6 +175,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       )
     },
+    {
+      title: 'Team Access',
+      key: 'team-access',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="8" cy="8" r="3" />
+          <path d="M2.5 19c.65-3.15 2.45-4.8 5.5-4.8s4.85 1.65 5.5 4.8" />
+          <path d="M15.5 6.2a2.55 2.55 0 0 1 0 4.95M17.15 14.65c1.5.65 2.25 2.08 2.35 4.35" />
+        </svg>
+      )
+    },
     { 
       title: 'Support Center',
       key: 'support',
@@ -205,6 +216,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Snapshot Backups', key: 'client-instances-backups' },
     { title: 'Network Firewall', key: 'client-instances-firewall' },
     { title: 'Support Center', key: 'support' },
+    { title: 'Team Access', key: 'team-access' },
     { title: 'User Profile Settings', key: 'user-settings' },
   ];
   const destinationTitles: Record<string, string> = {
@@ -216,6 +228,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'client-instances-firewall': 'Network Firewall',
     'client-instances-backups': 'Snapshot Backups',
     'support': 'Support Center',
+    'team-access': 'Team Access',
     'user-settings': 'User Profile Settings',
   };
 
