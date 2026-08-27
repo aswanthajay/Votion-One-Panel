@@ -13,7 +13,7 @@ import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastContext';
 import { RouteNotFound } from './components/RouteNotFound';
 import { readWorkspaceScope, saveWorkspaceScope, type WorkspaceScope } from './workspaceScope';
-import { apiClient } from './services/apiClient';
+import { apiClient, type ApiAccount } from './services/apiClient';
 
 const DashboardContent = lazy(() => import('./components/DashboardContent'));
 const OverviewDashboard = lazy(() => import('./components/OverviewDashboard').then(module => ({ default: module.OverviewDashboard })));
@@ -123,6 +123,8 @@ const authModeForPath = (pathname: string): AuthMode => {
 
 const isAuthPath = (pathname: string) => Object.values(AUTH_PATHS).includes(normalizePath(pathname));
 
+const hasAdministratorRole = (role: ApiAccount['role'] | undefined): boolean => role === 'admin' || role === 'administrator';
+
 const navigateForView = (navigate: ReturnType<typeof useNavigate>, view: unknown) => {
   const path = typeof view === 'string' && view in VIEW_PATHS
     ? VIEW_PATHS[view as ViewMode]
@@ -186,6 +188,7 @@ const AppShell: React.FC = () => {
     const savedRole = localStorage.getItem('votion_user_role');
     return savedRole === 'admin' ? 'admin' : 'client';
   });
+  const [hasAdministrativeAccess, setHasAdministrativeAccess] = useState(() => hasAdministratorRole(apiClient.getUserRole() as ApiAccount['role']));
   const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>(() => readWorkspaceScope());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -195,14 +198,31 @@ const AppShell: React.FC = () => {
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [alertRulesOpen, setAlertRulesOpen] = useState(false);
   const roleQuery = new URLSearchParams(location.search).get('role');
-  const activeRole: UserRole = roleQuery === 'admin' || roleQuery === 'client' ? roleQuery : userRole;
+  const requestedRole: UserRole | null = roleQuery === 'admin' || roleQuery === 'client' ? roleQuery : null;
+  const activeRole: UserRole = hasAdministrativeAccess && (requestedRole || userRole) === 'admin' ? 'admin' : 'client';
 
   useEffect(() => {
-    if (roleQuery === 'admin' || roleQuery === 'client') {
-      setUserRole(roleQuery);
-      localStorage.setItem('votion_user_role', roleQuery);
+    if (requestedRole && (requestedRole !== 'admin' || hasAdministrativeAccess)) {
+      setUserRole(requestedRole);
+      localStorage.setItem('votion_user_role', requestedRole);
     }
-  }, [roleQuery]);
+  }, [hasAdministrativeAccess, requestedRole]);
+
+  useEffect(() => {
+    let active = true;
+    void apiClient.getUserProfile()
+      .then((profile) => {
+        if (!active) return;
+        const canUseAdminWorkspace = hasAdministratorRole(profile?.role);
+        setHasAdministrativeAccess(canUseAdminWorkspace);
+        if (!canUseAdminWorkspace && userRole === 'admin') {
+          setUserRole('client');
+          localStorage.setItem('votion_user_role', 'client');
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [userRole]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -278,6 +298,7 @@ const AppShell: React.FC = () => {
           currentView={currentView}
           onNavigate={handleNavigate}
           userRole={activeRole}
+          canSwitchToAdmin={hasAdministrativeAccess}
           onToggleRole={handleToggleRole}
           onOpenModal={handleOpenModal}
           onOpenAlertRules={activeRole === 'admin' ? () => startTransition(() => setAlertRulesOpen(true)) : undefined}

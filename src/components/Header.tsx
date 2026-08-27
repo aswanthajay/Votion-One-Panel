@@ -16,6 +16,7 @@ interface HeaderProps {
   currentView: string;
   onNavigate: (view: any) => void;
   userRole: 'admin' | 'client';
+  canSwitchToAdmin: boolean;
   onToggleRole: () => void;
   onOpenModal: (modalName: string) => void;
   onOpenAlertRules?: () => void;
@@ -28,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentView,
   onNavigate, 
   userRole, 
+  canSwitchToAdmin,
   onToggleRole,
   onOpenModal,
   onOpenAlertRules,
@@ -243,11 +245,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* ADMIN vs CLIENT ROLE SWITCHER */}
-        {userRole === 'admin' && (
+        {canSwitchToAdmin && (
           <button 
             onClick={onToggleRole}
             className="header-role-switcher px-3 py-1.5 rounded-md text-[13px] font-semibold flex items-center gap-2 transition-colors border cursor-pointer bg-[#fbfaf9] text-[#1a1a1a] border-[#dedfdf] hover:bg-[#f1f1f1]"
-            title="Toggle between Admin & Client Panels"
+            title={userRole === 'admin' ? 'Switch to client workspace' : 'Switch to administrator workspace'}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 3l4 4-4 4" />
@@ -386,15 +388,20 @@ export const Header: React.FC<HeaderProps> = ({
           {userMenuOpen && (
             <div className="header-user-menu absolute right-0 top-11 w-56 bg-white border border-[#dedfdf] rounded-lg shadow-xl py-2 z-[350] text-sm text-[#1a1a1a]">
               
-              {userRole === 'admin' && (
+              {canSwitchToAdmin && (
                 <>
-                  {/* Role Toggle Link */}
                   <button 
                     onClick={() => { onToggleRole(); setUserMenuOpen(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors font-semibold text-[#2563eb] flex items-center justify-between cursor-pointer"
+                    title={userRole === 'admin' ? 'Open the client workspace' : 'Open the administrator workspace'}
                   >
-                    <span>Switch to Client View</span>
-                    <span>⇄</span>
+                    <span>{userRole === 'admin' ? 'Switch to Client View' : 'Switch to Admin View'}</span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M17 3l4 4-4 4" />
+                      <path d="M3 7h18" />
+                      <path d="M7 21l-4-4 4-4" />
+                      <path d="M21 17H3" />
+                    </svg>
                   </button>
 
                   <div className="my-1 border-t border-[#dedfdf]"></div>
