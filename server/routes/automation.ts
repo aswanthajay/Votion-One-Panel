@@ -51,7 +51,7 @@ automationRouter.post('/vms/:vmid/rescue/enter', authOrApiKey, requireScope('ful
   const vmid = parseInt(String(req.params.vmid), 10);
   if (await assertVmAccess(req, res, vmid)) return;
   try {
-    const r = await dbService.runTask(req.authUser!.email, 'Rescue Mode — Enter', `Booting VMID ${vmid} into rescue environment`, 'high', async (updateProgress) => {
+    const r = await dbService.runTask(req.authUser!.email, `Rescue Mode — Enter — VMID ${vmid}`, `Booting VMID ${vmid} into rescue environment`, 'high', async (updateProgress) => {
       await updateProgress(30, 'Mounting rescue ISO');
       const r = await automationService.enterRescueMode(vmid, req.authUser!.email);
       await updateProgress(100, r.message);
@@ -67,7 +67,7 @@ automationRouter.post('/vms/:vmid/rescue/exit', authOrApiKey, requireScope('full
   const vmid = parseInt(String(req.params.vmid), 10);
   if (await assertVmAccess(req, res, vmid)) return;
   try {
-    const r = await dbService.runTask(req.authUser!.email, 'Rescue Mode — Exit', `Restoring normal boot for VMID ${vmid}`, 'medium', async (updateProgress) => {
+    const r = await dbService.runTask(req.authUser!.email, `Rescue Mode — Exit — VMID ${vmid}`, `Restoring normal boot for VMID ${vmid}`, 'medium', async (updateProgress) => {
       await updateProgress(30, 'Restoring original boot device');
       const r = await automationService.exitRescueMode(vmid, req.authUser!.email);
       await updateProgress(100, r.message);

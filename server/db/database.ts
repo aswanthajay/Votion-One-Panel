@@ -2610,6 +2610,56 @@ export class DatabaseService {
     return result.rows;
   }
 
+  async createProviderOperation(input: {
+    id: string;
+    vmid: number;
+    action: string;
+    idempotencyKey: string;
+    requestedBy: string;
+    payload?: Record<string, unknown>;
+  }) {
+    const result = await pgPool.query(
+      `INSERT INTO provider_operations (id, vmid, action, idempotency_key, requested_by, request_payload)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (vmid, action, idempotency_key) DO UPDATE SET updated_at = provider_operations.updated_at
+       RETURNING id, vmid, action, state, idempotency_key, provider_task_id, result_payload, error_code, error_message, created_at, updated_at`,
+      [input.id, input.vmid, input.action, input.idempotencyKey, input.requestedBy.toLowerCase().trim(), JSON.stringify(input.payload || {})],
+    );
+    return result.rows[0];
+  }
+
+  async transitionProviderOperation(
+    id: string,
+    fromStates: string[],
+    state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled',
+    details: { providerTaskId?: string | null; result?: Record<string, unknown>; errorCode?: string; errorMessage?: string } = {},
+  ) {
+    const result = await pgPool.query(
+      `UPDATE provider_operations
+       SET state = $1,
+           provider_task_id = COALESCE($2, provider_task_id),
+           result_payload = COALESCE($3::jsonb, result_payload),
+           error_code = $4,
+           error_message = $5,
+           started_at = CASE WHEN $1 = 'running' AND started_at IS NULL THEN NOW() ELSE started_at END,
+           completed_at = CASE WHEN $1 IN ('succeeded', 'failed', 'cancelled') THEN NOW() ELSE completed_at END,
+           updated_at = NOW()
+       WHERE id = $6 AND state = ANY($7::text[])
+       RETURNING id, vmid, action, state, provider_task_id, result_payload, error_code, error_message, updated_at`,
+      [state, details.providerTaskId ?? null, details.result ? JSON.stringify(details.result) : null, details.errorCode || null, details.errorMessage || null, id, fromStates],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getProviderOperation(id: string) {
+    const result = await pgPool.query(
+      `SELECT id, vmid, action, state, idempotency_key, provider_task_id, requested_by, result_payload, error_code, error_message, created_at, started_at, completed_at, updated_at
+       FROM provider_operations WHERE id = $1`,
+      [id],
+    );
+    return result.rows[0] || null;
+  }
+
   async getVmBandwidthQuota(vmid: number): Promise<number> {
     const result = await pgPool.query<{ bandwidth_quota_gb: string | number | null }>(
       'SELECT bandwidth_quota_gb FROM vm_billing_profiles WHERE vmid = $1',
@@ -2718,15 +2768,34 @@ export class DatabaseService {
     work: (updateProgress: (progressPct: number, detail?: string) => Promise<void>) => Promise<T>,
   ): Promise<T> {
     const task = await this.addTask(userEmail, title, description, 'running', priority, 0);
+    const vmidMatch = title.match(/VMID\s+(\d+)/i);
+    const operationId = vmidMatch ? `op-${task.id}` : null;
+    if (operationId && vmidMatch) {
+      const vmid = Number(vmidMatch[1]);
+      const action = title.replace(/\s*[—-].*$/, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      await this.createProviderOperation({
+        id: operationId,
+        vmid,
+        action,
+        idempotencyKey: task.id,
+        requestedBy: userEmail,
+        payload: { taskId: task.id, title },
+      });
+      await this.transitionProviderOperation(operationId, ['queued'], 'running');
+    }
     const updateProgress = async (progressPct: number, _detail?: string): Promise<void> => {
       await this.updateTaskStatus(task.id, 'running', Math.max(0, Math.min(100, Math.round(progressPct))));
     };
     try {
       const result = await work(updateProgress);
       await this.updateTaskStatus(task.id, 'completed', 100);
+      if (operationId) await this.transitionProviderOperation(operationId, ['running'], 'succeeded');
       return result;
     } catch (error) {
       await this.updateTaskStatus(task.id, 'failed', 0);
+      if (operationId) await this.transitionProviderOperation(operationId, ['running'], 'failed', {
+        errorMessage: error instanceof Error ? error.message : 'Provider operation failed',
+      });
       throw error;
     }
   }
