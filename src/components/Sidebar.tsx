@@ -349,7 +349,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </svg>
                 </span>
                                 <span className="sidenav-link-text">Essentials</span>
-                {userRole === 'client' && !isCollapsed && hasLoadedNavigationUsage && <span className="sidenav-essentials-caption">Top 5</span>}
 
               </div>
               <svg 

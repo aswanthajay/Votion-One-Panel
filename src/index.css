@@ -3549,16 +3549,3 @@ body {
     line-height: 1.7;
   }
 }
-
-.sidenav-essentials-caption {
-  margin-left: 0.4rem;
-  color: var(--theme-text-muted, var(--color-text-subtle));
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-[data-theme="dark"] .sidenav-essentials-caption {
-  color: var(--theme-text-muted, #a1a1aa);
-}
