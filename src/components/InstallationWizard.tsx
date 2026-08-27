@@ -3,9 +3,32 @@ import { API_BASE_URL } from '../services/apiClient';
 
 type InstallationState = 'checking' | 'ready' | 'unavailable' | 'complete';
 
+type InstallerHistoryState = Record<string, unknown> & { installationToken?: unknown };
+
+const readInstallationToken = (): string => {
+  const urlToken = new URLSearchParams(window.location.search).get('token')?.trim();
+  if (urlToken) return urlToken;
+
+  const historyState = window.history.state;
+  if (!historyState || typeof historyState !== 'object') return '';
+  const token = (historyState as InstallerHistoryState).installationToken;
+  return typeof token === 'string' ? token.trim() : '';
+};
+
+const updateInstallerHistoryState = (installationToken?: string) => {
+  const historyState = window.history.state;
+  const nextState: InstallerHistoryState = historyState && typeof historyState === 'object'
+    ? { ...(historyState as InstallerHistoryState) }
+    : {};
+
+  if (installationToken) nextState.installationToken = installationToken;
+  else delete nextState.installationToken;
+
+  window.history.replaceState(nextState, document.title, '/install');
+};
+
 export const InstallationWizard: React.FC = () => {
-  const initialToken = useMemo(() => new URLSearchParams(window.location.search).get('token')?.trim() || '', []);
-  const [installationToken] = useState(initialToken);
+  const [installationToken] = useState(readInstallationToken);
   const [state, setState] = useState<InstallationState>('checking');
   const [databaseUrl, setDatabaseUrl] = useState('');
   const [publicAppUrl, setPublicAppUrl] = useState(() => window.location.origin);
@@ -30,13 +53,14 @@ export const InstallationWizard: React.FC = () => {
       setError('This installation link is missing its security token. Restart the installation service to issue a new link.');
       return;
     }
-    window.history.replaceState({}, document.title, '/install');
+    updateInstallerHistoryState(installationToken);
     let active = true;
     void fetch(`${API_BASE_URL}/installation/status`, { headers: requestHeaders })
       .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }))
       .then(({ response, data }) => {
         if (!active) return;
         if (!response.ok || !data.success) {
+          updateInstallerHistoryState();
           setState('unavailable');
           setError(data.error || 'This installation link is unavailable or has expired.');
           return;
@@ -109,6 +133,7 @@ export const InstallationWizard: React.FC = () => {
         setError(data.error || 'Installation could not be completed.');
         return;
       }
+      updateInstallerHistoryState();
       setAdminPassword('');
       setAdminPasswordConfirmation('');
       setState('complete');
