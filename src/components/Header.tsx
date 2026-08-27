@@ -454,12 +454,12 @@ export const Header: React.FC<HeaderProps> = ({
                 Release notes
               </button>
 
-              <button 
-                onClick={() => { onOpenModal('terms'); setUserMenuOpen(false); }}
-                className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors cursor-pointer"
+              <a
+                href="/legal/terms"
+                className="block w-full px-4 py-2 text-left hover:bg-[#f1f1f1] transition-colors"
               >
                 Terms and privacy
-              </button>
+              </a>
 
               {/* Log out — clears session */}
               <button 

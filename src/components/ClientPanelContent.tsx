@@ -821,8 +821,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       <footer className="app-footer">
         <div>&copy; Copyright 2026, Votion One™ Platform. All rights reserved.</div>
         <div className="footer-links">
-          <a href="#">Terms of service</a>
-          <a href="#">Privacy policy</a>
+          <a href="/legal/terms">Terms of service</a>
+          <a href="/legal/privacy">Privacy policy</a>
         </div>
       </footer>
 

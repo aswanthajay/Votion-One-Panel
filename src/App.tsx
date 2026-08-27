@@ -30,6 +30,7 @@ const ReimageRequestsPanel = lazy(() => import('./components/ReimageRequestsPane
 const OperatorReimagePanel = lazy(() => import('./components/OperatorReimagePanel').then(module => ({ default: module.OperatorReimagePanel })));
 const BillingOperationsPanel = lazy(() => import('./components/BillingOperationsPanel').then(module => ({ default: module.BillingOperationsPanel })));
 const SupportCenter = lazy(() => import('./components/SupportCenter').then(module => ({ default: module.SupportCenter })));
+const LegalPages = lazy(() => import('./components/LegalPages').then(module => ({ default: module.LegalPages })));
 
 export type ViewMode =
   | 'overview'
@@ -372,6 +373,12 @@ export const App: React.FC = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
+      <Route path="/legal/terms" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="terms" /></Suspense>} />
+      <Route path="/legal/privacy" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="privacy" /></Suspense>} />
+      <Route path="/legal/acceptable-use" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="acceptable-use" /></Suspense>} />
+      <Route path="/legal/service-level" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="service-level" /></Suspense>} />
+      <Route path="/legal/billing" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="billing" /></Suspense>} />
+      <Route path="/legal/data-processing" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="data-processing" /></Suspense>} />
       <Route path="*" element={<AppRouter />} />
     </Routes>
   </BrowserRouter>

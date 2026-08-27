@@ -387,11 +387,11 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                 {/* Terms line */}
                 <p className="text-[11px] text-[#656b6b] leading-relaxed -mt-1">
                   By clicking the Log in button, you agree to VOTION&apos;s{' '}
-                  <a href="#" className="underline underline-offset-2 hover:opacity-70">
+                  <a href="/legal/terms" className="underline underline-offset-2 hover:opacity-70">
                     Terms of Service
                   </a>{' '}
                   and{' '}
-                  <a href="#" className="underline underline-offset-2 hover:opacity-70">
+                  <a href="/legal/privacy" className="underline underline-offset-2 hover:opacity-70">
                     Privacy Policy
                   </a>
                   .
