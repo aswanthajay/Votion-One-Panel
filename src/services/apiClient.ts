@@ -1185,10 +1185,10 @@ class ApiClient {
   /**
    * Fetch Cluster Pricing & Tier Plans
    */
-  async getPricing() {
+  async getPricing(): Promise<ApiPricingPlan[]> {
     const res = await this.apiFetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load upgrade plans.');
-    return Array.isArray(data.data) ? data.data : [];
+    return Array.isArray(data.data) ? data.data as ApiPricingPlan[] : [];
   }
 
   /**
@@ -1209,20 +1209,26 @@ class ApiClient {
     return data.data || { title: 'VOTION Terms', sections: [] };
   }
 
-  async requestUpgrade(plan: { id?: string; name: string; price?: string; vcpus?: number; ramGb?: number; storageGb?: number; bandwidth?: string }) {
+  async requestUpgrade(plan: ApiPricingPlan) {
+    const price = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: plan.currency,
+      maximumFractionDigits: 2,
+    }).format(plan.monthlyPriceCents / 100);
     const details = [
-      plan.price ? `Listed price: ${plan.price}` : null,
-      plan.vcpus ? `Dedicated vCPUs: ${plan.vcpus}` : null,
-      plan.ramGb ? `RAM: ${plan.ramGb} GB` : null,
-      plan.storageGb ? `Storage: ${plan.storageGb} GB` : null,
-      plan.bandwidth ? `Bandwidth: ${plan.bandwidth}` : null,
-    ].filter(Boolean).join('; ');
+      `Plan ID: ${plan.id}`,
+      `Listed monthly price: ${price} ${plan.currency}`,
+      `vCPUs: ${plan.vcpuLimit}`,
+      `RAM: ${plan.ramGb} GB`,
+      `Storage: ${plan.diskGb} GB`,
+      plan.bandwidthGb === null ? 'Transfer: Unlimited' : `Transfer: ${plan.bandwidthGb} GB`,
+    ].join('; ');
     return this.createSupportTicket(
       `Upgrade request: ${plan.name}`,
       'Quota Upgrade',
       'high',
       undefined,
-      `Please review my request for the ${plan.name} plan.${details ? ` ${details}.` : ''} Please confirm availability, billing, and next steps.`,
+      `Please review my request for the ${plan.name} plan. ${details}. Please confirm availability, billing, and next steps.`,
     );
   }
 

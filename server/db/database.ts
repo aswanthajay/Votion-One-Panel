@@ -1452,7 +1452,8 @@ export class DatabaseService {
   // MODALS & TELEMETRY
   async getDownloads() { return CONSTANTS.downloads; }
   async getDataRoom() { return CONSTANTS.dataroom; }
-  async getPricing() { return CONSTANTS.pricing; }
+    async getPricing() { return await this.getPricingPlans(true); }
+
   async getReleaseNotes() { return []; }
   async getTerms() { return { title: 'VOTION Terms', sections: [] }; }
   async getHaFencing() { return []; }

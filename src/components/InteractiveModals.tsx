@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient, ApiSupportTicket, ApiTicketReply, ApiSupportAgent, SupportTicketPriority, SupportTicketStatus } from '../services/apiClient';
+import { apiClient, ApiPricingPlan, ApiSupportTicket, ApiTicketReply, ApiSupportAgent, SupportTicketPriority, SupportTicketStatus } from '../services/apiClient';
+
+const formatPlanPrice = (plan: ApiPricingPlan) => new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: plan.currency,
+  maximumFractionDigits: 2,
+}).format(plan.monthlyPriceCents / 100);
+
+const formatCapacity = (value: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 
 interface InteractiveModalsProps {
   activeModal: string | null;
@@ -28,6 +36,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
   const [ticketAssignmentFilter, setTicketAssignmentFilter] = useState('all');
   const [supportAgents, setSupportAgents] = useState<ApiSupportAgent[]>([]);
   const [isUpdatingTicketMeta, setIsUpdatingTicketMeta] = useState(false);
+  const [upgradePlanId, setUpgradePlanId] = useState<string | null>(null);
 
   // New Ticket Form State
   const [ticketSubject, setTicketSubject] = useState('');
@@ -64,6 +73,7 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
       setModalData(null);
       setModalError(null);
       setSelectedTicket(null);
+      setUpgradePlanId(null);
       setViewMode('list');
       setErrorMessage(null);
       return;
@@ -233,6 +243,9 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
 
   const openTicketCount = ticketsList.filter(ticket => ['open', 'in-progress', 'replied'].includes(ticket.status)).length;
   const unreadTicketCount = ticketsList.filter(ticket => ticket.unread).length;
+  const pricingPlans = Array.isArray(modalData)
+    ? (modalData as ApiPricingPlan[]).filter(plan => plan.isActive)
+    : [];
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
@@ -398,26 +411,29 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
             {(activeModal === 'pricing' || activeModal === 'upgrade') && (
               <div className="flex flex-col gap-4">
                 <div>
-                  <p className="font-semibold text-[#1a1a1a]">Choose an instance plan</p>
-                  <p className="mt-1 text-[#656b6b]">Submit a request and the Votion operations team will confirm availability, billing, and next steps.</p>
+                  <p className="font-semibold text-[#1a1a1a]">Available service plans</p>
+                  <p className="mt-1 text-[#656b6b]">Plans, currencies, and capacity are maintained in the pricing catalog. Select a plan to send its exact configuration to the operations team for availability and billing review.</p>
                 </div>
-                {Array.isArray(modalData) && modalData.length > 0 ? (
+                {pricingPlans.length > 0 ? (
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    {modalData.map((plan: any) => (
-                      <div key={plan.id} className={`flex flex-col justify-between rounded-xl border p-4 ${plan.popular ? 'border-[#1a1a1a] bg-[#fbfaf9]' : 'border-[#dedfdf]'}`}>
+                    {pricingPlans.map(plan => (
+                      <article key={plan.id} className="flex min-h-[248px] flex-col justify-between rounded-xl border border-[#dedfdf] bg-ink-card p-4">
                         <div>
-                          {plan.popular && <span className="mb-2 block w-fit rounded bg-[#1a1a1a] px-2 py-0.5 text-[10px] font-bold uppercase text-white">Recommended</span>}
-                          <div className="text-sm font-bold text-[#1a1a1a]">{plan.name}</div>
-                          <div className="my-2 text-base font-extrabold text-[#1a1a1a]">{plan.price || 'Contact us'}</div>
-                          <div className="space-y-1 text-[11px] text-[#656b6b]">
-                            {plan.vcpus && <div>• {plan.vcpus} dedicated vCPUs</div>}
-                            {plan.ramGb && <div>• {plan.ramGb} GB ECC RAM</div>}
-                            {plan.storageGb && <div>• {plan.storageGb} GB NVMe storage</div>}
-                            {plan.bandwidth && <div>• {plan.bandwidth} bandwidth</div>}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 text-sm font-bold text-[#1a1a1a]">{plan.name}</div>
+                            <span className="shrink-0 rounded border border-[#dedfdf] px-1.5 py-0.5 text-[10px] font-semibold text-[#656b6b]">{plan.currency}</span>
                           </div>
+                          <div className="mt-3 text-xl font-extrabold tracking-[-0.02em] text-[#1a1a1a]">{formatPlanPrice(plan)}<span className="ml-1 text-[11px] font-semibold text-[#656b6b]">/ month</span></div>
+                          <ul className="mt-4 space-y-1.5 text-[11px] leading-5 text-[#656b6b]">
+                            <li>{formatCapacity(plan.vcpuLimit)} vCPU{plan.vcpuLimit === 1 ? '' : 's'}</li>
+                            <li>{formatCapacity(plan.ramGb)} GB RAM</li>
+                            <li>{formatCapacity(plan.diskGb)} GB storage</li>
+                            <li>{plan.bandwidthGb === null ? 'Unlimited transfer' : `${formatCapacity(plan.bandwidthGb)} GB transfer / month`}</li>
+                          </ul>
                         </div>
                         <button type="button" disabled={isSubmitting} onClick={async () => {
                           setIsSubmitting(true);
+                          setUpgradePlanId(plan.id);
                           setErrorMessage(null);
                           try {
                             const res = await apiClient.requestUpgrade(plan);
@@ -425,18 +441,19 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
                           } catch (err) {
                             setErrorMessage(err instanceof Error ? err.message : 'Unable to submit the upgrade request.');
                           } finally {
+                            setUpgradePlanId(null);
                             setIsSubmitting(false);
                           }
-                        }} className="btn-primary mt-4 w-full cursor-pointer py-1.5 text-[11px] disabled:opacity-50">
-                          {isSubmitting ? 'Submitting…' : 'Request upgrade'}
+                        }} className="btn-primary mt-5 w-full cursor-pointer py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50">
+                          {isSubmitting && upgradePlanId === plan.id ? 'Submitting…' : 'Request this plan'}
                         </button>
-                      </div>
+                      </article>
                     ))}
                   </div>
                 ) : (
                   <div className="modal-empty-state">
-                    <p className="font-semibold text-[#1a1a1a]">No upgrade plans are available</p>
-                    <p className="mt-1 text-[#656b6b]">Please contact support if you need a custom capacity review.</p>
+                    <p className="font-semibold text-[#1a1a1a]">No active service plans are published</p>
+                    <p className="mt-1 text-[#656b6b]">A Votion administrator can publish plans from Billing Operations. For custom capacity, open a support request.</p>
                   </div>
                 )}
               </div>
