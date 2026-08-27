@@ -1,7 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
-import { apiClient, ApiTask, ApiProxmoxConnection } from '../services/apiClient';
+import { apiClient, ApiTask, ApiProxmoxConnectionOverview } from '../services/apiClient';
 import { NotificationBell } from './NotificationBell';
+import { GLOBAL_WORKSPACE_SCOPE, type WorkspaceScope } from '../workspaceScope';
+
+interface WorkspaceLocation {
+  id: string;
+  name: string;
+  status: string;
+  vmCount: number;
+  nodeCount?: number;
+}
 
 interface HeaderProps {
   currentView: string;
@@ -11,6 +20,8 @@ interface HeaderProps {
   onOpenModal: (modalName: string) => void;
   onOpenAlertRules?: () => void;
   onToggleMobileSidebar: () => void;
+  workspaceScope: WorkspaceScope;
+  onWorkspaceScopeChange: (scope: WorkspaceScope) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -21,18 +32,20 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenModal,
   onOpenAlertRules,
   onToggleMobileSidebar,
+  workspaceScope,
+  onWorkspaceScopeChange,
 }) => {
   const [tasksOpen, setTasksOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [selectedWorkspace, setSelectedWorkspace] = useState('Global');
   const [searchQuery, setSearchQuery] = useState('');
+  const [workspaceOptionsLoaded, setWorkspaceOptionsLoaded] = useState(false);
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<ApiTask | null>(null);
   const [liveTasks, setLiveTasks] = useState<ApiTask[]>([]);
   const [inboxCount, setInboxCount] = useState(0);
   const [currentUserName, setCurrentUserName] = useState('');
-  const [locations, setLocations] = useState<ApiProxmoxConnection[]>([]);
+  const [locations, setLocations] = useState<WorkspaceLocation[]>([]);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -51,14 +64,60 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Load live user name and tasks from backend
+  const loadWorkspaceLocations = async (): Promise<WorkspaceLocation[]> => {
+    if (userRole === 'admin') {
+      const [connections, fleetVms] = await Promise.all([
+        apiClient.getProxmoxConnectionOverview().catch(() => [] as ApiProxmoxConnectionOverview[]),
+        apiClient.getVMs().catch(() => []),
+      ]);
+      if (connections.length > 0) {
+        return connections.map(connection => ({
+          id: connection.id,
+          name: connection.name,
+          status: connection.status,
+          vmCount: connection.vmCount,
+          nodeCount: connection.nodeCount,
+        }));
+      }
+
+      const locationsById = new Map<string, WorkspaceLocation>();
+      fleetVms.forEach(vm => {
+        if (!vm.proxmoxConnectionId) return;
+        const existing = locationsById.get(vm.proxmoxConnectionId);
+        locationsById.set(vm.proxmoxConnectionId, {
+          id: vm.proxmoxConnectionId,
+          name: vm.proxmoxConnectionName || 'Service location',
+          status: 'available',
+          vmCount: (existing?.vmCount || 0) + 1,
+        });
+      });
+      return [...locationsById.values()];
+    }
+
+    const clientVms = await apiClient.getClientVMs().catch(() => []);
+    const locationsById = new Map<string, WorkspaceLocation>();
+    clientVms.forEach(vm => {
+      if (!vm.proxmoxConnectionId) return;
+      const existing = locationsById.get(vm.proxmoxConnectionId);
+      locationsById.set(vm.proxmoxConnectionId, {
+        id: vm.proxmoxConnectionId,
+        name: vm.proxmoxConnectionName || 'Service location',
+        status: 'available',
+        vmCount: (existing?.vmCount || 0) + 1,
+      });
+    });
+    return [...locationsById.values()];
+  };
+
+  // Load live user name, tasks, and role-appropriate scope inventory.
   useEffect(() => {
+    setWorkspaceOptionsLoaded(false);
     const loadHeaderData = async () => {
       try {
-        const [profile, tasks, proxmoxConns, supportTickets] = await Promise.all([
+        const [profile, tasks, workspaceLocations, supportTickets] = await Promise.all([
           apiClient.getUserProfile(),
           apiClient.getTasks(),
-          userRole === 'admin' ? apiClient.getProxmoxConnections().catch(() => []) : Promise.resolve([]),
+          loadWorkspaceLocations(),
           apiClient.getSupportTickets().catch(() => []),
         ]);
         if (profile) {
@@ -67,20 +126,27 @@ export const Header: React.FC<HeaderProps> = ({
         if (tasks) {
           setLiveTasks(tasks);
         }
-        if (proxmoxConns && Array.isArray(proxmoxConns)) {
-          setLocations(proxmoxConns);
-        }
+        setLocations(workspaceLocations);
+        setWorkspaceOptionsLoaded(true);
         setInboxCount(Array.isArray(supportTickets) ? supportTickets.filter(ticket => ticket.unread).length : 0);
       } catch {
         // Fallback: read from localStorage
         const email = apiClient.getUserEmail();
         setCurrentUserName(email.split('@')[0] || 'Account');
+        setWorkspaceOptionsLoaded(true);
       }
     };
     loadHeaderData();
     const interval = setInterval(loadHeaderData, 10000);
     return () => clearInterval(interval);
   }, [userRole]);
+
+  useEffect(() => {
+    if (!workspaceOptionsLoaded || !workspaceScope.connectionId || locations.length === 0) return;
+    if (!locations.some(location => location.id === workspaceScope.connectionId)) {
+      onWorkspaceScopeChange(GLOBAL_WORKSPACE_SCOPE);
+    }
+  }, [locations, onWorkspaceScopeChange, workspaceOptionsLoaded, workspaceScope.connectionId]);
 
   const filteredLocations = locations.filter(loc => loc.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -114,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="header-workspace-control flex items-center gap-2 border border-[#1a1a1a] rounded-lg px-3 py-1 bg-white hover:bg-[#f1f1f1] transition-all cursor-pointer font-semibold text-sm text-[#1a1a1a]"
             title="Select Workspace or Company"
           >
-            <span>{selectedWorkspace}</span>
+            <span>{workspaceScope.name}</span>
             <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
           </button>
 
@@ -134,36 +200,41 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-xs font-bold text-[#1a1a1a] px-2 py-1">Global</span>
                 <button 
                   className={`block w-full text-left px-3 py-2 rounded text-xs transition-colors ${
-                    selectedWorkspace === 'Global' ? 'bg-[#f1f1f1] font-semibold text-[#1a1a1a]' : 'text-[#656b6b] hover:bg-[#f1f1f1] hover:text-[#1a1a1a]'
+                    workspaceScope.connectionId === null ? 'bg-[#f1f1f1] font-semibold text-[#1a1a1a]' : 'text-[#656b6b] hover:bg-[#f1f1f1] hover:text-[#1a1a1a]'
                   }`}
                   onClick={() => {
-                    setSelectedWorkspace('Global');
+                    onWorkspaceScopeChange(GLOBAL_WORKSPACE_SCOPE);
+                    setSearchQuery('');
                     setWorkspaceMenuOpen(false);
                   }}
                 >
-                  Global
-                  {selectedWorkspace === 'Global' && <span className="ml-2 text-[#16a34a] font-bold">✓</span>}
+                  <span>Global</span>
+                  <span className="mt-0.5 block text-[10px] font-normal text-[#8a9090]">All accessible infrastructure</span>
+                  {workspaceScope.connectionId === null && <span className="ml-2 text-[#16a34a] font-bold">✓</span>}
                 </button>
               </div>
               <div className="flex flex-col gap-1 border-t border-[#dedfdf] pt-2">
-                <span className="text-xs font-bold text-[#1a1a1a] px-2 py-1">Datacenters</span>
-                {filteredLocations.length > 0 ? filteredLocations.map(loc => (
+                <span className="text-xs font-bold text-[#1a1a1a] px-2 py-1">Service locations</span>
+                {!workspaceOptionsLoaded ? (
+                  <div className="px-2 py-2 text-xs text-[#a7aaaa]">Loading accessible locations…</div>
+                ) : filteredLocations.length > 0 ? filteredLocations.map(loc => (
                   <button
                     key={loc.id}
                     onClick={() => {
-                      setSelectedWorkspace(loc.name);
+                      onWorkspaceScopeChange({ connectionId: loc.id, name: loc.name });
+                      setSearchQuery('');
                       setWorkspaceMenuOpen(false);
                     }}
                     className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors cursor-pointer flex items-center justify-between ${
-                      selectedWorkspace === loc.name ? 'bg-[#f1f1f1] font-semibold text-[#1a1a1a]' : 'text-[#656b6b] hover:bg-[#f1f1f1] hover:text-[#1a1a1a]'
+                      workspaceScope.connectionId === loc.id ? 'bg-[#f1f1f1] font-semibold text-[#1a1a1a]' : 'text-[#656b6b] hover:bg-[#f1f1f1] hover:text-[#1a1a1a]'
                     }`}
                   >
-                    <span>{loc.name}</span>
-                    {selectedWorkspace === loc.name && <span className="text-[#10b981] font-bold">✓</span>}
+                    <span className="min-w-0"><span className="block truncate">{loc.name}</span><span className="mt-0.5 block text-[10px] font-normal text-[#8a9090]">{loc.vmCount} service{loc.vmCount === 1 ? '' : 's'}{loc.nodeCount !== undefined ? ` · ${loc.nodeCount} node${loc.nodeCount === 1 ? '' : 's'}` : ''}</span></span>
+                    {workspaceScope.connectionId === loc.id && <span className="ml-2 text-[#10b981] font-bold">✓</span>}
                   </button>
                 )) : (
                   <div className="px-2 py-2 text-xs text-[#a7aaaa]">
-                    No locations found. Add one in Admin Settings.
+                    {userRole === 'admin' ? 'No Proxmox connections are configured yet.' : 'No service locations are assigned to this account.'}
                   </div>
                 )}
               </div>

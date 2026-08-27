@@ -773,12 +773,12 @@ export class DatabaseService {
     return { id, status: 'maintenance' };
   }
 
-  // VMS & EXPIRY SUSPENSION ENGINE
-  async getVMs(ownerEmail?: string, vmid?: number) {
-    let query = "SELECT v.*, pc.name AS proxmox_connection_name FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id";
-    let params: any[] = [];
-    let conditions = [];
-    
+    // VMS & EXPIRY SUSPENSION ENGINE
+  async getVMs(ownerEmail?: string, vmid?: number, proxmoxConnectionId?: string) {
+    let query = 'SELECT v.*, pc.name AS proxmox_connection_name FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id';
+    const params: unknown[] = [];
+    const conditions: string[] = [];
+
     if (vmid) {
       params.push(vmid);
       conditions.push(`vmid = $${params.length}`);
@@ -787,8 +787,14 @@ export class DatabaseService {
       params.push(ownerEmail.toLowerCase().trim());
       conditions.push(`owner_email = $${params.length}`);
     }
-    
-    if (conditions.length > 0) query += " WHERE " + conditions.join(" AND ");
+    if (proxmoxConnectionId) {
+      params.push(proxmoxConnectionId.trim());
+      conditions.push(`v.proxmox_connection_id = $${params.length}`);
+    }
+
+    if (conditions.length > 0) query += ` WHERE ${conditions.join(' AND ')}`;
+
+
     
     const res = await pgPool.query(query, params);
     return res.rows.map(v => ({

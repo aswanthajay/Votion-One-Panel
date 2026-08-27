@@ -21,7 +21,14 @@ interface StellarNode {
   uptimeDays: number;
 }
 
-export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu' | 'lxc'; onOpenModal: (modalName: string) => void }> = ({ pageTitle = 'Dashboard', typeFilter, onOpenModal }) => {
+export const DashboardContent: React.FC<{
+  pageTitle?: string;
+  typeFilter?: 'qemu' | 'lxc';
+  onOpenModal: (modalName: string) => void;
+  workspaceConnectionId?: string;
+  workspaceName?: string;
+}> = ({ pageTitle = 'Dashboard', typeFilter, onOpenModal, workspaceConnectionId, workspaceName = 'Global' }) => {
+
   const [nodes, setNodes] = useState<StellarNode[]>([]);
   const [vms, setVMs] = useState<ApiVM[]>([]);
   const [accounts, setAccounts] = useState<ApiAccount[]>([]);
@@ -75,9 +82,9 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
   const loadData = async () => {
     try {
       const [apiNodes, apiOverview, apiVMs, apiAccounts, apiTickets] = await Promise.all([
-        apiClient.getAdminNodes(),
-        apiClient.getClusterOverview(),
-        apiClient.getVMs(),
+        apiClient.getAdminNodes(workspaceConnectionId),
+        apiClient.getClusterOverview(workspaceConnectionId),
+        apiClient.getVMs(undefined, workspaceConnectionId),
         apiClient.getAccounts(),
         apiClient.getSupportTickets(),
       ]);
@@ -147,7 +154,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
     loadData();
     const interval = setInterval(loadData, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [workspaceConnectionId]);
 
   const handleToggleSuspend = async (vmid: number, isSuspended: boolean) => {
     try {
@@ -253,6 +260,7 @@ export const DashboardContent: React.FC<{ pageTitle?: string; typeFilter?: 'qemu
           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#8a9090]"><span className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />Control plane</div>
           <h1 className="page-heading">{pageTitle}</h1>
           <p className="mt-2 text-sm text-[#656b6b]">Manage compute nodes, guest allocations, and cluster health from one operational view.</p>
+          <p className="mt-2 text-xs font-semibold text-[#2563eb]">Scope: {workspaceName}</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-[#656b6b]">
           <span>{lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Waiting for telemetry'}</span>

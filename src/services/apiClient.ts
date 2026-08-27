@@ -524,8 +524,9 @@ class ApiClient {
   /**
    * PROMPT 5: Client Portal Specific Methods
    */
-  async getClientVMs(): Promise<ApiVM[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms`, {
+  async getClientVMs(connectionId?: string): Promise<ApiVM[]> {
+    const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms${query}`, {
       headers: this.getHeaders(),
     });
     const data = await this.readApiResponse(res, 'Unable to load client virtual machines.');
@@ -830,14 +831,16 @@ class ApiClient {
   /**
    * PROMPT 3: Admin Node Monitoring & Cluster Overview APIs
    */
-  async getAdminNodes(): Promise<ApiNode[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/nodes`, { headers: this.getHeaders() });
+  async getAdminNodes(connectionId?: string): Promise<ApiNode[]> {
+    const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/nodes${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load cluster nodes.');
     return data.data || [];
   }
 
-  async getClusterOverview(): Promise<ApiClusterOverview | null> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/cluster/overview`, { headers: this.getHeaders() });
+  async getClusterOverview(connectionId?: string): Promise<ApiClusterOverview | null> {
+    const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/cluster/overview${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load cluster overview.');
     return data.data || null;
   }
@@ -1091,10 +1094,12 @@ class ApiClient {
   /**
    * Fetch VM Allocations from Express API
    */
-  async getVMs(ownerEmail?: string): Promise<ApiVM[]> {
-    const url = ownerEmail 
-      ? `${API_BASE_URL}/vms?ownerEmail=${encodeURIComponent(ownerEmail)}` 
-      : `${API_BASE_URL}/vms`;
+  async getVMs(ownerEmail?: string, connectionId?: string): Promise<ApiVM[]> {
+    const params = new URLSearchParams();
+    if (ownerEmail) params.set('ownerEmail', ownerEmail);
+    if (connectionId) params.set('connectionId', connectionId);
+    const query = params.toString();
+    const url = query ? `${API_BASE_URL}/vms?${query}` : `${API_BASE_URL}/vms`;
     const res = await this.apiFetch(url, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load virtual machines.');
     return data.data || [];

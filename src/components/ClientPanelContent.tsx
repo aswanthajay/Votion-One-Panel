@@ -10,9 +10,10 @@ const VmBackupPanel = lazy(() => import('./VmBackupPanel'));
 interface ClientPanelContentProps {
   onOpenModal: (modalName: string) => void;
   filter?: string;
+  workspaceConnectionId?: string;
 }
 
-export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter }) => {
+export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId }) => {
   const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
   const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
   const [vmMetadata, setVmMetadata] = useState<ApiVmMetadata | null>(null);
@@ -63,12 +64,10 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   // PROMPT 5.1: Fetch ONLY assigned servers for logged-in client via GET /api/client/vms
   const loadClientVMs = async () => {
     try {
-      const vms = await apiClient.getClientVMs();
+      const vms = await apiClient.getClientVMs(workspaceConnectionId);
       setClientVMs(vms);
       setLoadError(null);
-      if (vms.length > 0 && !selectedVm) {
-        setSelectedVm(vms[0]);
-      }
+      setSelectedVm(previous => vms.find(vm => vm.vmid === previous?.vmid) || vms[0] || null);
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
 
@@ -80,10 +79,11 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   };
 
   useEffect(() => {
+    setIsLoading(true);
     loadClientVMs();
     const interval = setInterval(loadClientVMs, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [workspaceConnectionId]);
 
   useEffect(() => {
     let cancelled = false;

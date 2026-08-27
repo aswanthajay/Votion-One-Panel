@@ -85,15 +85,23 @@ apiRouter.get('/status', async (req, res) => {
 
 // PROMPT 3: ADMIN NODE MONITORING & CLUSTER OVERVIEW ENDPOINTS
 const handleAdminNodes = async (req: any, res: any) => {
-  const nodes = await proxmoxApi.getNodeMetrics();
+  const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
+    ? req.query.connectionId.trim()
+    : undefined;
+  const nodes = await proxmoxApi.getNodeMetrics(undefined, connectionId);
   res.json({ success: true, count: nodes.length, data: nodes });
 };
+
 apiRouter.get('/admin/nodes', handleAdminNodes);
 
 const handleClusterOverview = async (req: any, res: any) => {
-  const overview = await proxmoxApi.getClusterOverview();
+  const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
+    ? req.query.connectionId.trim()
+    : undefined;
+  const overview = await proxmoxApi.getClusterOverview(connectionId);
   res.json({ success: true, data: overview });
 };
+
 apiRouter.get('/admin/cluster/overview', handleClusterOverview);
 
 // 2. GET /api/v1/accounts (Registered Accounts List)
@@ -782,12 +790,13 @@ apiRouter.delete('/vms/:vmid/snapshots/:name', async (req, res) => {
 
 // 12. PROXMOX VMS, EXPIRY & REINSTALLATION ENDPOINTS
 apiRouter.get('/vms', async (req, res) => {
-  const { ownerEmail, vmid } = req.query;
+  const { ownerEmail, vmid, connectionId } = req.query;
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
   const parsedEmail = ownerEmail ? String(ownerEmail) : undefined;
+  const parsedConnectionId = typeof connectionId === 'string' && connectionId.trim() ? connectionId.trim() : undefined;
 
   try {
-    const vms = await dbService.getVMs(parsedEmail, parsedVmid);
+    const vms = await dbService.getVMs(parsedEmail, parsedVmid, parsedConnectionId);
     res.json({ success: true, count: vms.length, data: vms });
   } catch (err: any) {
     res.status(503).json({ success: false, error: err?.message || 'Unable to read VMs from the local database' });

@@ -121,7 +121,10 @@ clientRouter.post('/vms/:vmid/reimage-requests/:requestId/cancel', async (req, r
 clientRouter.get('/vms', async (req, res) => {
   const userEmail = (req as any).authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const vms = await proxmoxApi.getLiveVMs(userEmail);
+  const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
+    ? req.query.connectionId.trim()
+    : undefined;
+  const vms = await proxmoxApi.getLiveVMs(userEmail, connectionId);
   res.json({ success: true, count: vms.length, data: vms });
 });
 

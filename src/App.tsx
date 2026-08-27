@@ -12,6 +12,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ToastProvider } from './components/ToastContext';
 import { RouteNotFound } from './components/RouteNotFound';
+import { readWorkspaceScope, saveWorkspaceScope, type WorkspaceScope } from './workspaceScope';
 
 const DashboardContent = lazy(() => import('./components/DashboardContent'));
 const OverviewDashboard = lazy(() => import('./components/OverviewDashboard').then(module => ({ default: module.OverviewDashboard })));
@@ -142,8 +143,9 @@ const OverlayLoading = () => (
 const ClientPanelRoute: React.FC<{
   filter?: ClientFilter;
   onOpenModal: (modalName: string) => void;
-}> = ({ filter, onOpenModal }) => (
-  <ClientPanelContent onOpenModal={onOpenModal} filter={filter} />
+  workspaceConnectionId?: string;
+}> = ({ filter, onOpenModal, workspaceConnectionId }) => (
+  <ClientPanelContent onOpenModal={onOpenModal} filter={filter} workspaceConnectionId={workspaceConnectionId} />
 );
 
 const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
@@ -173,6 +175,7 @@ const AppShell: React.FC = () => {
     const savedRole = localStorage.getItem('votion_user_role');
     return savedRole === 'admin' ? 'admin' : 'client';
   });
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>(() => readWorkspaceScope());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isCmdOpen, setIsCmdOpen] = useState(false);
@@ -227,6 +230,11 @@ const AppShell: React.FC = () => {
     });
   };
 
+  const handleWorkspaceScopeChange = (scope: WorkspaceScope) => {
+    setWorkspaceScope(scope);
+    saveWorkspaceScope(scope);
+  };
+
   const handleToggleRole = () => {
     const nextRole: UserRole = activeRole === 'admin' ? 'client' : 'admin';
     localStorage.setItem('votion_user_role', nextRole);
@@ -248,6 +256,8 @@ const AppShell: React.FC = () => {
           onOpenModal={handleOpenModal}
           onOpenAlertRules={activeRole === 'admin' ? () => startTransition(() => setAlertRulesOpen(true)) : undefined}
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(previous => !previous)}
+          workspaceScope={workspaceScope}
+          onWorkspaceScopeChange={handleWorkspaceScopeChange}
         />
         <div className="app-body">
           <Sidebar
@@ -273,11 +283,11 @@ const AppShell: React.FC = () => {
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-                            <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} /> :   <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS.dashboard} element={activeRole === 'admin' ? <DashboardContent onOpenModal={handleOpenModal} /> : <Navigate to={VIEW_PATHS.overview} replace />} />
-              <Route path={VIEW_PATHS.instances} element={activeRole === 'admin' ? <DashboardContent pageTitle="Virtual Machines" onOpenModal={handleOpenModal} /> : <ClientPanelRoute onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['instances-qemu']} element={activeRole === 'admin' ? <DashboardContent pageTitle="QEMU Virtual Machines" typeFilter="qemu" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['instances-lxc']} element={activeRole === 'admin' ? <DashboardContent pageTitle="LXC Containers" typeFilter="lxc" onOpenModal={handleOpenModal} /> : <ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
+                            <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} />} />
+              <Route path={VIEW_PATHS.dashboard} element={activeRole === 'admin' ? <DashboardContent onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS.instances} element={activeRole === 'admin' ? <DashboardContent pageTitle="Virtual Machines" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['instances-qemu']} element={activeRole === 'admin' ? <DashboardContent pageTitle="QEMU Virtual Machines" typeFilter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['instances-lxc']} element={activeRole === 'admin' ? <DashboardContent pageTitle="LXC Containers" typeFilter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
               <Route path={VIEW_PATHS['audit-logs']} element={activeRole === 'admin' ? <ClusterAuditLogs /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['operator-reimage']} element={activeRole === 'admin' ? <OperatorReimagePanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
@@ -287,13 +297,13 @@ const AppShell: React.FC = () => {
               <Route path={VIEW_PATHS['system-settings']} element={activeRole === 'admin' ? <SystemSettings /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-management']} element={activeRole === 'admin' ? <UserManagement /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['proxmox-connections']} element={activeRole === 'admin' ? <ProxmoxConnections /> : <Navigate to={VIEW_PATHS.overview} replace />} />
-              <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-vnc']} element={<ClientPanelRoute filter="vnc" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-metrics']} element={<ClientPanelRoute filter="metrics" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-firewall']} element={<ClientPanelRoute filter="firewall" onOpenModal={handleOpenModal} />} />
-              <Route path={VIEW_PATHS['client-instances-backups']} element={<ClientPanelRoute filter="backups" onOpenModal={handleOpenModal} />} />
+              <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-qemu']} element={<ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-lxc']} element={<ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-vnc']} element={<ClientPanelRoute filter="vnc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-metrics']} element={<ClientPanelRoute filter="metrics" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-firewall']} element={<ClientPanelRoute filter="firewall" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-instances-backups']} element={<ClientPanelRoute filter="backups" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
               <Route path="*" element={<RouteNotFound />} />
             </Routes>
           </Suspense>

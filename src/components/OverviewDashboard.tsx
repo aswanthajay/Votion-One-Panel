@@ -143,7 +143,12 @@ const customerAuditDetail = (entry: ApiAuditLog): string => {
 };
 
 /* ---------------- main ---------------- */
-export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal: (m: string) => void }> = ({ onOpenManage, onOpenModal }) => {
+export const OverviewDashboard: React.FC<{
+  onOpenManage: () => void;
+  onOpenModal: (m: string) => void;
+  workspaceConnectionId?: string;
+  workspaceName?: string;
+}> = ({ onOpenManage, onOpenModal, workspaceConnectionId, workspaceName = 'Global' }) => {
   const [vms, setVms] = useState<ApiVM[]>([]);
   const [liveTelemetry, setLiveTelemetry] = useState<Record<number, LiveTelemetry>>({});
   const [histMetrics, setHistMetrics] = useState<Record<number, { history: HistPoint[]; aggregations?: any }>>({});
@@ -215,7 +220,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
     const t0 = Date.now();
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        vmsRes = await apiClient.getClientVMs();
+        vmsRes = await apiClient.getClientVMs(workspaceConnectionId);
         fleetOk = true;
         break;
       } catch {
@@ -229,7 +234,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
     if (fleetOk) {
       setVms(vmsRes);
       if (!backgroundOnly || selectedVmid === null) {
-        setSelectedVmid(prev => (prev === null && vmsRes.length) ? vmsRes[0].vmid : prev);
+        setSelectedVmid(previous => vmsRes.some(vm => vm.vmid === previous) ? previous : (vmsRes[0]?.vmid || null));
       }
       setFleetLoading(false); // STAGE 1: roster renders immediately
     } else {
@@ -285,6 +290,9 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
 
   useEffect(() => {
     mountedRef.current = true;
+    setFleetLoading(true);
+    setLiveTelemetry({});
+    setHistMetrics({});
     loadData(false);
     // Background pulse: light streams every 5s, full refresh every 20s (self-heals after blips)
     const ivLight = setInterval(() => loadData(true), 5000);
@@ -292,9 +300,10 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
     const ageTick = setInterval(() => setDataAge(a => a + 1), 1000);
     return () => { mountedRef.current = false; clearInterval(ivLight); clearInterval(ivFull); clearInterval(ageTick); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [workspaceConnectionId]);
 
   const openTickets = tickets.filter(t => t.status === 'pending' || t.status === 'open' || t.status === 'in-progress');
+  const scopeLabel = workspaceName === 'Global' ? 'All service locations' : workspaceName;
   const matchPlan = (vcpus: number, ramGb: number, diskGb: number) => {
     const eligible = [...billingPlans].filter(plan => plan.isActive).sort((a, b) => a.monthlyPriceCents - b.monthlyPriceCents);
     return eligible.find(plan => vcpus <= plan.vcpuLimit && ramGb <= plan.ramGb && diskGb <= plan.diskGb) || eligible[eligible.length - 1] || null;
@@ -434,7 +443,7 @@ export const OverviewDashboard: React.FC<{ onOpenManage: () => void; onOpenModal
           <h1 className="page-heading !text-[22px] !mb-0 !leading-none truncate">Overview</h1>
           <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate">
             {loadDone
-              ? `Fleet of ${vms.length} instance${vms.length === 1 ? '' : 's'} · refreshed ${dataAge}s ago`
+              ? `Fleet of ${vms.length} instance${vms.length === 1 ? '' : 's'} · ${scopeLabel} · refreshed ${dataAge}s ago`
               : 'Synchronizing with the Stellar Engine…'}
           </p>
         </div>

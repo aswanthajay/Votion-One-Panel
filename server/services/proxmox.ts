@@ -107,10 +107,18 @@ export class ProxmoxApiService {
    * shows REAL telemetry from the machine running this panel (never fake fabricated numbers),
    * and the response is flagged so the UI can label it clearly.
    */
-  async getNodeMetrics(nodeName?: string): Promise<NodeMetric[]> {
-    const connections = await dbService.getProxmoxConnectionCredentials();
+    async getNodeMetrics(nodeName?: string, proxmoxConnectionId?: string): Promise<NodeMetric[]> {
+    const allConnections = await dbService.getProxmoxConnectionCredentials();
+    const connections = Array.isArray(allConnections) ? allConnections : [];
+    const scopedConnections = proxmoxConnectionId
+      ? connections.filter(connection => connection.id === proxmoxConnectionId)
+      : connections;
 
-    const metricsPromises = (connections.length > 0 ? connections : [null]).map(async (conn, connIdx) => {
+    const metricsSources = scopedConnections.length > 0
+      ? scopedConnections
+      : (proxmoxConnectionId ? [] : [null]);
+    const metricsPromises = metricsSources.map(async (conn, connIdx) => {
+
       if (!conn) {
         // No Proxmox connection configured: show real local host metrics
         const local = this.getLocalHostMetrics();
@@ -423,14 +431,17 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
   /**
    * Get VMs for a specific user, enriched with real-time telemetry from Proxmox
    */
-  async getLiveVMs(ownerEmail?: string) {
-    const vms = await dbService.getVMs(ownerEmail);
-    const conns = await dbService.getProxmoxConnectionCredentials();
-    
-    if (!conns || conns.length === 0) return vms;
-    
-    // We assume all VMs belong to the first cluster connection for simplicity
-    const conn = conns[0];
+    async getLiveVMs(ownerEmail?: string, proxmoxConnectionId?: string) {
+    const vms = await dbService.getVMs(ownerEmail, undefined, proxmoxConnectionId);
+    const connections = await dbService.getProxmoxConnectionCredentials();
+    const conns = Array.isArray(connections) ? connections : [];
+    if (conns.length === 0) return vms;
+
+    const conn = proxmoxConnectionId
+      ? conns.find(connection => connection.id === proxmoxConnectionId)
+      : conns[0];
+    if (!conn) return vms;
+
     const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const bareHost = cleanHost.split(':')[0];
     
@@ -551,10 +562,24 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
   /**
    * Aggregated Cluster Overview Metrics
    */
-  async getClusterOverview() {
-    const nodes = await this.getNodeMetrics();
-    const vms = await dbService.getVMs();
-    const clusterStatus = await this.getClusterStatus();
+  async getClusterOverview(proxmoxConnectionId?: string) {
+    const nodes = await this.getNodeMetrics(undefined, proxmoxConnectionId);
+    const vms = await dbService.getVMs(undefined, undefined, proxmoxConnectionId);
+    const scopedConnection = proxmoxConnectionId
+      ? await dbService.getProxmoxConnectionCredentials(proxmoxConnectionId)
+      : null;
+    const matchingConnection = scopedConnection && !Array.isArray(scopedConnection)
+      ? scopedConnection
+      : null;
+    const onlineNodes = nodes.filter(node => node.status === 'online').length;
+    const clusterStatus = matchingConnection
+      ? {
+          clusterName: matchingConnection.name,
+          totalNodes: nodes.length,
+          onlineNodes,
+          status: nodes.length === 0 || onlineNodes === nodes.length ? 'healthy' : 'degraded',
+        }
+      : await this.getClusterStatus();
 
     const totalCpuPct = +(nodes.reduce((acc, n) => acc + Number(n.cpuUsagePct), 0) / (nodes.length || 1)).toFixed(1);
     const totalRamUsedBytes = nodes.reduce((acc, n) => acc + Number(n.ramUsageBytes), 0);
