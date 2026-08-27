@@ -9,6 +9,7 @@ export const InstallationWizard: React.FC = () => {
   const [isRedeemingCode, setIsRedeemingCode] = useState(false);
   const [databaseUrl, setDatabaseUrl] = useState('');
   const [publicAppUrl, setPublicAppUrl] = useState(() => window.location.origin);
+  const [applicationPort, setApplicationPort] = useState(() => String(window.location.port || 5000));
   const [corsOrigins, setCorsOrigins] = useState(() => window.location.origin);
   const [adminName, setAdminName] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -118,6 +119,11 @@ export const InstallationWizard: React.FC = () => {
       setError('Verify the database connection before completing installation.');
       return;
     }
+    const normalizedPort = applicationPort.trim();
+    if (!/^\d{1,5}$/.test(normalizedPort) || Number(normalizedPort) < 1 || Number(normalizedPort) > 65535) {
+      setError('Use an application port between 1 and 65535.');
+      return;
+    }
     if (adminPassword.length < 12) {
       setError('Use an administrator password with at least 12 characters.');
       return;
@@ -133,7 +139,7 @@ export const InstallationWizard: React.FC = () => {
         method: 'POST',
         headers: requestHeaders,
         credentials: 'same-origin',
-        body: JSON.stringify({ databaseUrl, publicAppUrl, corsOrigins, adminName, adminPassword }),
+        body: JSON.stringify({ databaseUrl, publicAppUrl, port: Number(applicationPort), corsOrigins, adminName, adminPassword }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.success) {
@@ -212,6 +218,11 @@ export const InstallationWizard: React.FC = () => {
                   <div>
                     <label htmlFor="installer-public-url" className="mb-1.5 block text-sm text-[#1a1a1a]">Public application URL</label>
                     <input id="installer-public-url" value={publicAppUrl} onChange={(event) => setPublicAppUrl(event.target.value)} type="url" autoComplete="url" className="w-full rounded-md border border-[#111111] px-3 py-2.5 text-sm text-[#1a1a1a] outline-none focus:ring-2 focus:ring-black/10" required />
+                  </div>
+                  <div>
+                    <label htmlFor="installer-application-port" className="mb-1.5 block text-sm text-[#1a1a1a]">Application port</label>
+                    <input id="installer-application-port" value={applicationPort} onChange={(event) => setApplicationPort(event.target.value.replace(/\D/g, '').slice(0, 5))} type="text" inputMode="numeric" autoComplete="off" pattern="[0-9]{1,5}" placeholder="5000" className="w-full rounded-md border border-[#111111] px-3 py-2.5 text-sm text-[#1a1a1a] outline-none focus:ring-2 focus:ring-black/10" required />
+                    <p className="mt-1.5 text-xs text-[#656b6b]">Use the port assigned by your host. A deployment-level <code>PORT</code> environment variable takes precedence over this saved value.</p>
                   </div>
                   <div>
                     <label htmlFor="installer-cors-origins" className="mb-1.5 block text-sm text-[#1a1a1a]">Trusted browser origins</label>

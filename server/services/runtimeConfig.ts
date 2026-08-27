@@ -7,6 +7,7 @@ const INSTALLATION_CONFIG_KEYS = [
   'TOKEN_SECRET',
   'CORS_ORIGINS',
   'PUBLIC_APP_URL',
+  'PORT',
   'INSTALLATION_COMPLETED_AT',
 ] as const;
 
@@ -73,12 +74,14 @@ export function persistInstallationConfiguration(values: {
   tokenSecret: string;
   corsOrigins: string;
   publicAppUrl: string;
+  port: number;
 }): void {
   const normalized: Record<InstallationConfigKey, string> = {
     DATABASE_URL: assertSafeEnvironmentValue(values.databaseUrl, 'DATABASE_URL'),
     TOKEN_SECRET: assertSafeEnvironmentValue(values.tokenSecret, 'TOKEN_SECRET'),
     CORS_ORIGINS: assertSafeEnvironmentValue(values.corsOrigins, 'CORS_ORIGINS'),
     PUBLIC_APP_URL: assertSafeEnvironmentValue(values.publicAppUrl, 'PUBLIC_APP_URL'),
+    PORT: assertSafeEnvironmentValue(String(values.port), 'PORT'),
     INSTALLATION_COMPLETED_AT: new Date().toISOString(),
   };
   const directory = runtimeSecretsDirectory();

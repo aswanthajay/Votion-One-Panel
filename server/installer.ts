@@ -91,6 +91,13 @@ function validDatabaseUrl(value: unknown): string | null {
   }
 }
 
+function validApplicationPort(value: unknown): number | null {
+  const normalized = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  if (!/^\d{1,5}$/.test(normalized)) return null;
+  const port = Number(normalized);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
 async function withDatabase<T>(databaseUrl: string, work: (pool: pg.Pool) => Promise<T>): Promise<T> {
   const pool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 5000 });
   try {
@@ -244,13 +251,14 @@ app.post('/api/v1/installation/complete', installationRateLimit, async (req, res
   const databaseUrl = validDatabaseUrl(req.body?.databaseUrl);
   const publicAppUrl = validPublicUrl(req.body?.publicAppUrl);
   const corsOrigins = typeof req.body?.corsOrigins === 'string' && req.body.corsOrigins.trim() ? req.body.corsOrigins.trim() : publicAppUrl;
+  const applicationPort = validApplicationPort(req.body?.port);
   const adminPassword = typeof req.body?.adminPassword === 'string' ? req.body.adminPassword : '';
   const adminName = typeof req.body?.adminName === 'string' ? req.body.adminName : '';
   const suppliedTokenSecret = typeof req.body?.tokenSecret === 'string' ? req.body.tokenSecret.trim() : '';
   const tokenSecret = suppliedTokenSecret || crypto.randomBytes(48).toString('base64url');
 
-  if (!databaseUrl || !publicAppUrl || !corsOrigins || adminPassword.length < 12 || tokenSecret.length < 32) {
-    return res.status(400).json({ success: false, error: 'Provide a valid database URL, public application URL, administrator password of at least 12 characters, and a valid session secret.' });
+  if (!databaseUrl || !publicAppUrl || !corsOrigins || !applicationPort || adminPassword.length < 12 || tokenSecret.length < 32) {
+    return res.status(400).json({ success: false, error: 'Provide a valid database URL, public application URL, application port, administrator password of at least 12 characters, and a valid session secret.' });
   }
 
   try {
@@ -259,7 +267,7 @@ app.post('/api/v1/installation/complete', installationRateLimit, async (req, res
       await applyMigrations(pool);
       await provisionInitialAdmin(pool, adminPassword, adminName);
     });
-    persistInstallationConfiguration({ databaseUrl, tokenSecret, corsOrigins, publicAppUrl });
+    persistInstallationConfiguration({ databaseUrl, tokenSecret, corsOrigins, publicAppUrl, port: applicationPort });
     installationCompleted = true;
     return res.status(201).json({
       success: true,
