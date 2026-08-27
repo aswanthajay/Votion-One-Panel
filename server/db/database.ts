@@ -2362,6 +2362,49 @@ export class DatabaseService {
     return res.rows;
   }
 
+  async getProxmoxConnectionOverview() {
+    const res = await pgPool.query(
+      `SELECT pc.id, pc.name, pc.host_ip, pc.port, pc.token_id, pc.ssl_fingerprint,
+              pc.status, pc.last_tested, pc.created_at,
+              COUNT(DISTINCT v.vmid)::int AS vm_count,
+              COUNT(DISTINCT v.vmid) FILTER (WHERE LOWER(COALESCE(v.status, '')) IN ('running', 'online', 'up'))::int AS running_vm_count,
+              COUNT(DISTINCT NULLIF(v.node, ''))::int AS node_count,
+              MAX(v.updated_at) AS last_inventory_at
+       FROM proxmox_connections pc
+       LEFT JOIN vms v ON v.proxmox_connection_id = pc.id
+       GROUP BY pc.id
+       ORDER BY pc.name ASC, pc.last_tested DESC`
+    );
+    return res.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      host_ip: row.host_ip,
+      port: Number(row.port),
+      token_id: row.token_id,
+      ssl_fingerprint: row.ssl_fingerprint || '',
+      status: row.status || 'unknown',
+      last_tested: row.last_tested || null,
+      created_at: row.created_at || null,
+      vmCount: Number(row.vm_count || 0),
+      runningVmCount: Number(row.running_vm_count || 0),
+      nodeCount: Number(row.node_count || 0),
+      lastInventoryAt: row.last_inventory_at || null,
+    }));
+  }
+
+  async getProxmoxConnectionCredentials(id: string) {
+    const res = await pgPool.query('SELECT * FROM proxmox_connections WHERE id = $1', [id]);
+    return res.rows[0] || null;
+  }
+
+  async recordProxmoxConnectionTest(id: string, status: string) {
+    const res = await pgPool.query(
+      `UPDATE proxmox_connections SET status = $1, last_tested = NOW(), updated_at = NOW() WHERE id = $2 RETURNING id, status, last_tested`,
+      [status, id],
+    );
+    return res.rows[0] || null;
+  }
+
   async getProxmoxVmIdentityConflicts() {
     const res = await pgPool.query(
       `SELECT c.vmid,

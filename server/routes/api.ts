@@ -1804,12 +1804,59 @@ apiRouter.get('/admin/proxmox', async (req, res) => {
   }
 });
 
+apiRouter.get('/admin/proxmox/overview', async (_req, res) => {
+  try {
+    const overview = await dbService.getProxmoxConnectionOverview();
+    res.json({ success: true, count: overview.length, data: overview });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
 apiRouter.get('/admin/proxmox/vm-identity-conflicts', async (_req, res) => {
   try {
     const conflicts = await dbService.getProxmoxVmIdentityConflicts();
     res.json({ success: true, count: conflicts.length, data: conflicts });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+apiRouter.post('/admin/proxmox/:id/test', async (req, res) => {
+  const connection = await dbService.getProxmoxConnectionCredentials(req.params.id);
+  if (!connection) return res.status(404).json({ success: false, error: 'Connection not found' });
+
+  const cleanHost = String(connection.host_ip).replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const port = Number(connection.port) || 8006;
+  try {
+    const pveRes = await proxmoxFetch(`https://${cleanHost}:${port}/api2/json/cluster/status`, {
+      headers: { 'Authorization': `PVEAPIToken=${connection.token_id}=${connection.token_secret}` },
+      sslFingerprint: connection.ssl_fingerprint,
+    });
+    const json = await pveRes.json().catch(() => ({}));
+    if (pveRes.ok && json.data) {
+      const updated = await dbService.recordProxmoxConnectionTest(connection.id, 'connected');
+      await dbService.logAudit(req.authUser?.email || 'unknown', 'TEST_PROXMOX_CONNECTION', connection.id, `Verified ${cleanHost}:${port}`);
+      return res.json({ success: true, reachable: true, message: `Connection test passed — reached ${connection.name}.`, data: updated });
+    }
+
+    const status = pveRes.status === 401 || pveRes.status === 403 ? 'unauthorized' : 'error';
+    const error = status === 'unauthorized'
+      ? `Proxmox rejected the stored API token (HTTP ${pveRes.status}).`
+      : `Proxmox returned HTTP ${pveRes.status}.`;
+    const updated = await dbService.recordProxmoxConnectionTest(connection.id, status);
+    return res.status(502).json({ success: false, reachable: false, error, data: updated });
+  } catch (err: any) {
+    const detail = `${String(err.message || '')} ${String(err.code || err.cause?.code || '')}`;
+    const isTls = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|TLS|FINGERPRINT/i.test(detail);
+    const isNetwork = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EAI_AGAIN/i.test(detail);
+    const error = isTls
+      ? 'TLS verification failed. Check the stored SHA-256 fingerprint.'
+      : isNetwork
+        ? 'The host could not be reached from this server.'
+        : (err.message || 'Connection test failed.');
+    const updated = await dbService.recordProxmoxConnectionTest(connection.id, 'error');
+    return res.status(502).json({ success: false, reachable: false, error, data: updated });
   }
 });
 

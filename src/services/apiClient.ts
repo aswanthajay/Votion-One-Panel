@@ -129,7 +129,15 @@ export interface ApiProxmoxConnection {
   token_id: string;
   ssl_fingerprint: string;
   status: string;
-  last_tested: string;
+  last_tested: string | null;
+}
+
+export interface ApiProxmoxConnectionOverview extends ApiProxmoxConnection {
+  created_at?: string | null;
+  vmCount: number;
+  runningVmCount: number;
+  nodeCount: number;
+  lastInventoryAt?: string | null;
 }
 
 export interface ApiAuditLog {
@@ -1316,6 +1324,20 @@ class ApiClient {
     }
 
     return payload as ApiProxmoxConnection[];
+  }
+
+  async getProxmoxConnectionOverview(): Promise<ApiProxmoxConnectionOverview[]> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/overview`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to load connection health overview.');
+    return Array.isArray(data.data) ? data.data : [];
+  }
+
+  async testStoredProxmoxConnection(id: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/${encodeURIComponent(id)}/test`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    return await this.readApiResponse(res, 'Unable to test Proxmox connection.');
   }
 
   async addProxmoxConnection(payload: any) {

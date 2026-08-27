@@ -1,9 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient, ApiProxmoxConnection } from '../services/apiClient';
+import { apiClient, ApiProxmoxConnection, ApiProxmoxConnectionOverview } from '../services/apiClient';
+
+const formatConnectionTime = (value?: string | null) => value
+  ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  : 'Not recorded';
+
+const connectionStatusLabel = (status?: string) => {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'connected' || normalized === 'online' || normalized === 'healthy') return 'Healthy';
+  if (normalized === 'unauthorized') return 'Auth failed';
+  if (normalized === 'error' || normalized === 'offline') return 'Unreachable';
+  return 'Needs test';
+};
+
+const connectionStatusTone = (status?: string) => {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'connected' || normalized === 'online' || normalized === 'healthy') return 'connection-status-healthy';
+  if (normalized === 'unauthorized') return 'connection-status-warning';
+  if (normalized === 'error' || normalized === 'offline') return 'connection-status-error';
+  return 'connection-status-neutral';
+};
 
 export const ProxmoxConnections: React.FC = () => {
-  const [connections, setConnections] = useState<ApiProxmoxConnection[]>([]);
+  const [connections, setConnections] = useState<ApiProxmoxConnectionOverview[]>([]);
   const [loading, setLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -33,6 +55,7 @@ export const ProxmoxConnections: React.FC = () => {
 
   const loadConnections = async () => {
     setLoading(true);
+    setOverviewError(null);
     let lastError: unknown;
 
     for (const delayMs of [0, 500, 1500]) {
@@ -41,7 +64,7 @@ export const ProxmoxConnections: React.FC = () => {
       }
 
       try {
-        const data = await apiClient.getProxmoxConnections();
+        const data = await apiClient.getProxmoxConnectionOverview();
         setConnections(data);
         setLoading(false);
         return;
@@ -49,13 +72,14 @@ export const ProxmoxConnections: React.FC = () => {
         lastError = error;
         if (!localStorage.getItem('votion_jwt_token')) {
           setLoading(false);
-          return;
+          break;
         }
       }
     }
 
-    const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
-    showToast(`Failed to load cluster connections${detail}`);
+    const detail = lastError instanceof Error ? lastError.message : 'The connection inventory is temporarily unavailable.';
+    setOverviewError(detail);
+    setConnections([]);
     setLoading(false);
   };
 
@@ -100,6 +124,19 @@ export const ProxmoxConnections: React.FC = () => {
       showToast('Error updating connection');
     } finally {
       setIsEditing(false);
+    }
+  };
+
+  const handleTestConnection = async (id: string) => {
+    setTestingConnectionId(id);
+    try {
+      const result = await apiClient.testStoredProxmoxConnection(id);
+      showToast(result.message || 'Connection test passed.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Connection test failed.');
+    } finally {
+      setTestingConnectionId(null);
+      await loadConnections();
     }
   };
 
@@ -165,8 +202,13 @@ export const ProxmoxConnections: React.FC = () => {
     }
   };
 
+  const healthyCount = connections.filter(connection => connectionStatusLabel(connection.status) === 'Healthy').length;
+  const totalVmCount = connections.reduce((total, connection) => total + connection.vmCount, 0);
+  const runningVmCount = connections.reduce((total, connection) => total + connection.runningVmCount, 0);
+  const observedNodeCount = connections.reduce((total, connection) => total + connection.nodeCount, 0);
+
   if (loading) {
-    return <div className="p-8 text-white">Loading connections...</div>;
+    return <div className="p-8 text-white">Loading connection health...</div>;
   }
 
   return (
@@ -182,73 +224,88 @@ export const ProxmoxConnections: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="connection-manager-header flex items-start justify-between gap-5 mb-8">
         <div>
+          <p className="connection-manager-eyebrow">Infrastructure control plane</p>
           <h1 className="page-heading mb-1">Cluster Connection Manager</h1>
-          <p className="text-xs text-[#656b6b]">Link and authenticate dedicated cluster engines</p>
+          <p className="text-xs text-[#656b6b]">Monitor connectivity and inventory across every Proxmox environment.</p>
         </div>
-        <button 
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary cursor-pointer flex items-center gap-2"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
-          Add Connection
-        </button>
+        <div className="connection-manager-actions flex items-center gap-2">
+          <button type="button" onClick={loadConnections} disabled={loading} className="btn-secondary cursor-pointer" title="Refresh connection health">
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button type="button" onClick={() => setShowAddModal(true)} className="btn-primary cursor-pointer flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+            Add Connection
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {connections.map((conn) => (
-          <div key={conn.id} className="bg-white border border-[#dedfdf] rounded-xl p-5 shadow-sm flex flex-col relative group hover:border-[#1a1a1a] transition-colors">
-            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => openEditModal(conn)}
-                className="bg-[#eff6ff] text-[#2563eb] hover:bg-[#dbeafe] p-1.5 rounded transition-colors"
-                title="Edit Connection"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-              </button>
-              <button
-                onClick={() => {
-                  setDeleteTarget(conn.id);
-                }}
-                className="bg-[#fef2f2] text-[#dc2626] hover:bg-[#fecaca] p-1.5 rounded transition-colors"
-                title="Delete Connection"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
-              </button>
-            </div>
+      {overviewError && (
+        <div className="connection-overview-error mb-6" role="alert">
+          <div>
+            <strong>Connection inventory unavailable</strong>
+            <p>{overviewError}</p>
+          </div>
+          <button type="button" className="btn-secondary" onClick={loadConnections}>Retry</button>
+        </div>
+      )}
 
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-[#f97316]/10 flex items-center justify-center text-[#ea580c]">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-[#1a1a1a]">{conn.name}</h3>
-                <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#656b6b]">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#10b981]"></div>
-                  {conn.host_ip}:{conn.port}
+      <div className="connection-overview-summary grid grid-cols-2 gap-3 md:grid-cols-4 mb-6">
+        <div className="connection-summary-card"><span>Connections</span><strong>{connections.length}</strong><small>{healthyCount} healthy</small></div>
+        <div className="connection-summary-card"><span>Observed nodes</span><strong>{observedNodeCount}</strong><small>From synchronized inventory</small></div>
+        <div className="connection-summary-card"><span>Total VMs</span><strong>{totalVmCount}</strong><small>{runningVmCount} running</small></div>
+        <div className="connection-summary-card"><span>Inventory scope</span><strong>Read-only</strong><small>Health checks do not mutate VMs</small></div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+        {connections.map((conn) => (
+          <article key={conn.id} className="connection-overview-card group">
+            <div className="connection-card-header">
+              <div className="connection-identity">
+                <div className="connection-icon" aria-hidden="true">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                </div>
+                <div className="min-w-0">
+                  <h3>{conn.name}</h3>
+                  <p>{conn.host_ip}:{conn.port}</p>
                 </div>
               </div>
+              <span className={`connection-status ${connectionStatusTone(conn.status)}`}><span aria-hidden="true"></span>{connectionStatusLabel(conn.status)}</span>
             </div>
-            
-            <div className="text-[11px] text-[#656b6b] space-y-2 font-mono bg-[#f5f6f6] rounded border border-[#dedfdf] p-3 mt-auto">
-              <div className="flex justify-between">
-                <span className="text-[#656b6b] font-semibold">Token ID:</span>
-                <span className="text-[#1a1a1a] truncate max-w-[150px]">{conn.token_id}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#656b6b] font-semibold">Fingerprint:</span>
-                <span className="text-[#1a1a1a] truncate max-w-[150px]">{conn.ssl_fingerprint || 'N/A'}</span>
-              </div>
+
+            <div className="connection-inventory-grid">
+              <div><span>VMs</span><strong>{conn.vmCount}</strong></div>
+              <div><span>Running</span><strong>{conn.runningVmCount}</strong></div>
+              <div><span>Nodes</span><strong>{conn.nodeCount}</strong></div>
             </div>
-          </div>
+
+            <dl className="connection-meta-list">
+              <div><dt>Last connection test</dt><dd>{formatConnectionTime(conn.last_tested)}</dd></div>
+              <div><dt>Latest inventory record</dt><dd>{formatConnectionTime(conn.lastInventoryAt)}</dd></div>
+              <div><dt>API token</dt><dd title={conn.token_id}>{conn.token_id}</dd></div>
+            </dl>
+
+            <div className="connection-card-actions">
+              <button type="button" onClick={() => handleTestConnection(conn.id)} disabled={testingConnectionId !== null} className="btn-secondary" title="Test this stored Proxmox connection">
+                {testingConnectionId === conn.id ? 'Testing…' : 'Test connection'}
+              </button>
+              <button type="button" onClick={() => openEditModal(conn)} className="connection-icon-action" title="Edit connection" aria-label={`Edit ${conn.name}`}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </button>
+              <button type="button" onClick={() => setDeleteTarget(conn.id)} className="connection-icon-action connection-icon-action-danger" title="Delete connection" aria-label={`Delete ${conn.name}`}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-2-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+              </button>
+            </div>
+          </article>
         ))}
-        
-        {connections.length === 0 && (
-          <div className="col-span-full border border-dashed border-[#dedfdf] bg-[#f9fafa] rounded-xl p-12 flex flex-col items-center justify-center text-center">
-            <svg className="text-[#656b6b] mb-4" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
-            <h3 className="text-lg font-bold text-[#1a1a1a] mb-2">No Cluster Connections</h3>
-            <p className="text-xs text-[#656b6b] max-w-sm">You haven't linked any cluster engines yet. Add a connection to start syncing nodes and VMs.</p>
+
+        {connections.length === 0 && !overviewError && (
+          <div className="connection-empty-state col-span-full">
+            <svg className="text-[#656b6b] mb-4" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+            <h3>No Proxmox connections configured</h3>
+            <p>Add the first cluster to begin tracking connectivity, nodes, and VM inventory from one admin workspace.</p>
+            <button type="button" className="btn-primary mt-4" onClick={() => setShowAddModal(true)}>Add first connection</button>
           </div>
         )}
       </div>
