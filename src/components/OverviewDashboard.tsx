@@ -591,7 +591,7 @@ export const OverviewDashboard: React.FC<{
                       <div className="font-mono text-sm text-[#1a1a1a] mt-0.5">{(liveTotalNetOut / GB).toFixed(1)} GB</div>
                     </div>
                     <div className="py-3 px-2 flex flex-col justify-center items-center">
-                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Active Nodes</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Running services</div>
                       <div className="font-mono text-sm text-[#1a1a1a] mt-0.5">{runningVms} / {vms.length}</div>
                     </div>
                     <div className="py-3 px-2 flex flex-col justify-center items-center">

@@ -344,18 +344,21 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
         b.diskWriteBytes = pt.diskWriteBytes;
       });
       return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, b]) => {
-        let nIn = 0, nOut = 0, dR = 0, dW = 0;
-        if (b.count > 1) {
-          const first = arr.find(p => bucketKey(p.timestamp) === k);
-          const last = [...arr].reverse().find(p => bucketKey(p.timestamp) === k);
-          if (!first || !last) return null;
-          nIn = Math.max(0, last.netInBytes - first.netInBytes);
-          nOut = Math.max(0, last.netOutBytes - first.netOutBytes);
-          dR = Math.max(0, last.diskReadBytes - first.diskReadBytes);
-          dW = Math.max(0, last.diskWriteBytes - first.diskWriteBytes);
-        }
+        const bucketSamples = arr.filter(point => bucketKey(point.timestamp) === k);
+        const first = bucketSamples[0];
+        const last = bucketSamples[bucketSamples.length - 1];
+        if (!first || !last) return null;
+
+        const sampleIntervalSeconds = Math.max(0, (new Date(last.timestamp).getTime() - new Date(first.timestamp).getTime()) / 1000);
+        const hasMeasuredInterval = bucketSamples.length > 1 && sampleIntervalSeconds > 0;
+        const nIn = hasMeasuredInterval ? Math.max(0, last.netInBytes - first.netInBytes) : 0;
+        const nOut = hasMeasuredInterval ? Math.max(0, last.netOutBytes - first.netOutBytes) : 0;
+        const dR = hasMeasuredInterval ? Math.max(0, last.diskReadBytes - first.diskReadBytes) : 0;
+        const dW = hasMeasuredInterval ? Math.max(0, last.diskWriteBytes - first.diskWriteBytes) : 0;
+
         return {
           timestamp: new Date(k + ':00:00Z').toISOString(),
+          sampleIntervalSeconds,
           cpuPct: Number((b.cpuPct.reduce((a: number, c: number) => a + c, 0) / b.count).toFixed(2)),
           peakCpuPct: Number(Math.max(...b.cpuPct).toFixed(2)),
           ramBytes: Math.round(b.ramBytes.reduce((a: number, c: number) => a + c, 0) / b.count),

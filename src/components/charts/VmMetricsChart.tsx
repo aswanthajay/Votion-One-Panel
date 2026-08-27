@@ -45,6 +45,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const [currentLive, setCurrentLive] = useState<LiveTelemetry | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'empty' | 'unavailable'>('loading');
 
   const lastMetricsRef = useRef<{ netin: number; netout: number; diskread: number; diskwrite: number; timestamp: number } | null>(null);
 
@@ -58,10 +59,14 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const fetchAggregations = async () => {
     try {
       const json = await apiClient.getVMMetrics(vmid);
+      const history = Array.isArray(json.history) ? json.history : Array.isArray(json.data) ? json.data : [];
       setAggregations(json.aggregations || null);
-      setDbHistory(json.history || json.data || []);
-    } catch (err) {
-      // Live telemetry remains useful when historical samples are unavailable.
+      setDbHistory(history);
+      setHistoryState(history.length > 0 ? 'ready' : 'empty');
+    } catch {
+      setAggregations(null);
+      setDbHistory([]);
+      setHistoryState('unavailable');
     }
   };
 
@@ -109,9 +114,11 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   useEffect(() => {
     setDbHistory([]);
     setAggregations(null);
-    setCurrentLive(null);
+        setCurrentLive(null);
     setLoadError(null);
+    setHistoryState('loading');
     lastMetricsRef.current = null;
+
     setIsLoading(true);
 
     fetchAggregations();
@@ -149,15 +156,21 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
     );
   }
 
-  // Bucketed history rows use {timestamp, cpuPct, peakCpuPct, ramBytes, peakRamBytes, netInBytes, netOutBytes, diskReadBytes, diskWriteBytes}
+  // Bucketed history rows include counter deltas and the measured interval used to calculate rates.
   const chartData = (dbHistory || []).map((d) => {
+    const intervalSeconds = Number(d.sampleIntervalSeconds);
+    const hasMeasuredInterval = Number.isFinite(intervalSeconds) && intervalSeconds > 0;
+    const toRate = (bytes: unknown, multiplier: number) => hasMeasuredInterval
+      ? Number(((Number(bytes) || 0) * multiplier / intervalSeconds).toFixed(2))
+      : null;
+
     return {
       time: new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       'CPU (%)': Number(d.cpuPct),
-      'Net In (Mbps)': Number(((d.netInBytes || 0) * 8 / 1000000 / 3600).toFixed(2)),
-      'Net Out (Mbps)': Number(((d.netOutBytes || 0) * 8 / 1000000 / 3600).toFixed(2)),
-      'Disk R (MB/s)': Number(((d.diskReadBytes || 0) / 1048576 / 3600).toFixed(2)),
-      'Disk W (MB/s)': Number(((d.diskWriteBytes || 0) / 1048576 / 3600).toFixed(2)),
+      'Net In (Mbps)': toRate(d.netInBytes, 8 / 1000000),
+      'Net Out (Mbps)': toRate(d.netOutBytes, 8 / 1000000),
+      'Disk R (MB/s)': toRate(d.diskReadBytes, 1 / 1048576),
+      'Disk W (MB/s)': toRate(d.diskWriteBytes, 1 / 1048576),
     };
   });
 
@@ -165,9 +178,13 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const memTotalGb = currentLive.maxmem / 1073741824;
   const memFreeGb = memTotalGb - memUsedGb;
 
-  const totalBandwidthGb = (currentLive.netin + currentLive.netout) / 1073741824;
+    const totalBandwidthGb = (currentLive.netin + currentLive.netout) / 1073741824;
+  const transferTotalBytes = Math.max(0, currentLive.netin) + Math.max(0, currentLive.netout);
+  const inboundTransferPct = transferTotalBytes > 0 ? (Math.max(0, currentLive.netin) / transferTotalBytes) * 100 : 0;
+  const outboundTransferPct = transferTotalBytes > 0 ? (Math.max(0, currentLive.netout) / transferTotalBytes) * 100 : 0;
 
   const cpuPct = currentLive.cpu * 100;
+
   const memPct = memTotalGb > 0 ? (memUsedGb / memTotalGb) * 100 : 0;
 
   const agg = aggregations || {};
@@ -336,7 +353,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 <span><i className="telemetry-legend-dot telemetry-legend-net-in" />Net in</span>
                 <span><i className="telemetry-legend-dot telemetry-legend-net-out" />Net out</span>
               </div>
-              <AreaChart
+                            {historyState === 'ready' ? <AreaChart
                 className="telemetry-trend-area-chart"
                 data={chartData}
                 index="time"
@@ -348,7 +365,8 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 showLegend={false}
                 showGridLines={true}
                 customTooltip={TrendTooltip}
-              />
+              /> : <HistoricalTelemetryState state={historyState} />}
+
             </div>
 
             <div className="telemetry-chart-card">
@@ -360,7 +378,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 <span><i className="telemetry-legend-dot telemetry-legend-disk-read" />Disk read</span>
                 <span><i className="telemetry-legend-dot telemetry-legend-disk-write" />Disk write</span>
               </div>
-              <AreaChart
+                            {historyState === 'ready' ? <AreaChart
                 className="telemetry-trend-area-chart"
                 data={chartData}
                 index="time"
@@ -372,7 +390,8 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 showGridLines={true}
                 customTooltip={TrendTooltip}
                 yAxisWidth={76}
-              />
+              /> : <HistoricalTelemetryState state={historyState} />}
+
             </div>
           </div>
         </div>
@@ -387,7 +406,8 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 <span className="text-[#1a1a1a] font-mono">{(currentLive.netin / 1073741824).toFixed(2)} GB</span>
               </div>
               <div className="h-[2px] w-full bg-[#f0f0f0]">
-                <div className="h-full bg-[#10b981] w-[50%]"></div>
+                                <div className="h-full bg-[#10b981] transition-[width] duration-300" style={{ width: `${inboundTransferPct}%` }}></div>
+
               </div>
             </div>
 
@@ -397,7 +417,8 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
                 <span className="text-[#1a1a1a] font-mono">{(currentLive.netout / 1073741824).toFixed(2)} GB</span>
               </div>
               <div className="h-[2px] w-full bg-[#f0f0f0]">
-                <div className="h-full bg-[#3b82f6] w-[50%]"></div>
+                                <div className="h-full bg-[#3b82f6] transition-[width] duration-300" style={{ width: `${outboundTransferPct}%` }}></div>
+
               </div>
             </div>
 
@@ -409,9 +430,9 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
         </div>
       </Grid>
 
-      <div className="telemetry-cpu-history flex flex-col mb-4">
+            <div className="telemetry-cpu-history flex flex-col mb-4">
         <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">CPU Compute History (24h)</h4>
-        <AreaChart
+        {historyState === 'ready' ? <AreaChart
           className="h-48 mt-4"
           data={chartData}
           index="time"
@@ -421,13 +442,25 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
           showAnimation={false}
           showLegend={false}
           yAxisWidth={56}
-        />
+        /> : <HistoricalTelemetryState state={historyState} className="mt-4 h-48" />}
       </div>
+
     </div>
   );
 }
 
+function HistoricalTelemetryState({ state, className = '' }: { state: 'loading' | 'empty' | 'unavailable'; className?: string }) {
+  const message = state === 'loading'
+    ? 'Loading recorded telemetry…'
+    : state === 'empty'
+      ? 'No recorded telemetry samples are available yet.'
+      : 'Recorded telemetry is currently unavailable.';
+
+  return <div className={`flex min-h-32 items-center justify-center border border-dashed border-[#dedfdf] px-4 text-center text-[11px] text-[#656b6b] ${className}`}>{message}</div>;
+}
+
 function SummaryCell({ label, value, tone }: { label: string; value: string; tone: 'neutral' | 'green' | 'blue' }) {
+
   const accent = tone === 'green' ? 'text-[#16a34a]' : tone === 'blue' ? 'text-[#2563eb]' : 'text-[#1a1a1a]';
   return (
     <div className="bg-white px-3 py-2.5 flex flex-col justify-center">
