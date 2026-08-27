@@ -1,9 +1,12 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 const PREFIX = 'enc:v1:';
 const IV_BYTES = 12;
 const KEY_BYTES = 32;
 const SUPPORT_PIN_PREFIX = 'hmac:v1:';
+const RUNTIME_KEY_FILE_NAME = 'proxmox-credentials.env';
 
 type SecretKeySource = 'hex' | 'base64url';
 
@@ -20,38 +23,106 @@ export class ProxmoxProviderUnavailableError extends Error {
   }
 }
 
-export function isProviderCredentialKeyConfigured(): boolean {
-  const configured = process.env.PROXMOX_CREDENTIALS_KEY?.trim();
-  if (!configured) return false;
-  if (/^[0-9a-f]{64}$/i.test(configured)) return true;
+export type ProviderCredentialKeyInitialization =
+  | { status: 'environment' }
+  | { status: 'runtime-file' }
+  | { status: 'generated' }
+  | { status: 'unavailable-existing-credentials' };
+
+function runtimeSecretsDirectory(): string {
+  return path.resolve(process.env.RUNTIME_SECRETS_DIR?.trim() || path.join(process.cwd(), '.runtime'));
+}
+
+function runtimeKeyFilePath(): string {
+  return path.join(runtimeSecretsDirectory(), RUNTIME_KEY_FILE_NAME);
+}
+
+function decodeKey(configured: string): Buffer | null {
+  if (/^[0-9a-f]{64}$/i.test(configured)) return Buffer.from(configured, 'hex');
   try {
-    return Buffer.from(configured, 'base64url').length === KEY_BYTES;
+    const decoded = Buffer.from(configured, 'base64url');
+    return decoded.length === KEY_BYTES ? decoded : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+function readRuntimeKey(): string | null {
+  const filePath = runtimeKeyFilePath();
+  if (!fs.existsSync(filePath)) return null;
+  const content = fs.readFileSync(filePath, 'utf8');
+  const match = content.match(/^PROXMOX_CREDENTIALS_KEY=([^\r\n]+)$/m);
+  if (!match?.[1]) {
+    throw new Error('The generated provider credential key file is malformed. Restore it from the protected runtime volume or configure PROXMOX_CREDENTIALS_KEY explicitly.');
+  }
+  return match[1].trim();
+}
+
+function configuredKeyValue(): { source: 'environment' | 'runtime-file'; value: string } | null {
+  const environmentValue = process.env.PROXMOX_CREDENTIALS_KEY?.trim();
+  if (environmentValue) return { source: 'environment', value: environmentValue };
+
+  const runtimeValue = readRuntimeKey();
+  if (runtimeValue) return { source: 'runtime-file', value: runtimeValue };
+  return null;
+}
+
+function persistGeneratedRuntimeKey(key: string): void {
+  const directory = runtimeSecretsDirectory();
+  const target = runtimeKeyFilePath();
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = path.join(directory, `.${RUNTIME_KEY_FILE_NAME}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
+
+  try {
+    fs.writeFileSync(temporary, `PROXMOX_CREDENTIALS_KEY=${key}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, target);
+    fs.chmodSync(target, 0o600);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    throw new Error(`Unable to persist the generated provider credential key: ${error instanceof Error ? error.message : 'unknown file-system error'}`);
+  }
+}
+
+/**
+ * Initializes a credential key only for an installation with no stored provider
+ * secrets. Environment configuration always takes precedence; a saved runtime
+ * key is reused. Existing credentials without either key remain fail-closed.
+ */
+export function initializeProviderCredentialKey(hasStoredProviderCredentials: boolean): ProviderCredentialKeyInitialization {
+  const existing = configuredKeyValue();
+  if (existing) {
+    if (!decodeKey(existing.value)) {
+      throw new Error('PROXMOX_CREDENTIALS_KEY must be exactly 32 bytes encoded as 64 hex or base64url characters.');
+    }
+    process.env.PROXMOX_CREDENTIALS_KEY = existing.value;
+    return { status: existing.source };
+  }
+
+  if (hasStoredProviderCredentials) {
+    return { status: 'unavailable-existing-credentials' };
+  }
+
+  const generated = crypto.randomBytes(KEY_BYTES).toString('base64url');
+  persistGeneratedRuntimeKey(generated);
+  process.env.PROXMOX_CREDENTIALS_KEY = generated;
+  return { status: 'generated' };
+}
+
+export function isProviderCredentialKeyConfigured(): boolean {
+  const configured = configuredKeyValue();
+  return Boolean(configured && decodeKey(configured.value));
+}
+
 function loadKey(): Buffer {
-  const configured = process.env.PROXMOX_CREDENTIALS_KEY?.trim();
+  const configured = configuredKeyValue();
   if (!configured) {
     throw new Error('PROXMOX_CREDENTIALS_KEY must be configured before provider credentials are accessed.');
   }
-
-  const candidates: Array<{ source: SecretKeySource; value: Buffer }> = [];
-  if (/^[0-9a-f]{64}$/i.test(configured)) {
-    candidates.push({ source: 'hex', value: Buffer.from(configured, 'hex') });
-  }
-  try {
-    candidates.push({ source: 'base64url', value: Buffer.from(configured, 'base64url') });
-  } catch {
-    // The length check below produces the public configuration error.
-  }
-
-  const valid = candidates.find(candidate => candidate.value.length === KEY_BYTES);
-  if (!valid) {
+  const decoded = decodeKey(configured.value);
+  if (!decoded) {
     throw new Error('PROXMOX_CREDENTIALS_KEY must be exactly 32 bytes encoded as 64 hex or base64url characters.');
   }
-  return valid.value;
+  return decoded;
 }
 
 export function isEncryptedCredential(value: string | null | undefined): boolean {

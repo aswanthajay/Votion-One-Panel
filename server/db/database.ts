@@ -2011,6 +2011,15 @@ export class DatabaseService {
   }
 
   // PROXMOX CONNECTIONS
+  async hasStoredProxmoxConnectionCredentials(): Promise<boolean> {
+    const result = await pgPool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM proxmox_connections
+       WHERE COALESCE(password, '') <> '' OR COALESCE(token_secret, '') <> ''`,
+    );
+    return Number(result.rows[0]?.count || 0) > 0;
+  }
+
   async migrateProxmoxCredentials(): Promise<number> {
     if (!isProviderCredentialKeyConfigured()) throw new ProxmoxProviderUnavailableError();
     const res = await pgPool.query<{ id: string; password: string | null; token_secret: string | null }>(

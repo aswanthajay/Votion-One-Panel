@@ -21,6 +21,7 @@ import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
 import {
+  initializeProviderCredentialKey,
   isProviderCredentialKeyConfigured,
   ProxmoxProviderUnavailableError,
   PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
@@ -295,7 +296,19 @@ if (initialAdminBootstrap.status === 'pending-configuration') {
   });
   console.log(`[SETUP] Initial administrator setup link (expires ${setup.expiresAt}): ${setupLink}`);
 }
+const providerCredentialInitialization = initializeProviderCredentialKey(
+  await dbService.hasStoredProxmoxConnectionCredentials(),
+);
 const providerCredentialsAvailable = isProviderCredentialKeyConfigured();
+if (providerCredentialInitialization.status === 'generated') {
+  log('info', 'startup.provider_credential_key_generated', {
+    storage: 'runtime-secrets-file',
+    reason: 'No stored provider credentials were found.',
+  });
+}
+if (providerCredentialInitialization.status === 'runtime-file') {
+  log('info', 'startup.provider_credential_key_loaded', { storage: 'runtime-secrets-file' });
+}
 if (providerCredentialsAvailable) {
   const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
   if (migratedProxmoxCredentials > 0) {
@@ -303,7 +316,9 @@ if (providerCredentialsAvailable) {
   }
 } else {
   log('warn', 'startup.proxmox_credentials_unavailable', {
-    reason: 'PROXMOX_CREDENTIALS_KEY is absent or invalid; provider operations and telemetry workers are disabled.',
+    reason: providerCredentialInitialization.status === 'unavailable-existing-credentials'
+      ? 'Stored provider credentials exist but no usable deployment credential key is available; automatic key generation was blocked.'
+      : 'No usable provider credential key is configured; provider operations and telemetry workers are disabled.',
   });
 }
 const dbHealth = await checkDbHealth();
