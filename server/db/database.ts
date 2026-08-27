@@ -2796,7 +2796,7 @@ export class DatabaseService {
       invoiceCount: 0, billedPaise: 0, collectedPaise: 0, outstandingPaise: 0, projectedRevenuePaise: 0, projectedGrossProfitPaise: 0, serverCostPaise: 0, ipCostPaise: 0,
       sharedCostPaise: 0, totalCostPaise: 0, grossProfitPaise: 0, marginPercent: 0, runningVmCount: 0, assignedVmCount: 0,
       plannedVmCapacity: profile.plannedVmCapacity, availableVmCapacity: profile.plannedVmCapacity, runningIpCount: 0,
-      assignedIpCount: 0, includedIpCount: profile.includedIpCount, billableIpCount: 0, projectedRevenuePaise: 0, projectedGrossProfitPaise: 0, projectedRevenueByCurrency: {}, breakEvenStatus: 'configure_costs',
+      assignedIpCount: 0, includedIpCount: profile.includedIpCount, billableIpCount: 0, projectedRevenueByCurrency: {}, breakEvenStatus: 'configure_costs',
     }));
     return [...rows, ...legacyRows];
   }
@@ -2945,7 +2945,8 @@ export class DatabaseService {
     const totalInrCostPaise = monthlyCost + monthlyServerCostPaise + monthlyIpCostPaise;
     const projectedRevenueByCurrency: Record<string, { cents: number; assignmentCount: number }> = {};
     for (const item of serverProfitability) {
-      for (const [currency, value] of Object.entries(item.projectedRevenueByCurrency || {})) {
+      const revenueByCurrency = item.projectedRevenueByCurrency as Record<string, { cents?: number; assignmentCount?: number }> | undefined;
+      for (const [currency, value] of Object.entries(revenueByCurrency || {})) {
         const current = projectedRevenueByCurrency[currency] || { cents: 0, assignmentCount: 0 };
         projectedRevenueByCurrency[currency] = { cents: current.cents + Number(value.cents || 0), assignmentCount: current.assignmentCount + Number(value.assignmentCount || 0) };
       }
@@ -3125,6 +3126,234 @@ export class DatabaseService {
       params
     );
     return res.rows;
+  }
+
+  async getApiKeyByHash(hash: string): Promise<{ id: number; user_email: string; name: string; scope: string } | null> {
+    const result = await pgPool.query<{ id: number; user_email: string; name: string; scope: string }>(
+      'SELECT id, user_email, name, scope FROM stellar_api_keys WHERE key_hash = $1 AND revoked_at IS NULL',
+      [hash],
+    );
+    return result.rows[0] || null;
+  }
+
+  async touchApiKey(id: number): Promise<void> {
+    await pgPool.query('UPDATE stellar_api_keys SET last_used_at = NOW() WHERE id = $1', [id]);
+  }
+
+  async createApiKey(email: string, name: string, keyHash: string, prefix: string, scope: string) {
+    const result = await pgPool.query(
+      `INSERT INTO stellar_api_keys (user_email, name, key_hash, key_prefix, scope)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, user_email, name, key_prefix, scope, created_at`,
+      [email.toLowerCase().trim(), name, keyHash, prefix, scope],
+    );
+    return result.rows[0];
+  }
+
+  async getUserApiKeys(email: string) {
+    const result = await pgPool.query(
+      `SELECT id, name, key_prefix, scope, created_at, last_used_at, revoked_at
+       FROM stellar_api_keys WHERE user_email = $1 ORDER BY created_at DESC`,
+      [email.toLowerCase().trim()],
+    );
+    return result.rows;
+  }
+
+  async deleteApiKey(id: number, email: string): Promise<boolean> {
+    const result = await pgPool.query(
+      'UPDATE stellar_api_keys SET revoked_at = NOW() WHERE id = $1 AND user_email = $2 AND revoked_at IS NULL RETURNING id',
+      [id, email.toLowerCase().trim()],
+    );
+    return result.rowCount > 0;
+  }
+
+  async queueBackup(vmid: number, providerTaskId: string | null, userEmail: string) {
+    const result = await pgPool.query(
+      `INSERT INTO vm_backup_queue (vmid, provider_task_id, requested_by, status)
+       VALUES ($1, $2, $3, 'running') RETURNING id, vmid, provider_task_id, status, created_at`,
+      [vmid, providerTaskId, userEmail.toLowerCase().trim()],
+    );
+    return result.rows[0];
+  }
+
+  async markBackupStatus(id: number, status: string, errorMessage?: string) {
+    const result = await pgPool.query(
+      `UPDATE vm_backup_queue SET status = $1, error_message = $2, updated_at = NOW()
+       WHERE id = $3 RETURNING id, vmid, status, error_message, updated_at`,
+      [status, errorMessage || null, id],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getBackupQueue(vmid?: number) {
+    const params: number[] = [];
+    const where = vmid !== undefined ? 'WHERE vmid = $1' : '';
+    if (vmid !== undefined) params.push(vmid);
+    const result = await pgPool.query(
+      `SELECT id, vmid, provider_task_id, requested_by, status, error_message, created_at, updated_at
+       FROM vm_backup_queue ${where} ORDER BY created_at DESC LIMIT 200`,
+      params,
+    );
+    return result.rows;
+  }
+
+  async getVmBandwidthQuota(vmid: number): Promise<number> {
+    const result = await pgPool.query<{ bandwidth_quota_gb: string | number | null }>(
+      'SELECT bandwidth_quota_gb FROM vm_billing_profiles WHERE vmid = $1',
+      [vmid],
+    );
+    return Number(result.rows[0]?.bandwidth_quota_gb || 0);
+  }
+
+  async setVmBandwidthQuota(vmid: number, bandwidthGb: number) {
+    const result = await pgPool.query(
+      `INSERT INTO vm_billing_profiles (vmid, bandwidth_quota_gb)
+       VALUES ($1, $2)
+       ON CONFLICT (vmid) DO UPDATE SET bandwidth_quota_gb = EXCLUDED.bandwidth_quota_gb, updated_at = NOW()
+       RETURNING vmid, bandwidth_quota_gb`,
+      [vmid, bandwidthGb],
+    );
+    return result.rows[0] || null;
+  }
+
+  async pushRdnsRequest(vmid: number, ip: string, ptr: string, userEmail: string) {
+    const result = await pgPool.query(
+      `INSERT INTO rdns_requests (vmid, ip_address, ptr_record, requested_by, status)
+       VALUES ($1, $2, $3, $4, 'pending') RETURNING id, vmid, ip_address AS ip, ptr_record AS ptr, status, created_at`,
+      [vmid, ip, ptr, userEmail.toLowerCase().trim()],
+    );
+    return result.rows[0];
+  }
+
+  async getRdnsQueue() {
+    const result = await pgPool.query(
+      `SELECT id, vmid, ip_address AS ip, ptr_record AS ptr, requested_by, status, error_message, created_at, updated_at
+       FROM rdns_requests WHERE status IN ('pending', 'processing') ORDER BY created_at ASC LIMIT 500`,
+    );
+    return result.rows;
+  }
+
+  async markRdnsProcessed(id: number, status: string, errorMessage?: string) {
+    const result = await pgPool.query(
+      `UPDATE rdns_requests SET status = $1, error_message = $2, updated_at = NOW()
+       WHERE id = $3 RETURNING id, status, error_message, updated_at`,
+      [status, errorMessage || null, id],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getAppCatalogAll() {
+    const result = await pgPool.query(
+      `SELECT id, name, description, category, icon, template_name, enabled
+       FROM app_catalog ORDER BY category ASC, name ASC`,
+    );
+    return result.rows;
+  }
+
+  async getAppCatalog() {
+    const result = await pgPool.query(
+      `SELECT id, name, description, category, icon, template_name, enabled
+       FROM app_catalog WHERE enabled = true ORDER BY category ASC, name ASC`,
+    );
+    return result.rows;
+  }
+
+  async createAppInstance(vmid: number, appId: string) {
+    const result = await pgPool.query(
+      `INSERT INTO app_instances (vmid, app_id, status) VALUES ($1, $2, 'provisioning')
+       ON CONFLICT (vmid, app_id) DO UPDATE SET status = 'provisioning', updated_at = NOW()
+       RETURNING id, vmid, app_id, status, created_at, updated_at`,
+      [vmid, appId],
+    );
+    return result.rows[0];
+  }
+
+  async setAppInstanceStatus(vmid: number, appId: string, status: string) {
+    const result = await pgPool.query(
+      `UPDATE app_instances SET status = $1, updated_at = NOW() WHERE vmid = $2 AND app_id = $3
+       RETURNING id, vmid, app_id, status, created_at, updated_at`,
+      [status, vmid, appId],
+    );
+    return result.rows[0] || null;
+  }
+
+  async getAppInstances(vmid?: number) {
+    const params: number[] = [];
+    const where = vmid !== undefined ? 'WHERE vmid = $1' : '';
+    if (vmid !== undefined) params.push(vmid);
+    const result = await pgPool.query(
+      `SELECT id, vmid, app_id, status, created_at, updated_at FROM app_instances ${where} ORDER BY created_at DESC LIMIT 500`,
+      params,
+    );
+    return result.rows;
+  }
+
+  async ensureScheduledTasksTable(): Promise<void> {
+    const result = await pgPool.query<{ exists: boolean }>(
+      "SELECT to_regclass('public.scheduled_tasks') IS NOT NULL AS exists",
+    );
+    if (!result.rows[0]?.exists) {
+      throw new Error('scheduled_tasks table is not available; run the database migrations');
+    }
+  }
+
+  async runTask<T>(
+    userEmail: string,
+    title: string,
+    description: string,
+    priority: string,
+    work: (updateProgress: (progressPct: number, detail?: string) => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    const task = await this.addTask(userEmail, title, description, 'running', priority, 0);
+    const updateProgress = async (progressPct: number, _detail?: string): Promise<void> => {
+      await this.updateTaskStatus(task.id, 'running', Math.max(0, Math.min(100, Math.round(progressPct))));
+    };
+    try {
+      const result = await work(updateProgress);
+      await this.updateTaskStatus(task.id, 'completed', 100);
+      return result;
+    } catch (error) {
+      await this.updateTaskStatus(task.id, 'failed', 0);
+      throw error;
+    }
+  }
+
+  async getSubUsers(vmid: number) {
+    const result = await pgPool.query(
+      `SELECT id, vmid, user_email, scope, created_at, updated_at
+       FROM vm_sub_users WHERE vmid = $1 ORDER BY created_at ASC`,
+      [vmid],
+    );
+    return result.rows;
+  }
+
+  async addSubUser(vmid: number, email: string, scope: string) {
+    const result = await pgPool.query(
+      `INSERT INTO vm_sub_users (vmid, user_email, scope)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (vmid, user_email) DO UPDATE SET scope = EXCLUDED.scope, updated_at = NOW()
+       RETURNING id, vmid, user_email, scope, created_at, updated_at`,
+      [vmid, email.toLowerCase().trim(), scope],
+    );
+    return result.rows[0];
+  }
+
+  async updateSubUser(id: number, vmid: number, scope: string) {
+    const result = await pgPool.query(
+      `UPDATE vm_sub_users SET scope = $1, updated_at = NOW()
+       WHERE id = $2 AND vmid = $3
+       RETURNING id, vmid, user_email, scope, created_at, updated_at`,
+      [scope, id, vmid],
+    );
+    return result.rows[0] || null;
+  }
+
+  async removeSubUser(id: number, vmid: number): Promise<boolean> {
+    const result = await pgPool.query(
+      'DELETE FROM vm_sub_users WHERE id = $1 AND vmid = $2 RETURNING id',
+      [id, vmid],
+    );
+    return result.rowCount > 0;
   }
 
 }

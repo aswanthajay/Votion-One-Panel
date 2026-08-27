@@ -13,7 +13,7 @@
  */
 
 import https from 'https';
-import { dbService, pgPool } from '../db/database';
+import { dbService, pgPool } from '../db/database.js';
 
 // Thin wrapper around pgPool.query so callers can pass plain SQL strings.
 async function query(text: string, params?: any[]) {

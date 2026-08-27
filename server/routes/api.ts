@@ -684,7 +684,10 @@ apiRouter.post('/admin/proxmox/test', async (req, res) => {
       sslFingerprint: ssl_fingerprint,
     });
     if (pveRes.ok) {
-      const json = await pveRes.json();
+      const payload: unknown = await pveRes.json();
+      const json = payload && typeof payload === 'object' && 'data' in payload
+        ? payload as { data?: Record<string, unknown> }
+        : {};
       if (json.data) {
         return res.json({
           success: true,
@@ -1833,7 +1836,10 @@ apiRouter.post('/admin/proxmox/:id/test', async (req, res) => {
       headers: { 'Authorization': `PVEAPIToken=${connection.token_id}=${connection.token_secret}` },
       sslFingerprint: connection.ssl_fingerprint,
     });
-    const json = await pveRes.json().catch(() => ({}));
+    const payload: unknown = await pveRes.json().catch(() => ({}));
+    const json = payload && typeof payload === 'object' && 'data' in payload
+      ? payload as { data?: Record<string, unknown> }
+      : {};
     if (pveRes.ok && json.data) {
       const updated = await dbService.recordProxmoxConnectionTest(connection.id, 'connected');
       await dbService.logAudit(req.authUser?.email || 'unknown', 'TEST_PROXMOX_CONNECTION', connection.id, `Verified ${cleanHost}:${port}`);

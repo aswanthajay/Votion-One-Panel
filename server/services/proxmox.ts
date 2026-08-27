@@ -3,9 +3,24 @@ import https from 'https';
 import { dbService } from '../db/database.js';
 import { proxmoxFetch } from './proxmoxHttp.js';
 
+interface PveEnvelope<T> { data?: T; errors?: unknown; }
+interface PveVersion { version?: string; }
+interface PveStatus { status?: string; cpu?: number; mem?: number; maxmem?: number; maxdisk?: number; disk?: number; uptime?: number; netin?: number; netout?: number; diskread?: number; diskwrite?: number; cpus?: number; maxswap?: number; memory?: { used?: number; total?: number }; swap?: { used?: number; total?: number }; rootfs?: { used?: number; total?: number }; [key: string]: unknown; }
+interface PveNode { node: string; name?: string; status?: string; cpu?: number; maxcpu?: number; mem?: number; maxmem?: number; uptime?: number; __pseudoNode?: boolean; [key: string]: unknown; }
+interface PveStorage { storage?: string; type?: string; used?: number; total?: number; free?: number; }
+interface PveConfig { ostype?: string; os?: string; ipconfig0?: string; net0?: string; [key: string]: unknown; }
+interface PveVmResource { vmid: number; node: string; name?: string; type?: string; status?: string; maxcpu?: number; maxmem?: number; maxdisk?: number; template?: number; [key: string]: unknown; }
+interface PveAgentInterface { name?: string; 'ip-addresses'?: Array<{ 'ip-address-type'?: string; 'ip-address'?: string }>; }
+interface NodeMetric { id: string; nodeName?: string; node?: string; ipAddress: string; status?: string; cpuUsagePct: number; cpuCores?: number; ramUsageBytes: number; ramTotalBytes: number; storageUsageGb?: number; storageTotalGb?: number; rootUsedGb?: number; rootTotalGb?: number; uptimeSeconds: number; platformVersion: string; zfsHealth?: string; storagePools?: Array<{ name: string; type: string; usedGb: number; totalGb: number }>; simulated?: boolean; reason?: string; }
 
+async function readPveJson<T>(response: Response): Promise<PveEnvelope<T>> {
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== 'object') return {};
+  return payload as PveEnvelope<T>;
+}
 
 export interface ProxmoxApiConfig {
+
   host: string;
   tokenId: string;
   secret: string;
@@ -14,14 +29,14 @@ export interface ProxmoxApiConfig {
 
 
 // Fetch the real Proxmox VE version from the host.
-async function fetchVersion(cleanHost: string, port: any, tokenId: string, secret: string, sslFingerprint?: string | null): Promise<string> {
+async function fetchVersion(cleanHost: string, port: number, tokenId: string, secret: string, sslFingerprint?: string | null): Promise<string> {
   try {
     const res = await proxmoxFetch(`https://${cleanHost}:${port}/api2/json/version`, {
       headers: { 'Authorization': `PVEAPIToken=${tokenId}=${secret}` },
       sslFingerprint,
     });
     if (res.ok) {
-      const json = await res.json();
+      const json = await readPveJson<PveVersion>(res);
       return json.data?.version || 'Unknown';
     }
   } catch (e) { /* fall through */ }
@@ -92,7 +107,7 @@ export class ProxmoxApiService {
    * shows REAL telemetry from the machine running this panel (never fake fabricated numbers),
    * and the response is flagged so the UI can label it clearly.
    */
-  async getNodeMetrics(nodeName?: string) {
+  async getNodeMetrics(nodeName?: string): Promise<NodeMetric[]> {
     const connections = await dbService.getProxmoxConnections();
 
     const metricsPromises = (connections.length > 0 ? connections : [null]).map(async (conn, connIdx) => {
@@ -130,7 +145,7 @@ const res = await proxmoxFetch(url, {
           throw new Error(`Proxmox API returned ${res.status}`);
         }
 
-                const json = await res.json();
+                        const json = await readPveJson<PveNode[]>(res);
         // On single-node Proxmox clusters, the /nodes list may only return the
         // pseudo-node 'info', whose mem/maxmem/cpu fields ARE the real node's
         // stats. 'cluster' is the only entry that is always purely synthetic.
@@ -156,7 +171,7 @@ const statusRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/jso
               sslFingerprint: conn.ssl_fingerprint,
             });
             if (statusRes.ok) {
-              const statusJson = await statusRes.json();
+              const statusJson = await readPveJson<PveStatus>(statusRes);
               if (statusJson.data) {
                 const d = statusJson.data;
                 if (d.swap) { swapUsed = d.swap.used || 0; swapTotal = d.swap.total || 0; }
@@ -183,8 +198,8 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
               sslFingerprint: conn.ssl_fingerprint,
             });
             if (stRes.ok) {
-              const stJson = await stRes.json();
-              let rawStores = (stJson.data || []) as any[];
+              const stJson = await readPveJson<PveStorage[]>(stRes);
+              let rawStores = stJson.data || [];
               // Deduplicate by capacity profile (used/total/free) — Proxmox can list
               // multiple storage definitions that share the same physical disk
               // (e.g. 'local' and 'local-nvme1' pointing at identical partitions).
@@ -282,7 +297,7 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
     const dbVms = await dbService.getVMs();
     if (!conns || conns.length === 0) return dbVms;
 
-    let allPveVMs: any[] = [];
+    let allPveVMs: PveVmResource[] = [];
     for (const conn of conns) {
       try {
         const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -291,7 +306,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/clus
           sslFingerprint: conn.ssl_fingerprint,
         });
         if (res.ok) {
-          const json = await res.json();
+          const json = await readPveJson<PveVmResource[]>(res);
           allPveVMs = allPveVMs.concat(json.data || []);
         }
       } catch (e) {
@@ -307,7 +322,7 @@ const nodesRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json
             sslFingerprint: conn.ssl_fingerprint,
           });
           if (nodesRes.ok) {
-            const nodesJson = await nodesRes.json();
+            const nodesJson = await readPveJson<PveNode[]>(nodesRes);
             for (const node of (nodesJson.data || [])) {
               // Fetch QEMU
 const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/qemu`, {
@@ -315,7 +330,7 @@ const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
                 sslFingerprint: conn.ssl_fingerprint,
               });
               if (qemuRes.ok) {
-                const qemuJson = await qemuRes.json();
+                const qemuJson = await readPveJson<PveVmResource[]>(qemuRes);
                 allPveVMs = allPveVMs.concat((qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node })));
               }
               // Fetch LXC
@@ -324,7 +339,7 @@ const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/n
                 sslFingerprint: conn.ssl_fingerprint,
               });
               if (lxcRes.ok) {
-                const lxcJson = await lxcRes.json();
+                const lxcJson = await readPveJson<PveVmResource[]>(lxcRes);
                 allPveVMs = allPveVMs.concat((lxcJson.data || []).map((v: any) => ({ ...v, type: 'lxc', node: node.node })));
               }
             }
@@ -351,7 +366,7 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
           sslFingerprint: conns[0].ssl_fingerprint,
         });
         if (cfgRes.ok) {
-          const cfgJson = await cfgRes.json();
+          const cfgJson = await readPveJson<PveConfig>(cfgRes);
           const cfg = cfgJson.data || {};
           const ostype = cfg.ostype || cfg.os || '';
           const ostypes: Record<string, string> = {
@@ -437,7 +452,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
         });
         
         if (res.ok) {
-          const json = await res.json();
+          const json = await readPveJson<PveStatus>(res);
           if (json.data) {
             
             // PROMPT: Fetch real IP from Guest Agent or Cloud-Init
@@ -452,7 +467,7 @@ const agentRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json
                   sslFingerprint: conn.ssl_fingerprint,
                 });
                 if (agentRes.ok) {
-                  const agentJson = await agentRes.json();
+                  const agentJson = await readPveJson<{ result?: PveAgentInterface[] }>(agentRes);
                   if (agentJson.data && agentJson.data.result) {
                     for (const iface of agentJson.data.result) {
                       if (iface.name !== 'lo' && iface['ip-addresses']) {
@@ -474,7 +489,7 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
                   sslFingerprint: conn.ssl_fingerprint,
                 });
                 if (confRes.ok) {
-                  const confJson = await confRes.json();
+                  const confJson = await readPveJson<PveConfig>(confRes);
                   if (confJson.data) {
                     if (confJson.data.ipconfig0) {
                       const match = confJson.data.ipconfig0.match(/ip=([0-9\.]+)(?:\/|,|$)/);
@@ -648,7 +663,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
               sslFingerprint: conn.ssl_fingerprint,
             });
             if (res.ok) {
-              const json = await res.json();
+              const json = await readPveJson<PveStatus>(res);
               if (json.data) {
                 const cpuPct = json.data.cpu !== undefined ? json.data.cpu * 100 : 0;
                 const ramBytes = json.data.mem || 0;

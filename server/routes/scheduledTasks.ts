@@ -14,9 +14,9 @@
  */
 
 import { Router } from 'express';
-import type { AuthenticatedRequest } from '../middleware';
-import { requireAuth } from '../middleware';
-import { dbService, query, pgPool } from '../db/database';
+import type { AuthenticatedRequest } from '../middleware.js';
+import { requireAuth } from '../middleware.js';
+import { dbService, pgPool } from '../db/database.js';
 
 export const scheduledTasksRouter = Router();
 
@@ -30,18 +30,18 @@ function genId(): string {
 
 /** Verify every vmid in `vmids` belongs to `userEmail` (or is owned by any of their VMs in the DB). */
 async function assertOwnership(userEmail: string, vmids: number[], isAdmin: boolean): Promise<{ ok: boolean; message?: string }> {
-  const rows: any[] = await pgPool.query(
+  const result = await pgPool.query<{ vmid: number; owner_email: string }>(
     'SELECT vmid, owner_email FROM vms WHERE vmid = ANY($1)',
     [vmids]
   );
-  const found = new Set(rows.rows.map((r: any) => Number(r.vmid)));
+  const found = new Set(result.rows.map(row => Number(row.vmid)));
   for (const v of vmids) {
     if (!found.has(v)) {
       return { ok: false, message: `VMID ${v} is not allocated to your account` };
     }
     if (!isAdmin) {
-      const r = rows.rows.find((x: any) => Number(x.vmid) === v);
-      if (r.owner_email !== userEmail) {
+      const r = result.rows.find(row => Number(row.vmid) === v);
+      if (r?.owner_email !== userEmail) {
         return { ok: false, message: `VMID ${v} does not belong to your account` };
       }
     }
@@ -89,13 +89,13 @@ scheduledTasksRouter.get('/', requireAuth, async (req: AuthenticatedRequest, res
   const isAdmin = req.authUser!.role === 'admin';
   const showAll = isAdmin && req.query.all === '1';
   try {
-    let rows: any[] = [];
+    let result;
     if (showAll) {
-      rows = await pgPool.query('SELECT * FROM scheduled_tasks ORDER BY created_at DESC');
+      result = await pgPool.query('SELECT * FROM scheduled_tasks ORDER BY created_at DESC');
     } else {
-      rows = await pgPool.query('SELECT * FROM scheduled_tasks WHERE owner_email = $1 ORDER BY created_at DESC', [userEmail]);
+      result = await pgPool.query('SELECT * FROM scheduled_tasks WHERE owner_email = $1 ORDER BY created_at DESC', [userEmail]);
     }
-    const out = rows.rows.map((r: any) => ({
+    const out = result.rows.map((r: Record<string, unknown>) => ({
       id: r.id,
       name: r.name,
       taskType: r.task_type,

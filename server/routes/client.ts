@@ -6,6 +6,16 @@ import { requireAuth } from '../middleware.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
 import { mapProxmoxVmMetadata } from '../services/proxmoxVmMetadata.js';
 
+interface PveEnvelope<T> { data?: T; }
+interface PveVmStatus { status?: string; cpu?: number; mem?: number; maxmem?: number; netin?: number; netout?: number; diskread?: number; diskwrite?: number; uptime?: number; }
+interface PveConfig { ipconfig0?: string; net0?: string; [key: string]: unknown; }
+interface PveAgentPayload { result?: Array<{ name?: string; 'ip-addresses'?: Array<{ 'ip-address-type'?: string; 'ip-address'?: string }> }>; }
+
+async function readPveJson<T>(response: Response): Promise<T | null> {
+  const payload: unknown = await response.json().catch(() => null);
+  return payload && typeof payload === 'object' ? payload as T : null;
+}
+
 export const clientRouter = Router();
 clientRouter.use(requireAuth);
 
@@ -147,7 +157,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
       return res.status(502).json({ success: false, error: 'Proxmox did not return VM configuration' });
     }
 
-    const configPayload = await configResponse.json().catch(() => null);
+    const configPayload = await readPveJson<PveEnvelope<PveConfig>>(configResponse);
     const config = (configPayload?.data || {}) as Record<string, unknown>;
     let guestAgentInterfaces: Array<Record<string, unknown>> = [];
     const agentEnabled = vm.type === 'qemu' && (
@@ -163,7 +173,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
           timeoutMs: 8000,
         });
         if (agentResponse.ok) {
-          const agentPayload = await agentResponse.json().catch(() => null);
+          const agentPayload = await readPveJson<PveEnvelope<PveAgentPayload>>(agentResponse);
           guestAgentInterfaces = Array.isArray(agentPayload?.data?.result) ? agentPayload.data.result : [];
         }
       } catch {
@@ -181,7 +191,7 @@ clientRouter.get('/vms/:vmid/metadata', async (req, res) => {
 
 // 2. GET /api/client/vms/:vmid/telemetry — Fetch live CPU %, RAM, and Bandwidth usage from Proxmox for VMID
 clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
-  const vmid = parseInt(req.params.vmid, 10);
+  const vmid = parseInt(String(req.params.vmid), 10);
   const vm = (req as any).authorizedVm;
 
   if (!vm) {
@@ -197,7 +207,7 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
     });
     
     if (!pveRes.ok) throw new Error('Failed to fetch from Proxmox');
-    const json = await pveRes.json();
+    const json = await readPveJson<PveEnvelope<PveVmStatus>>(pveRes);
     
     if (json.data) {
       res.json({
@@ -233,7 +243,7 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
 // 2.5. GET /api/client/vms/:vmid/metrics — Fetch historical telemetry data for charts & aggregations
 clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
     // Fetch last 48 hours for comparison
     const rawHistory = await dbService.getVmTelemetryHistory(vmid, 48);
     
@@ -368,7 +378,7 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
 // 2.6. GET /api/client/vms/:vmid/export — Export VM telemetry history as CSV or JSON
 clientRouter.get('/vms/:vmid/export', async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
     const format = (req.query.format as string) || 'json';
     const range = (req.query.range as string) || '24h';
     const hours = range === '7d' ? 168 : range === '1h' ? 1 : 24;
@@ -409,7 +419,7 @@ clientRouter.get('/vms/:vmid/export', async (req, res) => {
 clientRouter.post('/vms/:vmid/power', async (req, res) => {
   const userEmail = (req as any).authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const vmid = parseInt(req.params.vmid, 10);
+  const vmid = parseInt(String(req.params.vmid), 10);
   const { action } = req.body;
   const allowedActions = new Set(['start', 'stop', 'shutdown', 'reboot']);
   if (!allowedActions.has(action)) {
@@ -448,7 +458,7 @@ clientRouter.post('/vms/:vmid/power', async (req, res) => {
 
 // GET /api/v1/client/vms/:vmid/firewall — uses Proxmox live rules when a connection exists, otherwise falls back to the local rule store so the panel stays functional
 clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
-  const vmid = parseInt(req.params.vmid, 10);
+  const vmid = parseInt(String(req.params.vmid), 10);
   try {
     const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
@@ -462,10 +472,10 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
       headers,
       sslFingerprint: conn.ssl_fingerprint,
     });
-    let options = {};
+    let options: Record<string, unknown> = {};
     if (optRes.ok) {
-      const optJson = await optRes.json();
-      options = optJson.data || {};
+      const optJson = await readPveJson<PveEnvelope<Record<string, unknown>>>(optRes);
+      options = optJson?.data || {};
     }
 
     // Fetch Rules
@@ -474,10 +484,10 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
       headers,
       sslFingerprint: conn.ssl_fingerprint,
     });
-    let rules = [];
+    let rules: Array<Record<string, unknown>> = [];
     if (rulesRes.ok) {
-      const rulesJson = await rulesRes.json();
-      rules = rulesJson.data || [];
+      const rulesJson = await readPveJson<PveEnvelope<Array<Record<string, unknown>>>>(rulesRes);
+      rules = rulesJson?.data || [];
     }
 
     res.json({ success: true, options, rules });
@@ -494,7 +504,7 @@ clientRouter.get('/vms/:vmid/firewall', async (req, res) => {
 // POST /api/v1/client/vms/:vmid/firewall/toggle
 clientRouter.post('/vms/:vmid/firewall/toggle', async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
     const { enable } = req.body;
     const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
@@ -526,7 +536,7 @@ clientRouter.post('/vms/:vmid/firewall/toggle', async (req, res) => {
 // POST /api/v1/client/vms/:vmid/firewall
 clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
     const { action, type, proto, dport, enable, comment } = req.body;
     const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
@@ -566,8 +576,8 @@ clientRouter.post('/vms/:vmid/firewall', async (req, res) => {
 // DELETE /api/v1/client/vms/:vmid/firewall/:pos
 clientRouter.delete('/vms/:vmid/firewall/:pos', async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
-    const pos = parseInt(req.params.pos, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
+    const pos = parseInt(String(req.params.pos), 10);
     const vm = (req as any).authorizedVm;
     if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
 

@@ -24,7 +24,7 @@ async function sweep() {
       .filter(Boolean);
     const nowHour = Math.floor(Date.now() / 3600000);
     for (const vm of vms) {
-      const vmid = vm.vmid || vm.id;
+      const vmid = vm.vmid;
       if (!vmid) continue;
       try {
         const bw = await automationService.getMonthlyBandwidth(vmid);

@@ -1,5 +1,13 @@
 import { dbService } from '../db/database.js';
-import { proxmoxApi } from '../services/proxmox.js';
+import { ProxmoxService } from '../services/proxmoxService.js';
+
+const proxmoxApi = new ProxmoxService({
+  hostIp: process.env.PVE_HOST || '',
+  port: Number(process.env.PVE_PORT || 8006),
+  tokenId: process.env.PVE_TOKEN_ID || '',
+  tokenSecret: process.env.PVE_TOKEN_SECRET || '',
+  sslFingerprint: process.env.PVE_SSL_FINGERPRINT,
+});
 import { emailService } from '../services/email.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;

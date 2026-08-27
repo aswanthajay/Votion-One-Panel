@@ -254,8 +254,11 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
             sslFingerprint: proxmoxConn.ssl_fingerprint,
           });
           if (resInfo.ok) {
-            const jsonInfo = await resInfo.json();
-            const match = (jsonInfo.data || []).find((v: any) => Number(v.vmid) === Number(vmid));
+            const payload: unknown = await resInfo.json();
+            const jsonInfo = payload && typeof payload === 'object' && 'data' in payload
+              ? payload as { data?: Array<{ vmid?: number; node?: string }> }
+              : {};
+            const match = (jsonInfo.data || []).find(v => Number(v.vmid) === Number(vmid));
             if (match && match.node) node = match.node;
           }
         } catch (_e) {}

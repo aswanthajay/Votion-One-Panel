@@ -11,7 +11,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { dbService } from './db/database.js';
-import { pveFetchWithLimit } from './services/proxmox.js';
+import { proxmoxFetch } from './services/proxmoxHttp.js';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from './middleware.js';
 
 export const adminVmFleetRouter = Router();
@@ -20,8 +20,17 @@ export const adminVmFleetRouter = Router();
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+interface PveNode { node: string; status?: string; cpu?: number; maxcpu?: number; mem?: number; maxmem?: number; uptime?: number; name?: string; }
+interface PveStatus { status?: string; cpu?: number; mem?: number; maxmem?: number; maxdisk?: number; disk?: number; netin?: number; netout?: number; uptime?: number; cpus?: number; rootfs?: { used?: number; total?: number }; memory?: { used?: number; total?: number }; }
+interface PveVm { vmid: number; node: string; name?: string; type?: string; status?: string; maxcpu?: number; maxmem?: number; maxdisk?: number; }
+interface PveEnvelope<T> { data?: T; }
+
+async function readPveJson<T>(response: globalThis.Response): Promise<T> {
+  return await response.json() as T;
+}
+
 interface ProxmoxConn {
-  id: number;
+  id: string;
   host_ip: string;
   port?: number;
   token_id: string;
@@ -49,13 +58,13 @@ async function locateVM(vmid: number): Promise<{ conn: ProxmoxConn; node: string
     const host = cleanHost(conn);
     const port = conn.port || 8006;
     try {
-      const nodesRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
+      const nodesRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
       if (!nodesRes.ok) continue;
-      const nodesJson = await nodesRes.json();
+      const nodesJson = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
       for (const node of (nodesJson.data || [])) {
         for (const t of ['qemu', 'lxc']) {
           try {
-            const res = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes/${node.node}/${t}/${vmid}/status/current`, { headers: authHeaders(conn) });
+            const res = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${node.node}/${t}/${vmid}/status/current`, { headers: authHeaders(conn) });
             if (res.ok) return { conn, node: node.node, type: t };
           } catch (e) { /* try next */ }
         }
@@ -74,9 +83,9 @@ async function getLiveVMSnapshot(vmid: number) {
     try {
       const host = cleanHost(loc.conn);
       const port = loc.conn.port || 8006;
-      const res = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes/${loc.node}/${loc.type}/${vmid}/status/current`, { headers: authHeaders(loc.conn) });
+      const res = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${loc.node}/${loc.type}/${vmid}/status/current`, { headers: authHeaders(loc.conn) });
       if (res.ok) {
-        const json = await res.json();
+        const json = await readPveJson<PveEnvelope<PveStatus>>(res);
         const d = json.data || {};
         live = {
           status: d.status || 'unknown',
@@ -110,9 +119,9 @@ adminVmFleetRouter.get('/nodes', requireAuth, requireAdmin, async (_req: Authent
       const host = cleanHost(conn);
       const port = conn.port || 8006;
       try {
-        const nodesRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
+        const nodesRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
         if (!nodesRes.ok) continue;
-        const nodesJson = await nodesRes.json();
+        const nodesJson = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
         for (const n of (nodesJson.data || [])) {
           let cpus = 0;
           let memUsed = 0;
@@ -120,9 +129,9 @@ adminVmFleetRouter.get('/nodes', requireAuth, requireAdmin, async (_req: Authent
           let diskUsed = 0;
           let diskTotal = 0;
           try {
-            const stRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });
+            const stRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });
             if (stRes.ok) {
-              const st = (await stRes.json()).data || {};
+              const st = (await readPveJson<PveEnvelope<PveStatus>>(stRes)).data || {};
               cpus = st.cpus || 0;
               memUsed = (st.mem as number) || (st.memory && (st.memory.used as number)) || 0;
               memTotal = (st.maxmem as number) || (st.memory && (st.memory.total as number)) || 0;
@@ -174,9 +183,9 @@ adminVmFleetRouter.get('/vms/options', requireAuth, requireAdmin, async (_req: A
       try {
         const host = cleanHost(conn);
         const port = conn.port || 8006;
-        const nodesRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
+        const nodesRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
         if (nodesRes.ok) {
-          const nodesJson = await nodesRes.json();
+          const nodesJson = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
           for (const n of (nodesJson.data || [])) {
             if (!nodes.some(x => x.node === n.node)) {
               nodes.push({ node: n.node, name: conn.name || n.node });
@@ -212,7 +221,7 @@ adminVmFleetRouter.get('/vms/options', requireAuth, requireAdmin, async (_req: A
 // ---------------------------------------------------------------------------
 adminVmFleetRouter.get('/vms/:vmid/live', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const vmid = parseInt(req.params.vmid, 10);
+    const vmid = parseInt(String(req.params.vmid), 10);
     if (!vmid) return res.status(400).json({ success: false, error: 'Invalid VMID' });
     const snapshot = await getLiveVMSnapshot(vmid);
     if (!snapshot.db) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
@@ -227,7 +236,7 @@ adminVmFleetRouter.get('/vms/:vmid/live', requireAuth, requireAdmin, async (req:
 // ---------------------------------------------------------------------------
 adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const userEmail = req.authUser!.email;
-  const vmid = parseInt(req.params.vmid, 10);
+  const vmid = parseInt(String(req.params.vmid), 10);
   const { action } = req.body || {};
   const allowed = ['start', 'stop', 'reboot', 'shutdown'];
   if (!allowed.includes(action)) {
@@ -250,7 +259,7 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
         const host = cleanHost(loc.conn);
         const port = loc.conn.port || 8006;
         const path = `https://${host}:${port}/api2/json/nodes/${loc.node}/${loc.type}/${vmid}/status/${action}`;
-        const fetchRes = await pveFetchWithLimit(path, { method: 'POST', headers: authHeaders(loc.conn) });
+        const fetchRes = await proxmoxFetch(path, { method: 'POST', headers: authHeaders(loc.conn) });
         if (fetchRes.ok) {
           pveResult = { ok: true, message: `Proxmox accepted the ${action} request` };
         } else {
@@ -282,7 +291,7 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
 // ---------------------------------------------------------------------------
 adminVmFleetRouter.post('/vms/:vmid/update', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const userEmail = req.authUser!.email;
-  const vmid = parseInt(req.params.vmid, 10);
+  const vmid = parseInt(String(req.params.vmid), 10);
   const { name, os, ipAddress, cpus, memoryGb, diskGb, expiryDays } = req.body || {};
   try {
     const vm = await dbService.getVMByVMID(vmid);
@@ -339,15 +348,16 @@ adminVmFleetRouter.get('/summary', requireAuth, requireAdmin, async (_req: Authe
       try {
         const host = cleanHost(conn);
         const port = conn.port || 8006;
-        const nodesRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
+        const nodesRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
         if (!nodesRes.ok) continue;
-        for (const n of (await nodesRes.json()).data || []) {
+        const nodePayload = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
+        for (const n of nodePayload.data || []) {
           let cpus = n.maxcpu || 0;
           let memTotal = 0;
           try {
-            const stRes = await pveFetchWithLimit(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });
+            const stRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });
             if (stRes.ok) {
-              const st = (await stRes.json()).data || {};
+              const st = (await readPveJson<PveEnvelope<PveStatus>>(stRes)).data || {};
               // This cluster's API reports RAM under memory.total rather than maxmem.
               memTotal = (st.maxmem as number) || (st.memory && (st.memory.total as number)) || 0;
             }
@@ -355,7 +365,7 @@ adminVmFleetRouter.get('/summary', requireAuth, requireAdmin, async (_req: Authe
           nodeCapacity.push({
             name: conn.name || n.node,
             node: n.node,
-            cpuCores: cpus || (n.cpus || 0),
+            cpuCores: cpus || (n.maxcpu || 0),
             ramTotalGb: Math.round(memTotal / 1073741824),
             vms: allVms.filter(v => v.node === n.node).length,
           });

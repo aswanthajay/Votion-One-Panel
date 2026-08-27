@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pgPool } from '../db/database.js';
 
 export type DatabaseHealthSuccess = {
@@ -49,7 +50,7 @@ const getDatabaseErrorMessage = (error: unknown): string => {
  */
 export async function checkDbHealth(): Promise<DatabaseHealth> {
   const startedAt = process.hrtime.bigint();
-  let client: Awaited<ReturnType<typeof pgPool.connect>> | null = null;
+  let client: PoolClient | null = null;
   let transactionStarted = false;
 
   try {
