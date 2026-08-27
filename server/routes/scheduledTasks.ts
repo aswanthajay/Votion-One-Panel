@@ -86,7 +86,7 @@ async function ensureTable() {
 scheduledTasksRouter.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
   await ensureTable();
   const userEmail = req.authUser!.email;
-  const isAdmin = req.authUser!.role === 'admin';
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser!.role);
   const showAll = isAdmin && req.query.all === '1';
   try {
     let result;
@@ -120,7 +120,7 @@ scheduledTasksRouter.get('/', requireAuth, async (req: AuthenticatedRequest, res
 scheduledTasksRouter.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
   await ensureTable();
   const userEmail = req.authUser!.email;
-  const isAdmin = req.authUser!.role === 'admin';
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser!.role);
   const { name, taskType, vmids, days, time, timezone } = req.body || {};
 
   if (!name || typeof name !== 'string') return res.status(400).json({ success: false, error: 'Schedule name is required' });
@@ -155,7 +155,7 @@ scheduledTasksRouter.post('/', requireAuth, async (req: AuthenticatedRequest, re
 scheduledTasksRouter.put('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   await ensureTable();
   const userEmail = req.authUser!.email;
-  const isAdmin = req.authUser!.role === 'admin';
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser!.role);
   try {
     const row = await pgPool.query('SELECT * FROM scheduled_tasks WHERE id = $1', [req.params.id]);
     if (row.rowCount === 0) return res.status(404).json({ success: false, error: 'Schedule not found' });
@@ -203,7 +203,7 @@ scheduledTasksRouter.put('/:id', requireAuth, async (req: AuthenticatedRequest, 
 scheduledTasksRouter.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   await ensureTable();
   const userEmail = req.authUser!.email;
-  const isAdmin = req.authUser!.role === 'admin';
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser!.role);
   try {
     const row = await pgPool.query('SELECT * FROM scheduled_tasks WHERE id = $1', [req.params.id]);
     if (row.rowCount === 0) return res.status(404).json({ success: false, error: 'Schedule not found' });
@@ -219,7 +219,7 @@ scheduledTasksRouter.delete('/:id', requireAuth, async (req: AuthenticatedReques
 scheduledTasksRouter.post('/:id/run-now', requireAuth, async (req: AuthenticatedRequest, res) => {
   await ensureTable();
   const userEmail = req.authUser!.email;
-  const isAdmin = req.authUser!.role === 'admin';
+  const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser!.role);
   try {
     const row = await pgPool.query('SELECT * FROM scheduled_tasks WHERE id = $1', [req.params.id]);
     if (row.rowCount === 0) return res.status(404).json({ success: false, error: 'Schedule not found' });
