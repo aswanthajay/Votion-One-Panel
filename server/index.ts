@@ -11,6 +11,7 @@ import { authKeyRouter } from './routes/authKey.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
+import { runMigrations } from './db/migrate.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
@@ -183,6 +184,10 @@ app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachPro
 
 // Initialize and validate the database before any route, worker, or proxy queries run.
 await initializeDatabaseSchema();
+const appliedMigrations = await runMigrations();
+if (appliedMigrations.length > 0) {
+  console.log(`[MIGRATIONS] Applied ${appliedMigrations.length} migration(s)`);
+}
 const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
 if (migratedProxmoxCredentials > 0) {
   console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);
