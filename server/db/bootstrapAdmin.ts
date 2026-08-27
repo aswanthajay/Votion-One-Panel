@@ -7,15 +7,12 @@ const ADMIN_ROLES = ['admin', 'administrator', 'moderator'];
 
 export type InitialAdminBootstrapResult =
   | { status: 'created'; email: string }
-  | { status: 'already-configured' };
+  | { status: 'already-configured' }
+  | { status: 'pending-configuration'; email: string };
 
-function readInitialAdminPassword(): string {
+function readInitialAdminPassword(): string | null {
   const password = process.env.INITIAL_ADMIN_PASSWORD;
-  if (!password) {
-    throw new Error(
-      'INITIAL_ADMIN_PASSWORD must be configured before the first administrator can be created.',
-    );
-  }
+  if (!password) return null;
   if (password.length < 12) {
     throw new Error('INITIAL_ADMIN_PASSWORD must contain at least 12 characters.');
   }
@@ -59,6 +56,12 @@ export async function bootstrapInitialAdmin(): Promise<InitialAdminBootstrapResu
     }
 
     const password = readInitialAdminPassword();
+    if (!password) {
+      await client.query('COMMIT');
+      transactionStarted = false;
+      return { status: 'pending-configuration', email: INITIAL_ADMIN_EMAIL };
+    }
+
     const existingAccount = await client.query<{ email: string }>(
       'SELECT email FROM accounts WHERE email = $1 FOR UPDATE',
       [INITIAL_ADMIN_EMAIL],

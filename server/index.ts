@@ -281,6 +281,12 @@ const initialAdminBootstrap = await bootstrapInitialAdmin();
 if (initialAdminBootstrap.status === 'created') {
   log('info', 'startup.initial_admin_created', { email: initialAdminBootstrap.email });
 }
+if (initialAdminBootstrap.status === 'pending-configuration') {
+  log('warn', 'startup.initial_admin_pending', {
+    email: initialAdminBootstrap.email,
+    reason: 'INITIAL_ADMIN_PASSWORD is not configured; no administrator was created.',
+  });
+}
 const providerCredentialsAvailable = isProviderCredentialKeyConfigured();
 if (providerCredentialsAvailable) {
   const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
