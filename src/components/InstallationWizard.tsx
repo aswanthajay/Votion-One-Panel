@@ -44,18 +44,13 @@ export const InstallationWizard: React.FC = () => {
 
   const requestHeaders = useMemo(() => ({
     'Content-Type': 'application/json',
-    'x-installation-token': installationToken,
+    ...(installationToken ? { 'x-installation-token': installationToken } : {}),
   }), [installationToken]);
 
   useEffect(() => {
-    if (!installationToken) {
-      setState('unavailable');
-      setError('This installation link is missing its security token. Restart the installation service to issue a new link.');
-      return;
-    }
-    updateInstallerHistoryState(installationToken);
+    if (installationToken) updateInstallerHistoryState(installationToken);
     let active = true;
-    void fetch(`${API_BASE_URL}/installation/status`, { headers: requestHeaders })
+    void fetch(`${API_BASE_URL}/installation/status`, { headers: requestHeaders, credentials: 'same-origin' })
       .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }))
       .then(({ response, data }) => {
         if (!active) return;
@@ -88,6 +83,7 @@ export const InstallationWizard: React.FC = () => {
       const response = await fetch(`${API_BASE_URL}/installation/validate-database`, {
         method: 'POST',
         headers: requestHeaders,
+        credentials: 'same-origin',
         body: JSON.stringify({ databaseUrl }),
       });
       const data = await response.json().catch(() => ({}));
@@ -126,6 +122,7 @@ export const InstallationWizard: React.FC = () => {
       const response = await fetch(`${API_BASE_URL}/installation/complete`, {
         method: 'POST',
         headers: requestHeaders,
+        credentials: 'same-origin',
         body: JSON.stringify({ databaseUrl, publicAppUrl, corsOrigins, adminName, adminPassword }),
       });
       const data = await response.json().catch(() => ({}));

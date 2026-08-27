@@ -11,6 +11,7 @@ import { persistInstallationConfiguration } from './services/runtimeConfig.js';
 
 const { Pool } = pg;
 const INSTALLER_TOKEN_TTL_MS = 30 * 60 * 1000;
+const INSTALLER_SESSION_COOKIE = 'votion_installation';
 const ADMIN_EMAIL = 'admin@votioncloud.org';
 const ADMIN_ROLES = ['admin', 'administrator', 'moderator'];
 const currentFile = fileURLToPath(import.meta.url);
@@ -35,7 +36,29 @@ function tokenIsValid(value: unknown): boolean {
 }
 
 function readInstallerToken(req: express.Request): string {
-  return typeof req.header('x-installation-token') === 'string' ? req.header('x-installation-token')! : '';
+  const headerToken = req.header('x-installation-token');
+  if (typeof headerToken === 'string' && headerToken.trim()) return headerToken;
+
+  const cookieHeader = req.header('cookie') || '';
+  const sessionCookie = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${INSTALLER_SESSION_COOKIE}=`));
+  return sessionCookie ? decodeURIComponent(sessionCookie.slice(INSTALLER_SESSION_COOKIE.length + 1)) : '';
+}
+
+function installerSessionCookie(token: string, req: express.Request): string {
+  const forwardedProtocol = req.header('x-forwarded-proto')?.split(',')[0]?.trim();
+  const secure = req.secure || forwardedProtocol === 'https';
+  const attributes = [
+    `${INSTALLER_SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    'Path=/',
+    `Max-Age=${Math.floor(INSTALLER_TOKEN_TTL_MS / 1000)}`,
+    'HttpOnly',
+    'SameSite=Strict',
+  ];
+  if (secure) attributes.push('Secure');
+  return attributes.join('; ');
 }
 
 function validPublicUrl(value: unknown): string | null {
@@ -164,6 +187,14 @@ const installationRateLimit = expressRateLimit({
 
 app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', service: 'votion-one-installer', setupAvailable: !installationCompleted && Date.now() <= installerExpiresAt });
+});
+
+app.get('/install', (req, res, next) => {
+  const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+  if (!queryToken || !tokenIsValid(queryToken)) return next();
+
+  res.setHeader('Set-Cookie', installerSessionCookie(queryToken, req));
+  return res.redirect(303, '/install');
 });
 
 app.get('/api/v1/installation/status', installationRateLimit, (req, res) => {
