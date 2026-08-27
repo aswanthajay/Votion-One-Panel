@@ -101,7 +101,7 @@ const proxyVmId = (req: any): number | null => {
 
 const attachProxyConnection = async (req: any, res: express.Response, next: express.NextFunction) => {
   try {
-    const connections = await dbService.getProxmoxConnections();
+    const connections = await dbService.getProxmoxConnectionCredentials();
     const vmid = proxyVmId(req);
     const vm = vmid ? await dbService.getVMByVMID(vmid) : null;
     const sessionUser = req.authUser;
@@ -128,7 +128,7 @@ const proxmoxProxy = createProxyMiddleware({
   secure: true,
   router: async (req: any) => {
     try {
-      const conns = await dbService.getProxmoxConnections();
+      const conns = await dbService.getProxmoxConnectionCredentials();
       const c = req.proxmoxConnection || (conns.length === 1 ? conns[0] : null);
       if (c) {
         const cleanHost = c.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -180,13 +180,17 @@ app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachPro
 
 // Initialize and validate the database before any route, worker, or proxy queries run.
 await initializeDatabaseSchema();
+const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
+if (migratedProxmoxCredentials > 0) {
+  console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);
+}
 const dbHealth = await checkDbHealth();
 if (dbHealth.status !== 'ok') {
   console.error(`[POSTGRES] Startup health check failed: ${dbHealth.error}`);
   throw new Error(`Database health check failed: ${dbHealth.error}`);
 }
 console.log(`[POSTGRES] Startup health check passed (${dbHealth.latencyMs}ms)`);
-const initialConnections = await dbService.getProxmoxConnections();
+const initialConnections = await dbService.getProxmoxConnectionCredentials();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
 // Start idempotent telemetry and policy-controlled billing workers
@@ -230,7 +234,7 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         return;
       }
 
-      const connections = await dbService.getProxmoxConnections();
+      const connections = await dbService.getProxmoxConnectionCredentials();
       const proxmoxConn = requestedVm.proxmoxConnectionId
         ? connections.find(connection => String(connection.id) === String(requestedVm.proxmoxConnectionId))
         : null;
@@ -326,7 +330,7 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
       socket.destroy();
     }
   } else if (req.url?.startsWith('/novnc') || req.url?.startsWith('/api2') || req.url?.startsWith('/pve2') || req.url?.startsWith('/proxmox-console')) {
-    const proxyConnections = await dbService.getProxmoxConnections();
+    const proxyConnections = await dbService.getProxmoxConnectionCredentials();
     if (proxyConnections.length !== 1) {
       socket.destroy();
       return;

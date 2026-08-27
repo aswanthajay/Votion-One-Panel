@@ -1356,11 +1356,8 @@ apiRouter.put('/admin/proxmox/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: result.error });
     }
     await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_PROXMOX_CONNECTION', req.params.id, 'Cluster connection details updated');
-    // Mask sensitive secrets in the response
-    const conn = result.connection;
-    conn.token_secret = conn.token_secret ? '••••••••' : '';
-    conn.password = conn.password ? '••••••••' : '';
-    res.json({ success: true, connection: conn });
+    // The database layer returns a strict secret-free public DTO.
+    res.json({ success: true, connection: result.connection });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

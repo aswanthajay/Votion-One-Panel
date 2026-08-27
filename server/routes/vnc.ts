@@ -25,7 +25,7 @@ vncRouter.post('/init', async (req, res) => {
     const type = vm.type;
     const node = vm.node;
 
-    const conns = await dbService.getProxmoxConnections();
+    const conns = await dbService.getProxmoxConnectionCredentials();
     if (!conns || conns.length === 0) {
       return res.status(500).json({ success: false, error: 'No Proxmox connection configured.' });
     }

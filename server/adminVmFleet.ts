@@ -34,12 +34,12 @@ interface ProxmoxConn {
   host_ip: string;
   port?: number;
   token_id: string;
-  token_secret: string;
+  token_secret: string | null;
   name?: string;
 }
 
 function authHeaders(conn: ProxmoxConn) {
-  return { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` };
+  return { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret || ''}` };
 }
 
 function cleanHost(conn: ProxmoxConn) {
@@ -48,7 +48,7 @@ function cleanHost(conn: ProxmoxConn) {
 
 /** All connections that can reach the cluster. */
 async function getConns(): Promise<ProxmoxConn[]> {
-  return ((await dbService.getProxmoxConnections()) as ProxmoxConn[]) || [];
+  return (await dbService.getProxmoxConnectionCredentials()) || [];
 }
 
 /** Find the VM's node and type from the live cluster (first match by vmid). */

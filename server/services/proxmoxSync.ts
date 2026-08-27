@@ -9,7 +9,7 @@ type ProxmoxConnection = {
   host_ip: string;
   port: number;
   token_id: string;
-  token_secret: string;
+  token_secret: string | null;
   ssl_fingerprint?: string | null;
 };
 
@@ -64,7 +64,7 @@ export class ProxmoxSyncWorker {
   }
 
   private async performSync(): Promise<void> {
-    const connections = (await dbService.getProxmoxConnections()) as ProxmoxConnection[];
+    const connections = (await dbService.getProxmoxConnectionCredentials()) as ProxmoxConnection[];
     if (connections.length === 0) return;
 
     for (const connection of connections) {

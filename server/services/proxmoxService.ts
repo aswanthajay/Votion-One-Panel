@@ -59,7 +59,7 @@ export class ProxmoxService {
       throw new Error(`Proxmox VMID ${vmid} is currently suspended due to billing expiry. Power action ${action.toUpperCase()} blocked.`);
     }
 
-    const connections = await dbService.getProxmoxConnections();
+    const connections = await dbService.getProxmoxConnectionCredentials();
     const connection = vm.proxmoxConnectionId
       ? connections.find(item => item.id === vm.proxmoxConnectionId)
       : connections[0];

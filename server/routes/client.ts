@@ -33,7 +33,7 @@ const getConnectionForVm = async (vm: { proxmoxConnectionId?: string | null }) =
   const connectionId = vm.proxmoxConnectionId;
   if (!connectionId) throw new Error('This VM is not associated with a Proxmox connection');
 
-  const connections = await dbService.getProxmoxConnections();
+  const connections = await dbService.getProxmoxConnectionCredentials();
   const connection = connections.find(candidate => String(candidate.id) === String(connectionId));
   if (!connection) throw new Error('The Proxmox connection assigned to this VM is unavailable');
   return connection;

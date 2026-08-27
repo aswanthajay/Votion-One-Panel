@@ -64,7 +64,7 @@ function inTz(now: Date, tz: string): { day: string; time: string } {
 
 async function getCachedConnection(): Promise<{ host: string; port: number; auth: string } | null> {
   try {
-    const conns: any[] = await dbService.getProxmoxConnections();
+    const conns: any[] = await dbService.getProxmoxConnectionCredentials();
     if (!conns || conns.length === 0) return null;
     const c = conns[0];
     const host = c.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');

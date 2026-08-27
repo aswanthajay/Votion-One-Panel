@@ -108,7 +108,7 @@ export class ProxmoxApiService {
    * and the response is flagged so the UI can label it clearly.
    */
   async getNodeMetrics(nodeName?: string): Promise<NodeMetric[]> {
-    const connections = await dbService.getProxmoxConnections();
+    const connections = await dbService.getProxmoxConnectionCredentials();
 
     const metricsPromises = (connections.length > 0 ? connections : [null]).map(async (conn, connIdx) => {
       if (!conn) {
@@ -238,7 +238,7 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
             rootUsedGb: Math.round(rootUsed / 1073741824),
             rootTotalGb: Math.round(rootTotal / 1073741824),
             uptimeSeconds: node.uptime || 0,
-            platformVersion: await fetchVersion(cleanHost, conn.port, conn.token_id, conn.token_secret, conn.ssl_fingerprint),
+            platformVersion: await fetchVersion(cleanHost, conn.port, conn.token_id, conn.token_secret || '', conn.ssl_fingerprint),
             zfsHealth: storageStores.length > 0 ? `${storageStores.length} pool(s) active, ${storageTotalGb} GB total` : 'Status unavailable',
             storagePools: storageTotalGb > 0 ? storageStores : [],
             simulated: false,
@@ -293,7 +293,7 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
    * Fetch ALL VMs across the Proxmox cluster and merge with local DB assignments
    */
   async getAllProxmoxVMs() {
-    const conns = await dbService.getProxmoxConnections();
+    const conns = await dbService.getProxmoxConnectionCredentials();
     const dbVms = await dbService.getVMs();
     if (!conns || conns.length === 0) return dbVms;
 
@@ -425,7 +425,7 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
    */
   async getLiveVMs(ownerEmail?: string) {
     const vms = await dbService.getVMs(ownerEmail);
-    const conns = await dbService.getProxmoxConnections();
+    const conns = await dbService.getProxmoxConnectionCredentials();
     
     if (!conns || conns.length === 0) return vms;
     
@@ -588,7 +588,7 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
     this.telemetryTimer = setInterval(async () => {
       try {
         const vms = await dbService.getVMs();
-        const conns = await dbService.getProxmoxConnections();
+        const conns = await dbService.getProxmoxConnectionCredentials();
         if (!conns || conns.length === 0) return;
         
         const conn = conns[0];

@@ -134,7 +134,7 @@ export class ReimageExecutionService {
       throw new ReimageExecutionError('BACKUP_REQUIRED', 'A verified backup reference is required before preflight.');
     }
 
-    const connections = await dbService.getProxmoxConnections();
+    const connections = await dbService.getProxmoxConnectionCredentials();
     const connection = vm.proxmoxConnectionId
       ? connections.find(candidate => String(candidate.id) === String(vm.proxmoxConnectionId))
       : null;
@@ -148,8 +148,8 @@ export class ReimageExecutionService {
     const host = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
     const port = Number(connection.port) || 8006;
     const base = `https://${host}:${port}/api2/json/nodes/${encodeURIComponent(vm.node)}/${vm.type}/${vm.vmid}`;
-    const status = await readProxmoxJson(`${base}/status/current`, connection.token_id, connection.token_secret, connection.ssl_fingerprint);
-    const config = await readProxmoxJson(`${base}/config`, connection.token_id, connection.token_secret, connection.ssl_fingerprint) as Record<string, unknown>;
+    const status = await readProxmoxJson(`${base}/status/current`, connection.token_id, connection.token_secret || '', connection.ssl_fingerprint);
+    const config = await readProxmoxJson(`${base}/config`, connection.token_id, connection.token_secret || '', connection.ssl_fingerprint) as Record<string, unknown>;
     const safeConfig = {
       node: vm.node,
       vmid: vm.vmid,

@@ -11,7 +11,7 @@ interface ProxmoxConn {
   host_ip: string;
   port: number | string;
   token_id: string;
-  token_secret: string;
+  token_secret: string | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -33,7 +33,7 @@ async function pveRequest<T = any>(
   const port = conn.port || 8006;
   const url = `https://${cleanHost}:${port}/api2/json${path}`;
   const headers: Record<string, string> = {
-    Authorization: `PVEAPIToken=${conn.token_id}=${conn.token_secret}`,
+    Authorization: `PVEAPIToken=${conn.token_id}=${conn.token_secret || ''}`,
   };
   let body: string | undefined;
   if (form) {
@@ -87,7 +87,7 @@ export function pveRequestExported(...args: Parameters<typeof pveRequest>) {
 }
 
 async function requireConn(): Promise<ProxmoxConn> {
-  const conns = await dbService.getProxmoxConnections();
+  const conns = await dbService.getProxmoxConnectionCredentials();
   if (!conns || conns.length === 0) {
     throw new Error('No cluster connection configured.');
   }

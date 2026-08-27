@@ -2,7 +2,54 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
+import { decryptCredential, encryptCredential, isEncryptedCredential } from '../services/secretBox.js';
 const { Pool } = pg;
+
+export type ProxmoxConnectionPublic = {
+  id: string;
+  name: string;
+  host_ip: string;
+  port: number;
+  username: string;
+  token_id: string;
+  ssl_fingerprint: string | null;
+  status: string;
+  last_tested: Date | null;
+  created_at: Date | null;
+  updated_at: Date | null;
+};
+
+type ProxmoxConnectionStored = ProxmoxConnectionPublic & {
+  password: string | null;
+  token_secret: string | null;
+};
+
+const PROXMOX_PUBLIC_COLUMNS = 'id, name, host_ip, port, username, token_id, ssl_fingerprint, status, last_tested, created_at, updated_at';
+const PROXMOX_SECRET_COLUMNS = `${PROXMOX_PUBLIC_COLUMNS}, password, token_secret`;
+
+function toProxmoxPublic(row: ProxmoxConnectionStored): ProxmoxConnectionPublic {
+  return {
+    id: String(row.id),
+    name: String(row.name || ''),
+    host_ip: String(row.host_ip || ''),
+    port: Number(row.port || 8006),
+    username: String(row.username || ''),
+    token_id: String(row.token_id || ''),
+    ssl_fingerprint: row.ssl_fingerprint || null,
+    status: String(row.status || 'unknown'),
+    last_tested: row.last_tested || null,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+  };
+}
+
+function decryptProxmoxCredentials(row: ProxmoxConnectionStored): ProxmoxConnectionStored {
+  return {
+    ...row,
+    password: decryptCredential(row.password),
+    token_secret: decryptCredential(row.token_secret),
+  };
+}
 
 const databaseUrl = process.env.DATABASE_URL?.trim();
 const poolConfig: pg.PoolConfig = databaseUrl
@@ -2306,22 +2353,17 @@ export class DatabaseService {
   }
 
   async updateProxmoxConnection(id: string, payload: { name?: string; host_ip?: string; port?: number; username?: string; password?: string; token_id?: string; token_secret?: string; ssl_fingerprint?: string }) {
-    const existing = await pgPool.query('SELECT * FROM proxmox_connections WHERE id = $1', [id]);
-    if (!existing.rows[0]) return { success: false, error: 'Connection not found' };
-    const e = existing.rows[0];
-    const name = payload.name !== undefined ? payload.name : e.name;
-    const host_ip = payload.host_ip !== undefined ? payload.host_ip : e.host_ip;
-    const port = payload.port !== undefined ? payload.port : e.port;
-    const username = payload.username !== undefined ? payload.username : e.username;
-    const password = payload.password !== undefined && payload.password !== '' ? payload.password : e.password;
-    const token_id = payload.token_id !== undefined ? payload.token_id : e.token_id;
-    const token_secret = payload.token_secret !== undefined && payload.token_secret !== '' ? payload.token_secret : e.token_secret;
-    const ssl_fingerprint = payload.ssl_fingerprint !== undefined ? payload.ssl_fingerprint : e.ssl_fingerprint;
-    const res = await pgPool.query(
-      `UPDATE proxmox_connections SET name = $1, host_ip = $2, port = $3, username = $4, password = $5, token_id = $6, token_secret = $7, ssl_fingerprint = $8, updated_at = NOW() WHERE id = $9 RETURNING *`,
-      [name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint, id]
+    const existing = await this.getProxmoxConnectionCredentials(id);
+    if (!existing) return { success: false, error: 'Connection not found' };
+    const password = payload.password !== undefined && payload.password !== '' ? payload.password : existing.password;
+    const token_secret = payload.token_secret !== undefined && payload.token_secret !== '' ? payload.token_secret : existing.token_secret;
+    const res = await pgPool.query<ProxmoxConnectionStored>(
+      `UPDATE proxmox_connections SET name = $1, host_ip = $2, port = $3, username = $4, password = $5, token_id = $6, token_secret = $7, ssl_fingerprint = $8, updated_at = NOW()
+       WHERE id = $9 RETURNING ${PROXMOX_SECRET_COLUMNS}`,
+      [payload.name ?? existing.name, payload.host_ip ?? existing.host_ip, payload.port ?? existing.port, payload.username ?? existing.username, encryptCredential(password), payload.token_id ?? existing.token_id, encryptCredential(token_secret), payload.ssl_fingerprint ?? existing.ssl_fingerprint, id],
     );
-    return { success: true, connection: res.rows[0] };
+    const updated = res.rows[0];
+    return { success: true, connection: updated ? toProxmoxPublic(decryptProxmoxCredentials(updated)) : null };
   }
 
   async getAuditLogsFiltered(opts: { action?: string; user_email?: string; status?: string; search?: string; limit?: number; offset?: number } = {}) {
@@ -2357,9 +2399,25 @@ export class DatabaseService {
   }
 
   // PROXMOX CONNECTIONS
-  async getProxmoxConnections() {
-    const res = await pgPool.query('SELECT * FROM proxmox_connections ORDER BY last_tested DESC');
-    return res.rows;
+  async migrateProxmoxCredentials(): Promise<number> {
+    const res = await pgPool.query<{ id: string; password: string | null; token_secret: string | null }>(
+      'SELECT id, password, token_secret FROM proxmox_connections',
+    );
+    let migrated = 0;
+    for (const row of res.rows) {
+      if (isEncryptedCredential(row.password) && isEncryptedCredential(row.token_secret)) continue;
+      await pgPool.query(
+        'UPDATE proxmox_connections SET password = $1, token_secret = $2, updated_at = NOW() WHERE id = $3',
+        [encryptCredential(row.password), encryptCredential(row.token_secret), row.id],
+      );
+      migrated++;
+    }
+    return migrated;
+  }
+
+  async getProxmoxConnections(): Promise<ProxmoxConnectionPublic[]> {
+    const res = await pgPool.query<ProxmoxConnectionStored>(`SELECT ${PROXMOX_PUBLIC_COLUMNS} FROM proxmox_connections ORDER BY last_tested DESC`);
+    return res.rows.map(toProxmoxPublic);
   }
 
   async getProxmoxConnectionOverview() {
@@ -2392,9 +2450,15 @@ export class DatabaseService {
     }));
   }
 
-  async getProxmoxConnectionCredentials(id: string) {
-    const res = await pgPool.query('SELECT * FROM proxmox_connections WHERE id = $1', [id]);
-    return res.rows[0] || null;
+  async getProxmoxConnectionCredentials(): Promise<ProxmoxConnectionStored[]>;
+  async getProxmoxConnectionCredentials(id: string): Promise<ProxmoxConnectionStored | null>;
+  async getProxmoxConnectionCredentials(id?: string): Promise<ProxmoxConnectionStored[] | ProxmoxConnectionStored | null> {
+    if (id) {
+      const res = await pgPool.query<ProxmoxConnectionStored>(`SELECT ${PROXMOX_SECRET_COLUMNS} FROM proxmox_connections WHERE id = $1`, [id]);
+      return res.rows[0] ? decryptProxmoxCredentials(res.rows[0]) : null;
+    }
+    const res = await pgPool.query<ProxmoxConnectionStored>(`SELECT ${PROXMOX_SECRET_COLUMNS} FROM proxmox_connections ORDER BY last_tested DESC`);
+    return res.rows.map(decryptProxmoxCredentials);
   }
 
   async recordProxmoxConnectionTest(id: string, status: string) {
@@ -2436,11 +2500,12 @@ export class DatabaseService {
 
   async addProxmoxConnection(name: string, host_ip: string, port: number, username: string, password: string, token_id: string, token_secret: string, ssl_fingerprint: string) {
     const connId = `pve-conn-${Date.now()}`;
-    const res = await pgPool.query(
-      `INSERT INTO proxmox_connections (id, name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [connId, name, host_ip, port, username || 'root@pam', password, token_id, token_secret, ssl_fingerprint]
+    const res = await pgPool.query<ProxmoxConnectionStored>(
+      `INSERT INTO proxmox_connections (id, name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${PROXMOX_SECRET_COLUMNS}`,
+      [connId, name, host_ip, port, username || 'root@pam', encryptCredential(password), token_id, encryptCredential(token_secret), ssl_fingerprint],
     );
-    return res.rows[0];
+    return res.rows[0] ? toProxmoxPublic(decryptProxmoxCredentials(res.rows[0])) : null;
   }
 
   async deleteProxmoxConnection(id: string) {
