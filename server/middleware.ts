@@ -92,6 +92,11 @@ export function verifySessionToken(token: string): { payload: string } | null {
  * Requests without a valid token receive 401.
  */
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (req.authUser) {
+    next();
+    return;
+  }
+
   const authHeader = req.headers['authorization'];
   let token = authHeader?.replace('Bearer ', '');
   if (!token) {

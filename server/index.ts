@@ -119,15 +119,38 @@ app.get('/readyz', async (_req, res) => {
   }
 });
 
+const anonymousApiRateLimit = Number(process.env.API_RATE_LIMIT_MAX || 300);
+const authenticatedApiRateLimit = Number(process.env.AUTHENTICATED_API_RATE_LIMIT_MAX || 1500);
+
+const resolveRateLimitIdentity = (req: express.Request, _res: express.Response, next: express.NextFunction): void => {
+  const authorization = req.header('authorization');
+  let sessionToken = authorization?.replace(/^Bearer\s+/i, '') || '';
+  if (!sessionToken) {
+    const cookieMatch = (req.header('cookie') || '').match(/(?:^|;\s*)votion_auth_token=([^;]+)/);
+    sessionToken = cookieMatch ? decodeURIComponent(cookieMatch[1]) : '';
+  }
+  if (!sessionToken) {
+    next();
+    return;
+  }
+
+  void resolveSessionUser(sessionToken)
+    .then((user) => {
+      if (user) req.authUser = user;
+      next();
+    })
+    .catch(() => next());
+};
+
 const apiRateLimiter = expressRateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: Number(process.env.API_RATE_LIMIT_MAX || 300),
+  limit: (req) => req.authUser ? authenticatedApiRateLimit : anonymousApiRateLimit,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: (req) => req.authUser?.id ? `account:${req.authUser.id}` : ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown'),
   skip: (req) => /(?:^|\/)(?:health|healthz|readyz)$/.test(req.path),
 });
-app.use('/api', apiRateLimiter);
+app.use('/api', resolveRateLimitIdentity, apiRateLimiter);
 
 // API Router Registrations
 app.use('/api/auth', authKeyRouter);
