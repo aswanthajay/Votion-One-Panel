@@ -2961,3 +2961,48 @@ body {
   background-image: none !important;
   color: #ededed !important;
 }
+
+
+/* Minimal finance visual: quiet surface, single focal object, no decorative flare. */
+.billing-finance-visual {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+}
+
+.billing-finance-visual::after {
+  display: none;
+}
+
+.billing-finance-visual-fallback {
+  perspective: none;
+  opacity: 0.5;
+}
+
+.billing-finance-fallback-ring {
+  width: 72px;
+  height: 72px;
+  border-color: color-mix(in srgb, var(--theme-accent) 52%, transparent);
+  animation-duration: 30s;
+}
+
+.billing-finance-fallback-core {
+  width: 20px;
+  height: 20px;
+  border-color: color-mix(in srgb, var(--theme-accent) 60%, var(--theme-border));
+  background: var(--theme-surface-raised);
+  box-shadow: none;
+  animation-duration: 7s;
+}
+
+[data-theme="dark"] .billing-finance-visual {
+  background: #0a0a0a;
+}
+
+[data-theme="dark"] .billing-finance-fallback-ring {
+  border-color: color-mix(in srgb, #d4a84f 58%, transparent);
+}
+
+[data-theme="dark"] .billing-finance-fallback-core {
+  border-color: color-mix(in srgb, #d4a84f 68%, #2b2b2b);
+  background: #161616;
+}

@@ -5,19 +5,16 @@ import * as THREE from 'three';
 interface FinancePalette {
   core: string;
   accent: string;
-  secondary: string;
 }
 
 const lightPalette: FinancePalette = {
-  core: '#1a1a1a',
+  core: '#a7aaaa',
   accent: '#8b5e00',
-  secondary: '#a7aaaa',
 };
 
 const darkPalette: FinancePalette = {
-  core: '#ededed',
-  accent: '#f3c56b',
-  secondary: '#71717a',
+  core: '#9b9b96',
+  accent: '#d4a84f',
 };
 
 const useReducedMotion = () => {
@@ -36,40 +33,34 @@ const useReducedMotion = () => {
 
 const FinanceScene: React.FC<{ palette: FinancePalette; reducedMotion: boolean }> = ({ palette, reducedMotion }) => {
   const coreRef = useRef<THREE.Mesh>(null);
-  const ringRef = useRef<THREE.Group>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
 
   useFrame(({ clock }) => {
     if (reducedMotion) return;
 
     const time = clock.getElapsedTime();
     if (coreRef.current) {
-      const pulse = 1 + Math.sin(time * 1.2) * 0.025;
+      const pulse = 1 + Math.sin(time * 0.65) * 0.012;
       coreRef.current.scale.setScalar(pulse);
     }
     if (ringRef.current) {
-      ringRef.current.rotation.y = time * 0.14;
-      ringRef.current.rotation.z = Math.sin(time * 0.28) * 0.06;
+      ringRef.current.rotation.y = time * 0.07;
+      ringRef.current.rotation.x = 0.58 + Math.sin(time * 0.22) * 0.025;
     }
   });
 
   return (
     <>
-      <ambientLight intensity={0.65} />
-      <directionalLight position={[3, 4, 5]} intensity={1.7} color={palette.core} />
-      <pointLight position={[-2, 1, 2]} intensity={4} distance={7} color={palette.accent} />
+      <ambientLight intensity={0.42} />
+      <directionalLight position={[2, 3, 4]} intensity={0.85} color={palette.core} />
+      <pointLight position={[-1.5, 1, 2]} intensity={1.1} distance={5} color={palette.accent} />
       <mesh ref={coreRef}>
-        <sphereGeometry args={[0.56, 32, 32]} />
-        <meshStandardMaterial color={palette.core} metalness={0.8} roughness={0.24} emissive={palette.accent} emissiveIntensity={0.08} />
+        <sphereGeometry args={[0.48, 24, 18]} />
+        <meshStandardMaterial color={palette.core} metalness={0.42} roughness={0.58} />
       </mesh>
-      <group ref={ringRef} rotation={[0.58, 0.18, -0.22]}>
-        <mesh>
-          <torusGeometry args={[0.9, 0.018, 12, 96]} />
-          <meshStandardMaterial color={palette.accent} metalness={0.9} roughness={0.22} emissive={palette.accent} emissiveIntensity={0.1} />
-        </mesh>
-      </group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.9, 0]}>
-        <planeGeometry args={[3.4, 2.1]} />
-        <meshStandardMaterial color={palette.secondary} metalness={0.2} roughness={0.9} transparent opacity={0.08} />
+      <mesh ref={ringRef} rotation={[0.58, 0.18, -0.22]}>
+        <torusGeometry args={[0.78, 0.009, 8, 64]} />
+        <meshStandardMaterial color={palette.accent} metalness={0.7} roughness={0.48} />
       </mesh>
     </>
   );
