@@ -192,7 +192,7 @@ export const SupportCenter: React.FC<SupportCenterProps> = ({ userRole }) => {
                 <HelpCircle size={17} strokeWidth={1.8} aria-hidden="true" />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">{isAdmin ? 'Service Operations' : 'Customer Care'}</span>
               </div>
-              <h1 className="mt-2 text-2xl font-semibold tracking-[-0.02em] text-[#1a1a1a]">{isAdmin ? 'Ticket management' : 'Support center'}</h1>
+              <h1 className="mt-2 font-serif text-2xl font-medium leading-tight tracking-[-0.03em] text-[#1a1a1a]">{isAdmin ? 'Ticket management' : 'Support center'}</h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[#656b6b]">
                 {isAdmin
                   ? 'Review workload, assign ownership, maintain clear response history, and close issues with an auditable service record.'

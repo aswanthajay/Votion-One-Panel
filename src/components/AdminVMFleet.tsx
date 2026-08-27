@@ -453,7 +453,7 @@ export const AdminVMFleet: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <div className="flex items-center gap-2" style={secLabel}>Control Panel · Administration</div>
-          <h1 className="text-2xl font-semibold text-[#e8e8e8] mt-1">VM Fleet</h1>
+          <h1 className="mt-1 font-serif text-2xl font-medium leading-tight tracking-[-0.03em] text-[#e8e8e8]">VM Fleet</h1>
           <p className="text-sm text-[#a7aaaa] mt-1">Every server across the cluster — power, specs, assignment, expiry.</p>
         </div>
         <div className="flex items-center gap-2">
