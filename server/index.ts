@@ -21,6 +21,7 @@ import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
 import { checkDbHealth } from './services/databaseHealth.js';
 import { createProxmoxWebSocketTlsOptions, proxmoxFetch } from './services/proxmoxHttp.js';
+import { log, requestLogger } from './services/logger.js';
 import { requireAuth, resolveSessionUser } from './middleware.js';
 
 let ticketCache: { cookie: string, csrf: string, expiresAt: number } | null = null;
@@ -66,6 +67,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
   hsts: nodeEnvironment === 'production',
 }));
+app.use(requestLogger);
 const PORT = process.env.PORT || 5000;
 
 const allowedOrigins = (process.env.CORS_ORIGINS || (nodeEnvironment === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
@@ -85,13 +87,37 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ status: 'ok', service: 'votion-one', timestamp: new Date().toISOString() });
+});
+
+app.get('/readyz', async (_req, res) => {
+  const database = await checkDbHealth();
+  if (database.status !== 'ok') {
+    return res.status(503).json({ status: 'not_ready', database, provider: { configured: false }, workers: { telemetry: false, billing: false } });
+  }
+  try {
+    const providerCount = (await dbService.getProxmoxConnections()).length;
+    const ready = providerCount > 0;
+    return res.status(ready ? 200 : 503).json({
+      status: ready ? 'ok' : 'not_ready',
+      database,
+      provider: { configured: ready, connectionCount: providerCount },
+      workers: { telemetry: true, billing: true },
+      timestamp: new Date().toISOString(),
+    });
+  } catch {
+    return res.status(503).json({ status: 'not_ready', database, provider: { configured: false }, workers: { telemetry: false, billing: false } });
+  }
+});
+
 const apiRateLimiter = expressRateLimit({
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.API_RATE_LIMIT_MAX || 300),
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: (req) => req.authUser?.id ? `account:${req.authUser.id}` : ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown'),
-  skip: (req) => req.path === '/health' || req.path === '/healthz' || req.path === '/readyz',
+  skip: (req) => /(?:^|\/)(?:health|healthz|readyz)$/.test(req.path),
 });
 app.use('/api', apiRateLimiter);
 
@@ -231,10 +257,10 @@ if (migratedProxmoxCredentials > 0) {
 }
 const dbHealth = await checkDbHealth();
 if (dbHealth.status !== 'ok') {
-  console.error(`[POSTGRES] Startup health check failed: ${dbHealth.error}`);
+  log('error', 'startup.database_health_failed', { error: dbHealth.error });
   throw new Error(`Database health check failed: ${dbHealth.error}`);
 }
-console.log(`[POSTGRES] Startup health check passed (${dbHealth.latencyMs}ms)`);
+log('info', 'startup.database_health_passed', { latencyMs: dbHealth.latencyMs });
 const initialConnections = await dbService.getProxmoxConnectionCredentials();
 if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
