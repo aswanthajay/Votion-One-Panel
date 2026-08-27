@@ -29,46 +29,46 @@ export const AppSwitcher: React.FC = () => {
       {isOpen && (
         <div className="theme-app-switcher-drawer bg-[#1a1a1a] border-b border-[#656b6b] p-6 pb-10 absolute top-9 left-0 right-0 z-[99] shadow-2xl animate-in slide-in-from-top-2 fade-in duration-200 ease-out origin-top">
           <div className="max-w-[1200px] mx-auto">
-            <div className="text-base font-semibold mb-3 text-white">VOTION Product Suite</div>
+            <div className="app-switcher-heading text-base font-semibold mb-3 text-white">VOTION Product Suite</div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-4">
               
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Lunar Panel</span>
-                  <span className="bg-[#1a1a1a] text-white text-[11px] px-2 py-0.5 rounded-full font-medium">Current</span>
+                  <span className="app-product-current-badge bg-[#1a1a1a] text-white text-[11px] px-2 py-0.5 rounded-full font-medium">Current</span>
                 </div>
                 <div className="text-[#656b6b] text-xs leading-relaxed">Next-generation game server management and container orchestration platform.</div>
               </a>
 
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Legacy Game panel</span>
                 </div>
                 <div className="text-[#656b6b] text-xs leading-relaxed">Classic server management for legacy gaming infrastructure and older workloads.</div>
               </a>
 
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Votion AI</span>
                 </div>
                 <div className="text-[#656b6b] text-xs leading-relaxed">Advanced machine learning workloads and generative AI infrastructure deployment.</div>
               </a>
 
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Lunar Shield</span>
                 </div>
                 <div className="text-[#656b6b] text-xs leading-relaxed">Enterprise DDoS protection, Web Application Firewall, and threat mitigation.</div>
               </a>
 
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Votion Mail Suite</span>
                 </div>
                 <div className="text-[#656b6b] text-xs leading-relaxed">Enterprise-grade email hosting, spam filtering, and secure delivery network.</div>
               </a>
 
-              <a href="#" className="bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
+              <a href="#" className="app-product-card bg-white text-[#1a1a1a] p-5 rounded-lg border border-[#dedfdf] hover:border-[#656b6b] transition-all flex flex-col gap-2">
                 <div className="flex items-center justify-between font-semibold text-sm">
                   <span>Votion Drive</span>
                 </div>
