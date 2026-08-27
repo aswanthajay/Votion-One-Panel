@@ -3191,3 +3191,88 @@ body {
 [data-theme="dark"] .support-center [class~="text-[#1f6b4c]"] {
   color: #86efac !important;
 }
+
+/* Ticket composer: override generic dialog-child styling so the modal reads as one deliberate dark surface. */
+[data-theme="dark"] .ticket-composer-overlay {
+  background-color: rgb(0 0 0 / 78%) !important;
+  backdrop-filter: blur(6px);
+}
+
+[data-theme="dark"] .ticket-composer-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  background: #0a0a0a !important;
+  border-color: #2b2b2b !important;
+  color: var(--theme-text) !important;
+  box-shadow: 0 24px 72px rgb(0 0 0 / 68%), inset 0 1px 0 rgb(255 255 255 / 4%) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog > .ticket-composer-header {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--theme-text) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog .ticket-composer-actions {
+  border-top-color: #2b2b2b !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog [class~="text-[#1a1a1a]"] {
+  color: var(--theme-text) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog [class~="text-[#656b6b]"],
+[data-theme="dark"] .ticket-composer-dialog [class~="text-[#8b9292]"] {
+  color: var(--theme-text-muted) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog [class~="text-[#2563eb]"] {
+  color: var(--theme-accent) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog [class~="border-[#dedfdf]"],
+[data-theme="dark"] .ticket-composer-dialog [class~="border-[#e7e8e8]"] {
+  border-color: var(--theme-border) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog input,
+[data-theme="dark"] .ticket-composer-dialog select,
+[data-theme="dark"] .ticket-composer-dialog textarea {
+  background: #050505 !important;
+  border-color: #2b2b2b !important;
+  color: var(--theme-text) !important;
+  color-scheme: dark;
+}
+
+[data-theme="dark"] .ticket-composer-dialog input::placeholder,
+[data-theme="dark"] .ticket-composer-dialog textarea::placeholder {
+  color: #8a8a94 !important;
+  opacity: 1;
+}
+
+[data-theme="dark"] .ticket-composer-dialog input:focus,
+[data-theme="dark"] .ticket-composer-dialog select:focus,
+[data-theme="dark"] .ticket-composer-dialog textarea:focus {
+  border-color: var(--theme-accent) !important;
+  box-shadow: 0 0 0 3px rgb(91 141 239 / 16%);
+}
+
+[data-theme="dark"] .ticket-composer-dialog button:not(.btn-primary) {
+  color: var(--theme-text) !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog [class~="hover:bg-[#f1f1f1]"]:hover,
+[data-theme="dark"] .ticket-composer-dialog [class~="hover:bg-[#fbfaf9]"]:hover {
+  background-color: #161616 !important;
+}
+
+[data-theme="dark"] .ticket-composer-dialog button:focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 639px) {
+  [data-theme="dark"] .ticket-composer-dialog {
+    max-height: calc(100dvh - 12px);
+  }
+}
