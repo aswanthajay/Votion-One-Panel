@@ -21,13 +21,17 @@ const handleCreateTicket = async (req: any, res: any) => {
   }
 
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
-  const ticket = await dbService.createSupportTicket(subject.trim(), category || 'General', priority || 'medium', parsedVmid, userEmail);
+  const ticket = await dbService.createSupportTicketWithInitialReply(
+    subject.trim(),
+    category || 'General',
+    priority || 'medium',
+    parsedVmid,
+    userEmail,
+    message,
+  );
 
-  // createSupportTicket returns { ticket, replies }; use the nested ticket.id
+  // createSupportTicketWithInitialReply returns { ticket, replies }; use the nested ticket.id
   const ticketId = ticket?.ticket?.id;
-  if (message && message.trim() && ticketId) {
-    await dbService.addTicketReply(ticketId, userEmail, message.trim(), 'client');
-  }
 
   res.json({
     success: true,

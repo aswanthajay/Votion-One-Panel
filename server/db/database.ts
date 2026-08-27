@@ -1309,6 +1309,40 @@ export class DatabaseService {
     return await this.getTicketDetails(ticketId);
   }
 
+  async createSupportTicketWithInitialReply(subject: string, category: string, priority: string, vmid: number | undefined, userEmail: string, message?: string) {
+    const client = await pgPool.connect();
+    const email = userEmail.toLowerCase().trim();
+    const ticketId = `TICK-${Date.now().toString().slice(-8)}-${crypto.randomInt(100, 1000)}`;
+    const replyId = message?.trim() ? `rep-${Date.now()}-${crypto.randomInt(100000, 1000000)}` : null;
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO tickets (id, ticket_number, vmid, subject, category, status, priority, user_email, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'open', $6, $7, NOW())`,
+        [ticketId, ticketId, vmid || null, subject, category || 'General', priority || 'medium', email],
+      );
+      if (replyId && message) {
+        await client.query(
+          `INSERT INTO ticket_replies (id, ticket_id, sender_email, sender_role, message, created_at)
+           VALUES ($1, $2, $3, 'client', $4, NOW())`,
+          [replyId, ticketId, email, message.trim()],
+        );
+        await client.query("UPDATE tickets SET updated_at = NOW() WHERE id = $1", [ticketId]);
+      }
+      await client.query(
+        `INSERT INTO audit_logs (id, user_email, action, target, details, status) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [`log-${Date.now()}-${crypto.randomInt(1000, 10000)}`, email, 'CREATE_TICKET', ticketId, `Opened support ticket for VMID ${vmid || 'N/A'}`, 'success'],
+      );
+      await client.query('COMMIT');
+      return await this.getTicketDetails(ticketId);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async addTicketReply(ticketId: string, senderEmail: string, message: string, senderRole: 'admin' | 'client' = 'client') {
     const replyId = `rep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await pgPool.query(
