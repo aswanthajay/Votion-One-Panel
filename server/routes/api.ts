@@ -15,6 +15,10 @@ import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
 import { createSessionToken, rateLimit, requireAdmin, requireAuth } from '../middleware.js';
+import {
+  isProviderCredentialKeyConfigured,
+  PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+} from '../services/secretBox.js';
 
 export const apiRouter = Router();
 
@@ -27,6 +31,28 @@ apiRouter.use('/files', requireAuth);
 apiRouter.use(['/nodes', '/vms', '/storage', '/ha', '/telemetry', '/tasks', '/audit-logs'], requireAuth, requireAdmin);
 apiRouter.use(['/alert-rules', '/notifications', '/inbox', '/billing'], requireAuth);
 
+const requireLiveProviderAccess = (_req: any, res: any, next: any) => {
+  if (!isProviderCredentialKeyConfigured()) {
+    return res.status(503).json({
+      success: false,
+      code: 'PROXMOX_PROVIDER_UNAVAILABLE',
+      error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+    });
+  }
+  next();
+};
+
+// Connection metadata remains readable from the local database. Tests and all
+// writes are unavailable until stored provider credentials can be encrypted.
+apiRouter.use('/admin/proxmox', (req: any, res: any, next: any) => {
+  const metadataRead = req.method === 'GET' && [
+    '/',
+    '/overview',
+    '/vm-identity-conflicts',
+  ].includes(req.path);
+  return metadataRead ? next() : requireLiveProviderAccess(req, res, next);
+});
+apiRouter.use(['/admin/nodes', '/admin/cluster/overview', '/vms/:vmid/action'], requireLiveProviderAccess);
 
 // File upload handler (real multipart uploads to uploads/ directory)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,10 +81,12 @@ apiRouter.get('/health', async (_req, res) => {
 // PUBLIC STATUS — used by login page, no auth required
 apiRouter.get('/status', async (req, res) => {
   try {
+    const providerAvailable = isProviderCredentialKeyConfigured();
     const [nodes, vms] = await Promise.all([
-      proxmoxApi.getNodeMetrics(),
+      providerAvailable ? proxmoxApi.getNodeMetrics() : dbService.getNodes(),
       dbService.getVMs(),
     ]);
+
     const runningVMs = vms.filter((v: any) => v.status === 'running' && !v.is_suspended).length;
     const onlineNodes = nodes.filter((n: any) => (n.status || n.cluster_status || 'online') === 'online').length;
     res.json({
@@ -72,12 +100,14 @@ apiRouter.get('/status', async (req, res) => {
         ramTotalGb: Math.round(Number(n.ramTotalBytes) / 1073741824),
         uptimeSeconds: n.uptimeSeconds,
       })),
-      summary: {
+            summary: {
         totalNodes: nodes.length,
         onlineNodes,
         activeVMs: runningVMs,
         totalVMs: vms.length,
       },
+      providerAvailable,
+
     });
   } catch (err) {
     res.json({ success: false, nodes: [], summary: { totalNodes: 0, onlineNodes: 0, activeVMs: 0, totalVMs: 0 } });

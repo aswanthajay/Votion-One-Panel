@@ -7,6 +7,30 @@ const SUPPORT_PIN_PREFIX = 'hmac:v1:';
 
 type SecretKeySource = 'hex' | 'base64url';
 
+export const PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE =
+  'Proxmox provider access is unavailable until the deployment credential key is configured.';
+
+export class ProxmoxProviderUnavailableError extends Error {
+  readonly statusCode = 503;
+  readonly code = 'PROXMOX_PROVIDER_UNAVAILABLE';
+
+  constructor() {
+    super(PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE);
+    this.name = 'ProxmoxProviderUnavailableError';
+  }
+}
+
+export function isProviderCredentialKeyConfigured(): boolean {
+  const configured = process.env.PROXMOX_CREDENTIALS_KEY?.trim();
+  if (!configured) return false;
+  if (/^[0-9a-f]{64}$/i.test(configured)) return true;
+  try {
+    return Buffer.from(configured, 'base64url').length === KEY_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 function loadKey(): Buffer {
   const configured = process.env.PROXMOX_CREDENTIALS_KEY?.trim();
   if (!configured) {

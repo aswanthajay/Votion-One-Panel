@@ -524,13 +524,21 @@ class ApiClient {
   /**
    * PROMPT 5: Client Portal Specific Methods
    */
-  async getClientVMs(connectionId?: string): Promise<ApiVM[]> {
+  async getClientVmInventory(connectionId?: string): Promise<{ vms: ApiVM[]; providerAvailable: boolean }> {
     const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms${query}`, {
       headers: this.getHeaders(),
     });
     const data = await this.readApiResponse(res, 'Unable to load client virtual machines.');
-    return data.data || [];
+    return {
+      vms: data.data || [],
+      providerAvailable: data.providerAvailable !== false,
+    };
+  }
+
+  async getClientVMs(connectionId?: string): Promise<ApiVM[]> {
+    const { vms } = await this.getClientVmInventory(connectionId);
+    return vms;
   }
 
   async getVmReimageRequests(vmid: number): Promise<ApiReimageRequest[]> {

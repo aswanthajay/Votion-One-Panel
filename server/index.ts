@@ -20,6 +20,11 @@ import { bootstrapInitialAdmin } from './db/bootstrapAdmin.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
+import {
+  isProviderCredentialKeyConfigured,
+  ProxmoxProviderUnavailableError,
+  PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+} from './services/secretBox.js';
 import { checkDbHealth } from './services/databaseHealth.js';
 import { createProxmoxWebSocketTlsOptions, proxmoxFetch } from './services/proxmoxHttp.js';
 import { log, requestLogger } from './services/logger.js';
@@ -169,6 +174,13 @@ const proxyVmId = (req: any): number | null => {
 };
 
 const attachProxyConnection = async (req: any, res: express.Response, next: express.NextFunction) => {
+  if (!isProviderCredentialKeyConfigured()) {
+    return res.status(503).json({
+      success: false,
+      code: 'PROXMOX_PROVIDER_UNAVAILABLE',
+      error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+    });
+  }
   try {
     const connections = await dbService.getProxmoxConnectionCredentials();
     const vmid = proxyVmId(req);
@@ -247,6 +259,17 @@ const proxmoxProxy = createProxyMiddleware({
 
 app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachProxyConnection, proxmoxProxy);
 
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (error instanceof ProxmoxProviderUnavailableError) {
+    return res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+    });
+  }
+  next(error);
+});
+
 // Apply versioned migrations before any route, worker, or proxy queries run.
 const appliedMigrations = await runMigrations();
 if (appliedMigrations.length > 0) {
@@ -258,9 +281,16 @@ const initialAdminBootstrap = await bootstrapInitialAdmin();
 if (initialAdminBootstrap.status === 'created') {
   log('info', 'startup.initial_admin_created', { email: initialAdminBootstrap.email });
 }
-const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
-if (migratedProxmoxCredentials > 0) {
-  console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);
+const providerCredentialsAvailable = isProviderCredentialKeyConfigured();
+if (providerCredentialsAvailable) {
+  const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
+  if (migratedProxmoxCredentials > 0) {
+    console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);
+  }
+} else {
+  log('warn', 'startup.proxmox_credentials_unavailable', {
+    reason: 'PROXMOX_CREDENTIALS_KEY is absent or invalid; provider operations and telemetry workers are disabled.',
+  });
 }
 const dbHealth = await checkDbHealth();
 if (dbHealth.status !== 'ok') {
@@ -268,21 +298,30 @@ if (dbHealth.status !== 'ok') {
   throw new Error(`Database health check failed: ${dbHealth.error}`);
 }
 log('info', 'startup.database_health_passed', { latencyMs: dbHealth.latencyMs });
-const initialConnections = await dbService.getProxmoxConnectionCredentials();
-if (initialConnections.length > 0) cachedConn = initialConnections[0];
+if (providerCredentialsAvailable) {
+  const initialConnections = await dbService.getProxmoxConnectionCredentials();
+  if (initialConnections.length > 0) cachedConn = initialConnections[0];
 
-// Start idempotent telemetry and policy-controlled billing workers
+  // Provider workers are started only when stored connection credentials can be decrypted.
   proxmoxSync.start();
   proxmoxApi.startTelemetryPoller();
-  billingWorker.start();
-  console.log('[ALERTS] Telemetry threshold monitor started (15s interval)');
+}
+
+// Billing and database-backed functions remain available without provider credentials.
+billingWorker.start();
+
+  console.log(providerCredentialsAvailable
+    ? '[ALERTS] Telemetry threshold monitor started (15s interval)'
+    : '[ALERTS] Telemetry threshold monitor is paused while provider credentials are unavailable');
 
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);
   console.log(`🚀 Votion One™ Platform Backend Server running on port ${PORT}`);
   console.log(`👉 API Endpoint: http://localhost:${PORT}/api/v1/health`);
   console.log(`🗄️ Database: PostgreSQL + TimescaleDB (TSDB) Telemetry Layer`);
-  console.log(`🔐 Proxmox API Auth: configured; strict TLS fingerprint pinning enforced`);
+  console.log(providerCredentialsAvailable
+    ? '🔐 Proxmox API Auth: configured; strict TLS fingerprint pinning enforced'
+    : '🔐 Proxmox API Auth: unavailable; encrypted provider credentials are locked until PROXMOX_CREDENTIALS_KEY is configured');
   console.log(`🎫 Support Ticket Router: Active (/api/tickets)`);
   console.log(`Billing lifecycle worker: registered (5m interval; policy-controlled; disabled by default)`);
   console.log(`================================================================`);
@@ -312,6 +351,16 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
         return;
       }
 
+      if (!isProviderCredentialKeyConfigured()) {
+        const body = JSON.stringify({
+          success: false,
+          code: 'PROXMOX_PROVIDER_UNAVAILABLE',
+          error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+        });
+        socket.write(`HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+        socket.destroy();
+        return;
+      }
       const connections = await dbService.getProxmoxConnectionCredentials();
       const proxmoxConn = requestedVm.proxmoxConnectionId
         ? connections.find(connection => String(connection.id) === String(requestedVm.proxmoxConnectionId))

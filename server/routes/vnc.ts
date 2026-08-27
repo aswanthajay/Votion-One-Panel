@@ -2,6 +2,10 @@ import { Router } from 'express';
 import { dbService } from '../db/database.js';
 import { requireAuth } from '../middleware.js';
 import { ProxmoxHttpError, proxmoxFetch } from '../services/proxmoxHttp.js';
+import {
+  isProviderCredentialKeyConfigured,
+  PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+} from '../services/secretBox.js';
 
 export const vncRouter = Router();
 vncRouter.use(requireAuth);
@@ -21,6 +25,13 @@ vncRouter.post('/init', async (req, res) => {
     const user = (req as any).authUser;
     if (!user || (!adminRoles.has(user.role) && String(vm.ownerEmail).toLowerCase() !== String(user.email).toLowerCase())) {
       return res.status(403).json({ success: false, error: 'You do not have access to this VM' });
+    }
+    if (!isProviderCredentialKeyConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: 'PROXMOX_PROVIDER_UNAVAILABLE',
+        error: PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+      });
     }
     const type = vm.type;
     const node = vm.node;

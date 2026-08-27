@@ -165,6 +165,7 @@ export const OverviewDashboard: React.FC<{
   const [powerLoading, setPowerLoading] = useState<string | null>(null);
   const [loadDone, setLoadDone] = useState(false);
   const [fleetFailed, setFleetFailed] = useState(false);
+  const [providerAvailable, setProviderAvailable] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataAge, setDataAge] = useState(0);
   const mountedRef = useRef(true);
@@ -217,10 +218,13 @@ export const OverviewDashboard: React.FC<{
     // always fails CLOSED (error card) instead of hanging on skeleton bars.
     let vmsRes: ApiVM[] = [];
     let fleetOk = false;
+    let providerIsAvailable = true;
     const t0 = Date.now();
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        vmsRes = await apiClient.getClientVMs(workspaceConnectionId);
+        const inventory = await apiClient.getClientVmInventory(workspaceConnectionId);
+        vmsRes = inventory.vms;
+        providerIsAvailable = inventory.providerAvailable;
         fleetOk = true;
         break;
       } catch {
@@ -232,6 +236,7 @@ export const OverviewDashboard: React.FC<{
 
     setFleetFailed(!fleetOk);
     if (fleetOk) {
+      setProviderAvailable(providerIsAvailable);
       setVms(vmsRes);
       if (!backgroundOnly || selectedVmid === null) {
         setSelectedVmid(previous => vmsRes.some(vm => vm.vmid === previous) ? previous : (vmsRes[0]?.vmid || null));
@@ -489,11 +494,19 @@ export const OverviewDashboard: React.FC<{
               )}
             </div>
             {loadDone && !fleetFailed && (
-              <span className="text-[10px] text-[#a0a1a2] font-mono shrink-0">{isRefreshing ? 'refreshing…' : `data ${dataAge}s`}</span>
+              <span className="text-[10px] text-[#a0a1a2] font-mono shrink-0">
+                {isRefreshing ? 'refreshing…' : providerAvailable ? `live data ${dataAge}s` : 'stored data'}
+              </span>
             )}
           </div>
 
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-5 sm:px-7 py-4">
+            {!fleetLoading && !fleetFailed && !providerAvailable && (
+              <section className="mb-4 rounded-md border border-[#dedfdf] bg-white px-4 py-3" role="status" aria-live="polite">
+                <p className="text-[12px] font-semibold text-[#1a1a1a]">Live provider access is unavailable</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-[#656b6b]">The deployment credential key is not configured. Inventory and historical operational data remain available from the local database, but live telemetry, console access, connection tests, and provider actions are paused.</p>
+              </section>
+            )}
             {fleetLoading ? (
               <div className="px-4 py-10">
                 <div className="h-2 bg-[#f1f1f1] rounded animate-pulse mb-3 w-2/3" />
@@ -518,7 +531,7 @@ export const OverviewDashboard: React.FC<{
                 <div className="ink-block-wrapper !mb-0">
                   <div className="ink-block-header !px-4 !py-3 flex items-center justify-between">
                     <span className="ink-block-title !text-[12px]">Aggregated Fleet Telemetry</span>
-                    <span className="text-[10px] text-[#a0a1a2] font-mono">LIVE</span>
+                    <span className="text-[10px] text-[#a0a1a2] font-mono">{providerAvailable ? 'LIVE' : 'STORED'}</span>
                   </div>
                   <table className="overview-telemetry-table w-full border-collapse table-fixed">
                     <tbody>

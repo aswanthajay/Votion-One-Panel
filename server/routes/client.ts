@@ -5,6 +5,10 @@ import { ProxmoxService } from '../services/proxmoxService.js';
 import { requireAuth } from '../middleware.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
 import { mapProxmoxVmMetadata } from '../services/proxmoxVmMetadata.js';
+import {
+  isProviderCredentialKeyConfigured,
+  PROXMOX_PROVIDER_UNAVAILABLE_MESSAGE,
+} from '../services/secretBox.js';
 
 interface PveEnvelope<T> { data?: T; }
 interface PveVmStatus { status?: string; cpu?: number; mem?: number; maxmem?: number; netin?: number; netout?: number; diskread?: number; diskwrite?: number; uptime?: number; }
@@ -56,6 +60,13 @@ clientRouter.use('/vms/:vmid', async (req, res, next) => {
   (req as any).authorizedVm = vm;
   next();
 });
+
+clientRouter.use([
+  '/vms/:vmid/metadata',
+  '/vms/:vmid/telemetry',
+  '/vms/:vmid/power',
+  '/vms/:vmid/firewall',
+], requireLiveProviderAccess);
 
 const allowedReimageOsByType: Record<'qemu' | 'lxc', Set<string>> = {
   qemu: new Set(['Ubuntu 24.04 LTS', 'Windows Server 2022 Standard', 'Debian 12 Bookworm']),
@@ -124,8 +135,11 @@ clientRouter.get('/vms', async (req, res) => {
   const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
     ? req.query.connectionId.trim()
     : undefined;
-  const vms = await proxmoxApi.getLiveVMs(userEmail, connectionId);
-  res.json({ success: true, count: vms.length, data: vms });
+  const providerAvailable = isProviderCredentialKeyConfigured();
+  const vms = providerAvailable
+    ? await proxmoxApi.getLiveVMs(userEmail, connectionId)
+    : await dbService.getVMs(userEmail);
+  res.json({ success: true, count: vms.length, data: vms, providerAvailable });
 });
 
 // Read-only client billing profile view. Effective assigned prices are returned

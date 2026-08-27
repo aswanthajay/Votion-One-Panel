@@ -2,7 +2,14 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
-import { decryptCredential, encryptCredential, hashSupportPin, isEncryptedCredential } from '../services/secretBox.js';
+import {
+  decryptCredential,
+  encryptCredential,
+  hashSupportPin,
+  isEncryptedCredential,
+  isProviderCredentialKeyConfigured,
+  ProxmoxProviderUnavailableError,
+} from '../services/secretBox.js';
 const { Pool } = pg;
 
 export type ProxmoxConnectionPublic = {
@@ -1958,6 +1965,7 @@ export class DatabaseService {
 
   // PROXMOX CONNECTIONS
   async migrateProxmoxCredentials(): Promise<number> {
+    if (!isProviderCredentialKeyConfigured()) throw new ProxmoxProviderUnavailableError();
     const res = await pgPool.query<{ id: string; password: string | null; token_secret: string | null }>(
       'SELECT id, password, token_secret FROM proxmox_connections',
     );
@@ -2011,6 +2019,7 @@ export class DatabaseService {
   async getProxmoxConnectionCredentials(): Promise<ProxmoxConnectionStored[]>;
   async getProxmoxConnectionCredentials(id: string): Promise<ProxmoxConnectionStored | null>;
   async getProxmoxConnectionCredentials(id?: string): Promise<ProxmoxConnectionStored[] | ProxmoxConnectionStored | null> {
+    if (!isProviderCredentialKeyConfigured()) throw new ProxmoxProviderUnavailableError();
     if (id) {
       const res = await pgPool.query<ProxmoxConnectionStored>(`SELECT ${PROXMOX_SECRET_COLUMNS} FROM proxmox_connections WHERE id = $1`, [id]);
       return res.rows[0] ? decryptProxmoxCredentials(res.rows[0]) : null;
