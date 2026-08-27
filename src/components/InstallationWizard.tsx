@@ -1,35 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { API_BASE_URL } from '../services/apiClient';
 
-type InstallationState = 'checking' | 'ready' | 'unavailable' | 'complete';
-
-type InstallerHistoryState = Record<string, unknown> & { installationToken?: unknown };
-
-const readInstallationToken = (): string => {
-  const urlToken = new URLSearchParams(window.location.search).get('token')?.trim();
-  if (urlToken) return urlToken;
-
-  const historyState = window.history.state;
-  if (!historyState || typeof historyState !== 'object') return '';
-  const token = (historyState as InstallerHistoryState).installationToken;
-  return typeof token === 'string' ? token.trim() : '';
-};
-
-const updateInstallerHistoryState = (installationToken?: string) => {
-  const historyState = window.history.state;
-  const nextState: InstallerHistoryState = historyState && typeof historyState === 'object'
-    ? { ...(historyState as InstallerHistoryState) }
-    : {};
-
-  if (installationToken) nextState.installationToken = installationToken;
-  else delete nextState.installationToken;
-
-  window.history.replaceState(nextState, document.title, '/install');
-};
+type InstallationState = 'checking' | 'code-entry' | 'ready' | 'unavailable' | 'complete';
 
 export const InstallationWizard: React.FC = () => {
-  const [installationToken] = useState(readInstallationToken);
   const [state, setState] = useState<InstallationState>('checking');
+  const [setupCode, setSetupCode] = useState('');
+  const [isRedeemingCode, setIsRedeemingCode] = useState(false);
   const [databaseUrl, setDatabaseUrl] = useState('');
   const [publicAppUrl, setPublicAppUrl] = useState(() => window.location.origin);
   const [corsOrigins, setCorsOrigins] = useState(() => window.location.origin);
@@ -44,20 +21,22 @@ export const InstallationWizard: React.FC = () => {
 
   const requestHeaders = useMemo(() => ({
     'Content-Type': 'application/json',
-    ...(installationToken ? { 'x-installation-token': installationToken } : {}),
-  }), [installationToken]);
+  }), []);
 
   useEffect(() => {
-    if (installationToken) updateInstallerHistoryState(installationToken);
     let active = true;
     void fetch(`${API_BASE_URL}/installation/status`, { headers: requestHeaders, credentials: 'same-origin' })
       .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }))
       .then(({ response, data }) => {
         if (!active) return;
+        if (response.status === 410) {
+          setState('code-entry');
+          setError(null);
+          return;
+        }
         if (!response.ok || !data.success) {
-          updateInstallerHistoryState();
           setState('unavailable');
-          setError(data.error || 'This installation link is unavailable or has expired.');
+          setError(data.error || 'The installation service could not verify its current setup state.');
           return;
         }
         setState('ready');
@@ -68,7 +47,38 @@ export const InstallationWizard: React.FC = () => {
         setError('Unable to reach the installation service.');
       });
     return () => { active = false; };
-  }, [installationToken, requestHeaders]);
+  }, [requestHeaders]);
+
+  const redeemSetupCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const code = setupCode.trim().toUpperCase();
+    if (!code) {
+      setError('Enter the one-time setup code shown in the server console.');
+      return;
+    }
+
+    setError(null);
+    setIsRedeemingCode(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/installation/session`, {
+        method: 'POST',
+        headers: requestHeaders,
+        credentials: 'same-origin',
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        setError(data.error || 'The setup code could not be verified.');
+        return;
+      }
+      setSetupCode('');
+      setState('ready');
+    } catch {
+      setError('Unable to reach the installation service while verifying the setup code.');
+    } finally {
+      setIsRedeemingCode(false);
+    }
+  };
 
   const testDatabase = async () => {
     setError(null);
@@ -130,7 +140,6 @@ export const InstallationWizard: React.FC = () => {
         setError(data.error || 'Installation could not be completed.');
         return;
       }
-      updateInstallerHistoryState();
       setAdminPassword('');
       setAdminPasswordConfirmation('');
       setState('complete');
@@ -166,8 +175,23 @@ export const InstallationWizard: React.FC = () => {
             {error && <div className="mt-6 rounded-lg border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#dc2626]" role="alert">{error}</div>}
             {message && <div className="mt-6 rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3 text-sm text-[#16a34a]" role="status">{message}</div>}
 
-            {state === 'checking' && <div className="mt-8 rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-3 text-sm text-[#656b6b]">Verifying your one-time installation link…</div>}
-            {state === 'unavailable' && <div className="mt-8 rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-4 text-sm leading-6 text-[#656b6b]">This installation wizard is closed. If installation has not completed, restart the installation service to issue a new one-time link.</div>}
+            {state === 'checking' && <div className="mt-8 rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-3 text-sm text-[#656b6b]">Verifying the protected installation session…</div>}
+            {state === 'code-entry' && (
+              <form className="mt-8 space-y-5 rounded-xl border border-[#dedfdf] bg-[#fafafa] p-5" onSubmit={redeemSetupCode}>
+                <div>
+                  <h3 className="text-base font-semibold text-[#1a1a1a]">Enter setup code</h3>
+                  <p className="mt-1.5 text-sm leading-6 text-[#656b6b]">Open the local server console, copy the one-time code shown after the `[INSTALL]` message, and enter it here. The code expires after 30 minutes and is exchanged for a protected browser session.</p>
+                </div>
+                <div>
+                  <label htmlFor="installer-setup-code" className="mb-1.5 block text-sm text-[#1a1a1a]">One-time setup code</label>
+                  <input id="installer-setup-code" value={setupCode} onChange={(event) => setSetupCode(event.target.value.toUpperCase())} type="password" autoComplete="one-time-code" spellCheck={false} placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" className="w-full rounded-md border border-[#111111] px-3 py-2.5 font-mono text-sm uppercase tracking-[0.12em] text-[#1a1a1a] outline-none focus:ring-2 focus:ring-black/10" required />
+                </div>
+                <button type="submit" disabled={isRedeemingCode} className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1c1c1c] disabled:cursor-not-allowed disabled:opacity-60">
+                  {isRedeemingCode ? 'Verifying code…' : 'Continue to installation'}
+                </button>
+              </form>
+            )}
+            {state === 'unavailable' && <div className="mt-8 rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-4 text-sm leading-6 text-[#656b6b]">This installation wizard is unavailable. Confirm that the installation service is running, then reload this page.</div>}
             {state === 'complete' && <div className="mt-8 rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-4 text-sm leading-6 text-[#656b6b]">Configuration is saved. Restart the service once to leave installation mode and sign in as the administrator you created.</div>}
 
             {state === 'ready' && (

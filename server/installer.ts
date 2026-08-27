@@ -18,10 +18,11 @@ const currentFile = fileURLToPath(import.meta.url);
 const migrationsDirectory = path.join(path.dirname(currentFile), 'db', 'migrations');
 const PORT = Number(process.env.PORT || 5000);
 
-const installerToken = crypto.randomBytes(32).toString('base64url');
-const installerTokenHash = crypto.createHash('sha256').update(installerToken).digest();
+const installerCode = (crypto.randomBytes(12).toString('hex').toUpperCase().match(/.{1,6}/g) || []).join('-');
+const installerCodeHash = crypto.createHash('sha256').update(installerCode).digest();
 const installerExpiresAt = Date.now() + INSTALLER_TOKEN_TTL_MS;
 let installationCompleted = false;
+let installationCodeRedeemed = false;
 
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(32).toString('hex');
@@ -29,29 +30,36 @@ function hashPassword(password: string): string {
   return `${hash}:${salt}`;
 }
 
-function tokenIsValid(value: unknown): boolean {
+function installerSessionIsValid(value: unknown): boolean {
   if (installationCompleted || Date.now() > installerExpiresAt || typeof value !== 'string' || !value.trim()) return false;
   const candidate = crypto.createHash('sha256').update(value.trim()).digest();
-  return candidate.length === installerTokenHash.length && crypto.timingSafeEqual(candidate, installerTokenHash);
+  return candidate.length === installerCodeHash.length && crypto.timingSafeEqual(candidate, installerCodeHash);
 }
 
-function readInstallerToken(req: express.Request): string {
-  const headerToken = req.header('x-installation-token');
-  if (typeof headerToken === 'string' && headerToken.trim()) return headerToken;
+function installerCodeIsValid(value: unknown): boolean {
+  return !installationCodeRedeemed && installerSessionIsValid(value);
+}
 
+function readInstallerSession(req: express.Request): string {
   const cookieHeader = req.header('cookie') || '';
   const sessionCookie = cookieHeader
     .split(';')
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${INSTALLER_SESSION_COOKIE}=`));
-  return sessionCookie ? decodeURIComponent(sessionCookie.slice(INSTALLER_SESSION_COOKIE.length + 1)) : '';
+  if (!sessionCookie) return '';
+
+  try {
+    return decodeURIComponent(sessionCookie.slice(INSTALLER_SESSION_COOKIE.length + 1));
+  } catch {
+    return '';
+  }
 }
 
-function installerSessionCookie(token: string, req: express.Request): string {
+function installerSessionCookie(code: string, req: express.Request): string {
   const forwardedProtocol = req.header('x-forwarded-proto')?.split(',')[0]?.trim();
   const secure = req.secure || forwardedProtocol === 'https';
   const attributes = [
-    `${INSTALLER_SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    `${INSTALLER_SESSION_COOKIE}=${encodeURIComponent(code)}`,
     'Path=/',
     `Max-Age=${Math.floor(INSTALLER_TOKEN_TTL_MS / 1000)}`,
     'HttpOnly',
@@ -189,16 +197,19 @@ app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', service: 'votion-one-installer', setupAvailable: !installationCompleted && Date.now() <= installerExpiresAt });
 });
 
-app.get('/install', (req, res, next) => {
-  const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
-  if (!queryToken || !tokenIsValid(queryToken)) return next();
+app.post('/api/v1/installation/session', installationRateLimit, (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  if (!installerCodeIsValid(code)) {
+    return res.status(410).json({ success: false, error: 'This installation code is unavailable or has expired.' });
+  }
 
-  res.setHeader('Set-Cookie', installerSessionCookie(queryToken, req));
-  return res.redirect(303, '/install');
+  installationCodeRedeemed = true;
+  res.setHeader('Set-Cookie', installerSessionCookie(code, req));
+  return res.json({ success: true, expiresAt: new Date(installerExpiresAt).toISOString() });
 });
 
 app.get('/api/v1/installation/status', installationRateLimit, (req, res) => {
-  if (!tokenIsValid(readInstallerToken(req))) {
+  if (!installerSessionIsValid(readInstallerSession(req))) {
     return res.status(410).json({ success: false, error: 'This installation link is unavailable or has expired.' });
   }
   return res.json({
@@ -210,7 +221,7 @@ app.get('/api/v1/installation/status', installationRateLimit, (req, res) => {
 });
 
 app.post('/api/v1/installation/validate-database', installationRateLimit, async (req, res) => {
-  if (!tokenIsValid(readInstallerToken(req))) {
+  if (!installerSessionIsValid(readInstallerSession(req))) {
     return res.status(410).json({ success: false, error: 'This installation link is unavailable or has expired.' });
   }
   const databaseUrl = validDatabaseUrl(req.body?.databaseUrl);
@@ -226,7 +237,7 @@ app.post('/api/v1/installation/validate-database', installationRateLimit, async 
 });
 
 app.post('/api/v1/installation/complete', installationRateLimit, async (req, res) => {
-  if (!tokenIsValid(readInstallerToken(req))) {
+  if (!installerSessionIsValid(readInstallerSession(req))) {
     return res.status(410).json({ success: false, error: 'This installation link is unavailable or has expired.' });
   }
 
@@ -269,8 +280,7 @@ app.use(express.static(distDirectory, { index: false, fallthrough: true }));
 app.get(/.*/, (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')));
 
 const installerBaseUrl = (process.env.INSTALLER_PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-const installerLink = `${installerBaseUrl}/install?token=${encodeURIComponent(installerToken)}`;
 app.listen(PORT, () => {
-  console.log(`[INSTALL] Open this one-time installation link before ${new Date(installerExpiresAt).toISOString()}: ${installerLink}`);
-  console.log('[INSTALL] The link can configure database access, session protection, trusted application origin, and the first administrator.');
+  console.log(`[INSTALL] Open ${installerBaseUrl}/install and enter this one-time setup code before ${new Date(installerExpiresAt).toISOString()}: ${installerCode}`);
+  console.log('[INSTALL] The code can establish a protected setup session for database configuration, trusted application origin, and first-administrator provisioning.');
 });
