@@ -2947,3 +2947,13 @@ body {
   border-color: color-mix(in srgb, #d4a84f 68%, #2b2b2b);
   background: #161616;
 }
+
+
+/* Keep the product-switcher drawer above the sticky global header. */
+#app-switcher {
+  z-index: 1201;
+}
+
+#app-switcher .theme-app-switcher-drawer {
+  z-index: 1202;
+}
