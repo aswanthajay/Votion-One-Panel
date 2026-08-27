@@ -23,6 +23,12 @@ const handleCreateTicket = async (req: any, res: any) => {
   }
 
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
+  if (Number.isInteger(parsedVmid) && !isAdmin(req)) {
+    const linkedVm = await dbService.getVMByVMID(parsedVmid!);
+    if (!linkedVm || String(linkedVm.ownerEmail || '').toLowerCase() !== userEmail.toLowerCase()) {
+      return res.status(403).json({ success: false, error: 'You can only link a support ticket to a service assigned to your account.' });
+    }
+  }
   const normalizedPriority = ticketPriorities.has(String(priority)) ? String(priority) : 'medium';
   const normalizedCategory = typeof category === 'string' && category.trim() ? category.trim().slice(0, 100) : 'General';
   const normalizedMessage = typeof message === 'string' ? message.trim().slice(0, 10_000) : undefined;
@@ -130,6 +136,10 @@ ticketRouter.put('/:id/priority', requireAdmin, async (req: any, res: any) => {
 ticketRouter.put('/:id/assignment', requireAdmin, async (req: any, res: any) => {
   const assigneeEmail = req.body?.assigneeEmail === null ? null : queryValue(req.body?.assigneeEmail, 255);
   if (assigneeEmail !== null && !assigneeEmail) return res.status(400).json({ success: false, error: 'A valid assignee email or null is required' });
+  if (assigneeEmail) {
+    const agentExists = (await dbService.getSupportAgents()).some(agent => agent.email.toLowerCase() === assigneeEmail.toLowerCase());
+    if (!agentExists) return res.status(400).json({ success: false, error: 'The selected assignee is not an active support agent.' });
+  }
   const data = await dbService.assignTicket(req.params.id, assigneeEmail, req.authUser!.email);
   res.json({ success: true, data });
 });
