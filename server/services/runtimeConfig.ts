@@ -55,9 +55,16 @@ export function loadRuntimeConfiguration(): void {
 
 export function hasCoreInstallationConfiguration(): boolean {
   loadRuntimeConfiguration();
-  const databaseConfigured = Boolean(process.env.DATABASE_URL?.trim());
+  const databaseUrlConfigured = Boolean(process.env.DATABASE_URL?.trim());
+  const legacyDatabaseConfigured = Boolean(
+    process.env.PGHOST?.trim()
+    && process.env.PGPORT?.trim()
+    && process.env.PGUSER?.trim()
+    && process.env.PGPASSWORD?.trim()
+    && process.env.PGDATABASE?.trim(),
+  );
   const tokenSecretConfigured = Boolean(process.env.TOKEN_SECRET?.trim() && process.env.TOKEN_SECRET.trim().length >= 32);
-  return databaseConfigured && tokenSecretConfigured;
+  return (databaseUrlConfigured || legacyDatabaseConfigured) && tokenSecretConfigured;
 }
 
 /** Saves encrypted-transport-ready connection configuration to the ignored runtime volume after successful installation. */

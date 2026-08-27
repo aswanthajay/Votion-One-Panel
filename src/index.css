@@ -1362,7 +1362,19 @@ body {
 }
 
 
+/* First-run installation keeps a distinct, stable editorial black surface in both themes. */
+.installation-wizard-editorial {
+  background-color: #000000 !important;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .installation-wizard-editorial {
+  background-color: #000000 !important;
+  color: #ffffff;
+}
+
 /* Public authentication surfaces follow the same theme tokens as the app shell. */
+
 [data-theme="dark"] .auth-page {
   background-color: #000000 !important;
   color: var(--theme-text);

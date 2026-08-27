@@ -123,7 +123,7 @@ export const InstallationWizard: React.FC = () => {
   return (
     <main className="auth-page min-h-screen bg-white px-4 py-8 sm:px-8 lg:px-12">
       <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-2xl border border-[#dedfdf] bg-white shadow-2xl lg:grid-cols-[0.9fr_1.1fr]">
-        <section className="bg-black p-8 text-white sm:p-12">
+        <section className="installation-wizard-editorial bg-black p-8 text-white sm:p-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-400">Votion One™</p>
           <h1 className="mt-8 max-w-md font-serif text-4xl leading-tight italic sm:text-5xl">Install your control plane with confidence.</h1>
           <p className="mt-6 max-w-md text-sm leading-7 text-zinc-300">This guided setup verifies your database, generates required application secrets, establishes the trusted application origin, and creates the first administrator. Provider connections remain optional and are configured later from the administrator panel.</p>
