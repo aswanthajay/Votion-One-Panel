@@ -6,6 +6,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      (function () {
+        try {
+          var preference = localStorage.getItem('votion_theme');
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var dark = preference === 'dark' || ((!preference || preference === 'system') && prefersDark);
+          var root = document.documentElement;
+          if (dark) {
+            root.setAttribute('data-theme', 'dark');
+          } else {
+            root.removeAttribute('data-theme');
+          }
+          root.style.colorScheme = dark ? 'dark' : 'light';
+          var themeColor = document.querySelector('meta[name="theme-color"]');
+          if (themeColor) themeColor.setAttribute('content', dark ? '#000000' : '#ffffff');
+        } catch (_error) {
+          // Storage access restrictions should fall back to the stylesheet default.
+        }
+      })();
+    </script>
     <title>Votion One™ Platform</title>
     
     <!-- GOOGLE FONTS: 1:1 Reference Fonts (Inter, Newsreader, Roboto Mono, Dancing Script) -->
