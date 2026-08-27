@@ -3,9 +3,9 @@ import { apiClient, API_BASE_URL } from '../services/apiClient';
 const ThreeBackground = lazy(() => import('./ThreeBackground').then(module => ({ default: module.ThreeBackground })));
 
 interface AuthPagesProps {
-  initialMode?: 'login' | 'register' | 'forgot-password' | 'recovery';
+  initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password';
   onNavigateToDashboard?: () => void;
-  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'recovery') => void;
+  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'reset-password') => void;
   onLoginSuccess?: (userRole: 'admin' | 'client') => void;
 }
 
@@ -15,7 +15,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   onNavigateToAuth,
   onLoginSuccess,
 }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'recovery'>(initialMode);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password'>(initialMode);
 
   useEffect(() => {
     setAuthMode(initialMode);
@@ -31,9 +31,9 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
 
-  // Recovery Form Inputs
-  const [recoveryEmail, setRecoveryEmail] = useState('');
-  const [recoveryPin, setRecoveryPin] = useState('');
+  // Password reset form inputs
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState('');
 
   // Status & Error Banners
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     if (onLoginSuccess) onLoginSuccess(role);
   };
 
-  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'recovery') => {
+  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'reset-password') => {
     setAuthMode(mode);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -138,37 +138,42 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     }
   };
 
-  // Handle Account Recovery PIN Submission — verifies against PostgreSQL, not hardcoded values
-  const handleRecoverySubmit = async (e: React.FormEvent) => {
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    if (!recoveryEmail.trim() || !recoveryEmail.includes('@')) {
-      setErrorMsg('Enter the email address associated with your account.');
+    setSuccessMsg(null);
+    const token = new URLSearchParams(window.location.search).get('token')?.trim() || '';
+    if (!token) {
+      setErrorMsg('This password reset link is missing its security token. Request a new link.');
       return;
     }
-    if (recoveryPin.trim().length !== 6) {
-      setErrorMsg('Support PIN must be exactly 6 digits.');
+    if (resetPassword.length < 12) {
+      setErrorMsg('Use a password with at least 12 characters.');
+      return;
+    }
+    if (resetPassword !== resetPasswordConfirmation) {
+      setErrorMsg('The password confirmation does not match.');
       return;
     }
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/recover-pin`, {
+      const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: recoveryEmail.trim(), pin: recoveryPin.trim() }),
+        body: JSON.stringify({ token, password: resetPassword }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        localStorage.setItem('votion_jwt_token', data.token);
-        localStorage.setItem('votion_user_email', data.user.email);
-        localStorage.setItem('votion_user_role', data.user.role);
-        setSuccessMsg('Support PIN verified. Logging in...');
-        setTimeout(() => triggerSuccess(data.user.role as 'admin' | 'client'), 800);
-      } else {
-        setErrorMsg(data.error || 'Invalid Support PIN. Contact VOTION administrator.');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setErrorMsg(data.error || 'This reset link is invalid or has expired.');
+        return;
       }
+      setResetPassword('');
+      setResetPasswordConfirmation('');
+      setSuccessMsg('Password reset successfully. You can now sign in.');
+      window.history.replaceState({}, document.title, '/login');
+      setTimeout(() => changeMode('login'), 1200);
     } catch {
-      setErrorMsg('Network error. Please check your connection and try again.');
+      setErrorMsg('Unable to reset your password right now. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -408,7 +413,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                 <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-[#656b6b]">
                   <button
                     type="button"
-                    onClick={() => changeMode('recovery')}
+                    onClick={() => changeMode('forgot-password')}
                     className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70"
                   >
                     Account recovery
@@ -547,42 +552,41 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
             </>
           )}
 
-          {authMode === 'recovery' && (
+          {authMode === 'reset-password' && (
             <>
               <div className="mb-6">
                 <h2
                   className="text-[26px] text-[#1a1a1a] leading-tight mb-1 font-medium"
                   style={{ fontFamily: 'var(--ink-font-global-family-prominent), Georgia, serif' }}
                 >
-                  Account recovery
+                  Set a new password
                 </h2>
-                <p className="text-xs text-[#656b6b]">Enter your account email and 6-digit Support PIN to continue.</p>
+                <p className="text-xs text-[#656b6b]">Choose a new password for your account. This link can be used once.</p>
               </div>
 
-              <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-5">
+              <form onSubmit={handleResetPasswordSubmit} className="flex flex-col gap-5">
                 <div>
-                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Account email</label>
+                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">New password</label>
                   <input
-                    type="email"
-                    value={recoveryEmail}
-                    onChange={(e) => setRecoveryEmail(e.target.value)}
-                    placeholder="name@company.com"
-                    autoComplete="username"
-                    className="w-full px-3 py-3 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                    type="password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
                     required
+                    minLength={12}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">6-Digit Support PIN</label>
+                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Confirm new password</label>
                   <input
-                    type="text"
-                    inputMode="numeric"
-                    value={recoveryPin}
-                    onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="e.g. 868975"
-                    maxLength={6}
-                    className="w-full px-3 py-3 border border-[#111111] rounded-md outline-none text-sm font-mono font-bold tracking-[0.35em] text-center text-[#1a1a1a] placeholder:tracking-normal placeholder:font-mono placeholder:font-normal placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                    type="password"
+                    value={resetPasswordConfirmation}
+                    onChange={(e) => setResetPasswordConfirmation(e.target.value)}
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
                     required
+                    minLength={12}
                   />
                 </div>
                 <button
@@ -593,7 +597,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                   {isLoading && (
                     <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                   )}
-                  Verify PIN & Log In
+                  Reset password
                 </button>
                 <div className="flex items-center justify-center text-xs text-[#656b6b]">
                   <button

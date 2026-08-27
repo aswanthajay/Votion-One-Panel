@@ -116,7 +116,7 @@ export interface ApiAccount {
   name: string;
   role: 'administrator' | 'moderator' | 'user' | 'admin' | 'client';
   phone?: string;
-  supportPin?: string;
+  supportPinConfigured?: boolean;
   twoFactorActive?: boolean;
   created_at?: string;
 }
@@ -906,7 +906,7 @@ class ApiClient {
   /**
    * Update User Profile & Name/Phone in PostgreSQL
    */
-  async updateUserProfile(profileData: { email?: string; name?: string; phone?: string; supportPin?: string; twoFactorActive?: boolean }) {
+  async updateUserProfile(profileData: { email?: string; name?: string; phone?: string; supportPin?: string }) {
     const email = profileData.email || this.getUserEmail();
     const res = await this.apiFetch(`${API_BASE_URL}/user/profile`, {
       method: 'PUT',
@@ -943,11 +943,11 @@ class ApiClient {
   /**
    * Toggle 2FA State in PostgreSQL
    */
-  async toggle2FA(active: boolean) {
+  async toggle2FA(active: boolean, stepUp?: { currentPassword: string; totpCode: string }) {
     const res = await this.apiFetch(`${API_BASE_URL}/user/2fa/toggle`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ email: this.getUserEmail(), active }),
+      body: JSON.stringify({ email: this.getUserEmail(), active, ...stepUp }),
     });
     return await res.json();
   }

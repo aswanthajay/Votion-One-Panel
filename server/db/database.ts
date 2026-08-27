@@ -1394,7 +1394,7 @@ export class DatabaseService {
 
   async regenerateSupportPin(email: string) {
     const clean = email.toLowerCase().trim();
-    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const newPin = crypto.randomInt(100000, 1000000).toString();
     await pgPool.query('UPDATE accounts SET support_pin = $1 WHERE email = $2', [hashSupportPin(newPin), clean]);
     await this.logAudit(clean, 'REGENERATE_PIN', clean, 'Generated a new Support PIN');
     return { success: true, supportPin: newPin };

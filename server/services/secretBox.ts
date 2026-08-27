@@ -3,6 +3,7 @@ import crypto from 'crypto';
 const PREFIX = 'enc:v1:';
 const IV_BYTES = 12;
 const KEY_BYTES = 32;
+const SUPPORT_PIN_PREFIX = 'hmac:v1:';
 
 type SecretKeySource = 'hex' | 'base64url';
 
@@ -42,6 +43,31 @@ export function encryptCredential(value: string | null | undefined): string | nu
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `${PREFIX}${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+function supportPinKey(): Buffer {
+  const configured = process.env.SUPPORT_PIN_PEPPER?.trim() || process.env.TOKEN_SECRET?.trim();
+  if (!configured || configured.length < 32) {
+    throw new Error('SUPPORT_PIN_PEPPER or TOKEN_SECRET must be configured before Support PIN verification.');
+  }
+  return Buffer.from(configured, 'utf8');
+}
+
+export function hashSupportPin(pin: string): string {
+  return `${SUPPORT_PIN_PREFIX}${crypto.createHmac('sha256', supportPinKey()).update(pin.trim()).digest('hex')}`;
+}
+
+export function verifySupportPin(pin: string, storedValue: string | null | undefined): boolean {
+  if (!storedValue) return false;
+  if (!storedValue.startsWith(SUPPORT_PIN_PREFIX)) return storedValue === pin.trim();
+  const expected = hashSupportPin(pin);
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const suppliedBuffer = Buffer.from(storedValue, 'utf8');
+  return expectedBuffer.length === suppliedBuffer.length && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+}
+
+export function isHashedSupportPin(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(SUPPORT_PIN_PREFIX);
 }
 
 export function decryptCredential(value: string | null | undefined): string | null {

@@ -230,39 +230,8 @@ apiRouter.post('/auth/reset-password', rateLimit({ windowMs: 15 * 60 * 1000, max
   }
 });
 
-// 4c. POST /api/v1/auth/recover-pin (Verify Support PIN against PostgreSQL)
-apiRouter.post('/auth/recover-pin', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-recover-pin' }), async (req, res) => {
-  const { email, pin } = req.body;
-  if (!email || !String(email).includes('@') || !pin || !/^\d{6}$/.test(String(pin).trim())) {
-    return res.status(400).json({ success: false, error: 'Account email and valid 6-digit Support PIN are required' });
-  }
-  try {
-    const account = await dbService.findUserBySupportPin(String(pin).trim(), String(email));
-    if (!account) {
-      return res.status(401).json({ success: false, error: 'Invalid Support PIN. Contact VOTION administrator.' });
-    }
-    const accountId = Number(account.id);
-    const accountEmail = String(account.email || '');
-    if (!Number.isInteger(accountId) || !accountEmail) {
-      return res.status(401).json({ success: false, error: 'Invalid Support PIN. Contact VOTION administrator.' });
-    }
-    const token = createSessionToken(accountId);
-    await dbService.logAudit(accountEmail, 'PIN_RECOVERY_LOGIN', 'auth', 'Account recovered via Support PIN');
-    res.cookie('votion_auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    res.json({
-      success: true,
-      token,
-      user: { id: accountId, email: accountEmail, name: String(account.name || ''), role: String(account.role || 'client') },
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: 'Server error during PIN verification' });
-  }
-});
+// Support PIN login was intentionally removed. Password recovery is handled only
+// through the expiring, single-use email token flow above.
 
 // 5. GET /api/v1/user/profile & /api/user/profile (Fetch Live Profile + VM Count)
 const handleGetProfile = async (req: any, res: any) => {
@@ -283,7 +252,7 @@ const handleGetProfile = async (req: any, res: any) => {
         name: user.name,
         role: user.role,
         phone: user.phone || null,
-        supportPin: user.support_pin || user.supportPin || null,
+        supportPinConfigured: Boolean(user.support_pin || user.supportPin),
         twoFactorActive: user.two_factor_active !== undefined ? user.two_factor_active : false,
         assignedVmCount: userVMs.length,
       },
@@ -298,9 +267,9 @@ apiRouter.get('/user/profile', handleGetProfile);
 const handleProfileUpdate = async (req: any, res: any) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { name, phone, supportPin, twoFactorActive } = req.body;
+  const { name, phone, supportPin } = req.body;
 
-  const updated = await dbService.updateUserProfile(userEmail, { name, phone, supportPin, twoFactorActive });
+  const updated = await dbService.updateUserProfile(userEmail, { name, phone, supportPin });
   if (updated) {
     res.json({ success: true, message: 'Profile updated in PostgreSQL database', data: updated });
   } else {
@@ -332,17 +301,31 @@ apiRouter.post('/user/change-password', async (req, res) => {
 apiRouter.post('/user/regenerate-pin', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const result = await dbService.regenerateSupportPin(userEmail);
-  res.json({ success: true, message: 'Support PIN regenerated', supportPin: result.supportPin });
+  await dbService.regenerateSupportPin(userEmail);
+  res.json({ success: true, message: 'Support PIN regenerated securely', supportPinConfigured: true });
 });
 
 // 9. POST /api/v1/user/2fa/toggle (Update 2FA State in PostgreSQL)
-apiRouter.post('/user/2fa/toggle', async (req, res) => {
+apiRouter.post('/user/2fa/toggle', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'user-2fa-toggle' }), async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { active } = req.body;
-  const result = await dbService.toggle2FA(userEmail, active === true);
-  res.json({ success: true, message: `2FA ${result.twoFactorActive ? 'enabled' : 'disabled'}`, twoFactorActive: result.twoFactorActive });
+  const { active, currentPassword, totpCode } = req.body;
+  if (active !== false) {
+    return res.status(400).json({ success: false, error: 'Use the verified 2FA setup flow to enable 2FA.' });
+  }
+  if (!currentPassword || !/^\d{6}$/.test(String(totpCode || ''))) {
+    return res.status(400).json({ success: false, error: 'Current password and a valid TOTP code are required to disable 2FA.' });
+  }
+  const passwordResult = await dbService.validateCredentials(userEmail, String(currentPassword));
+  if (!passwordResult.success) return res.status(401).json({ success: false, error: 'Current password is incorrect.' });
+  const secret = await dbService.getTotpSecret(userEmail);
+  if (!secret) return res.status(400).json({ success: false, error: 'No enrolled TOTP authenticator was found.' });
+  const totp = new TOTP({ issuer: 'VOTION', label: userEmail, algorithm: 'SHA1', digits: 6, period: 30, secret });
+  if (totp.validate({ token: String(totpCode), window: 1 }) === null) {
+    return res.status(401).json({ success: false, error: 'The TOTP code is invalid or expired.' });
+  }
+  const result = await dbService.toggle2FA(userEmail, false);
+  res.json({ success: true, message: '2FA disabled', twoFactorActive: result.twoFactorActive });
 });
 
 // 9a. POST /api/v1/user/2fa/setup (Generate real TOTP secret + otpauth URI for QR scanning)

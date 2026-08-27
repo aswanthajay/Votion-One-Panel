@@ -200,7 +200,7 @@ export const UserManagement: React.FC = () => {
                 <th className="px-4 py-3 font-semibold tracking-wider">User</th>
                 <th className="px-4 py-3 font-semibold tracking-wider">Email</th>
                 <th className="px-4 py-3 font-semibold tracking-wider">Role</th>
-                <th className="px-4 py-3 font-semibold tracking-wider">Support PIN</th>
+                <th className="px-4 py-3 font-semibold tracking-wider">Support verification</th>
                 <th className="px-4 py-3 font-semibold tracking-wider text-right">Actions</th>
               </tr>
             </thead>
@@ -221,7 +221,7 @@ export const UserManagement: React.FC = () => {
                       <option value="client">Client</option>
                     </select>
                   </td>
-                  <td className="px-4 py-3 font-mono text-[#656b6b]">{user.supportPin || 'N/A'}</td>
+                  <td className="px-4 py-3 text-[#656b6b]">{user.supportPinConfigured ? 'Configured' : 'Not configured'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button

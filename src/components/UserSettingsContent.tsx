@@ -17,8 +17,7 @@ export const UserSettingsContent: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
-  const [supportPin, setSupportPin] = useState('');
-  const [isSupportPinVisible, setIsSupportPinVisible] = useState(false);
+  const [supportPinConfigured, setSupportPinConfigured] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -87,7 +86,7 @@ export const UserSettingsContent: React.FC = () => {
           setLastName(parts.slice(1).join(' ') || 'Ajay');
         }
         if (data.phone) setPhoneNumber(data.phone);
-        if (data.supportPin) setSupportPin(data.supportPin);
+        setSupportPinConfigured(Boolean(data.supportPinConfigured));
         if (data.twoFactorActive !== undefined) setTwoFactorActive(data.twoFactorActive);
       }
     } catch (err) {
@@ -179,20 +178,28 @@ export const UserSettingsContent: React.FC = () => {
   // STEP 3.2: Regenerate Support PIN via POST /api/v1/user/regenerate-pin
   const handleGenerateNewPin = async () => {
     const res = await apiClient.regenerateSupportPin();
-    if (res.success && res.supportPin) {
-      setSupportPin(res.supportPin);
-      setIsSupportPinVisible(false);
-      showToast('Support PIN regenerated and saved securely. Reveal it when needed.');
+    if (res.success) {
+      setSupportPinConfigured(true);
+      showToast('Support PIN regenerated securely. Contact support when assistance is required.');
+    } else {
+      showToast(res.error || 'Unable to regenerate the Support PIN.');
     }
   };
 
   // STEP 3.3: Toggle 2FA via POST /api/v1/user/2fa/toggle
-  const handleToggle2FAState = async (active: boolean) => {
-    const res = await apiClient.toggle2FA(active);
-    if (res.success) {
-      setTwoFactorActive(res.twoFactorActive);
-      showToast(`2FA status updated to ${res.twoFactorActive ? 'Active (TOTP)' : 'Disabled'} in PostgreSQL`);
+  const handleToggle2FAState = async (active: boolean, stepUp?: { currentPassword: string; totpCode: string }) => {
+    try {
+      const res = await apiClient.toggle2FA(active, stepUp);
+      if (res.success) {
+        setTwoFactorActive(res.twoFactorActive);
+        showToast(`2FA status updated to ${res.twoFactorActive ? 'Active (TOTP)' : 'Disabled'}`);
+        return true;
+      }
+      showToast(res.error || 'Unable to update 2FA status.');
+    } catch {
+      showToast('Unable to update 2FA status. Please try again.');
     }
+    return false;
   };
 
   return (
@@ -406,25 +413,17 @@ export const UserSettingsContent: React.FC = () => {
                       <td className="ink-table-td">
                         <div className="flex items-center gap-3">
                           <span
-                            className="font-mono text-base font-bold text-[#1a1a1a] bg-[#f1f1f1] px-2.5 py-1 rounded border border-[#dedfdf]"
-                            aria-label={isSupportPinVisible ? 'Support PIN visible' : 'Support PIN masked'}
+                            className="font-mono text-xs font-semibold text-[#1a1a1a] bg-[#f1f1f1] px-2.5 py-1 rounded border border-[#dedfdf]"
+                            aria-label={supportPinConfigured ? 'Support PIN configured' : 'Support PIN not configured'}
                           >
-                            {supportPin ? (isSupportPinVisible ? supportPin : '••••••') : 'Not available'}
+                            {supportPinConfigured ? 'Configured' : 'Not configured'}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setIsSupportPinVisible((visible) => !visible)}
-                            className="text-xs text-[#2563eb] hover:underline font-semibold cursor-pointer"
-                            aria-pressed={isSupportPinVisible}
-                          >
-                            {isSupportPinVisible ? 'Hide pin' : 'Reveal pin'}
-                          </button>
                           <button
                             type="button"
                             onClick={handleGenerateNewPin}
                             className="text-xs text-[#2563eb] hover:underline font-semibold cursor-pointer"
                           >
-                            Refresh pin
+                            Regenerate
                           </button>
                         </div>
                         <p className="ink-description-text">
@@ -800,8 +799,7 @@ export const UserSettingsContent: React.FC = () => {
                     });
                     const data = await res.json();
                     if (data.success && data.verified) {
-                      await handleToggle2FAState(true);
-                      showToast('2FA activated — the code matched your authenticator app');
+                          showToast('2FA activated — the code matched your authenticator app');
                     } else {
                       showToast(`⚠️ ${data.error || 'Invalid TOTP code — 2FA was NOT activated. Try again.'}`);
                       return;
@@ -827,14 +825,45 @@ export const UserSettingsContent: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
           <div className="w-full max-w-[420px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-6 flex flex-col gap-4 text-center">
             <h3 className="text-base font-bold text-[#dc2626]">Disable 2FA Authentication?</h3>
-            <p className="text-xs text-[#656b6b]">Disabling 2FA reduces account security. You will only require a password to log into VOTION Cloud.</p>
+            <p className="text-xs text-[#656b6b]">Disabling 2FA reduces account security. Confirm your current password and a fresh authenticator code to continue.</p>
+            <div className="flex flex-col gap-3 text-left">
+              <label className="text-xs font-semibold text-[#1a1a1a]">
+                Current password
+                <input
+                  type="password"
+                  value={inputPassword}
+                  onChange={(e) => setInputPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full mt-1 p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a]"
+                />
+              </label>
+              <label className="text-xs font-semibold text-[#1a1a1a]">
+                Authenticator code
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={inputTotpCode}
+                  onChange={(e) => setInputTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  autoComplete="one-time-code"
+                  className="w-full mt-1 p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a] font-mono tracking-[0.3em]"
+                />
+              </label>
+            </div>
             <div className="flex items-center gap-3 pt-2">
               <button onClick={() => setActiveModal(null)} className="btn-secondary w-1/2 py-2 cursor-pointer">Keep 2FA</button>
-              <button 
-                onClick={async () => { 
-                  await handleToggle2FAState(false); 
-                  setActiveModal(null); 
-                }} 
+              <button
+                onClick={async () => {
+                  if (!inputPassword || inputTotpCode.length !== 6) {
+                    showToast('Enter your current password and a 6-digit authenticator code.');
+                    return;
+                  }
+                  const disabled = await handleToggle2FAState(false, { currentPassword: inputPassword, totpCode: inputTotpCode });
+                  if (disabled) {
+                    setInputPassword('');
+                    setInputTotpCode('');
+                    setActiveModal(null);
+                  }
+                }}
                 className="theme-destructive-button btn-primary bg-[#dc2626] hover:bg-[#b91c1c] w-1/2 py-2 cursor-pointer"
               >
                 Disable 2FA
@@ -948,10 +977,10 @@ export const UserSettingsContent: React.FC = () => {
             {activeRemoteSession ? (
               <div className="flex flex-col gap-3 text-xs font-mono text-[#10b981]">
                 <p>Session ID: <span className="text-white">{activeRemoteSession.session_id || activeRemoteSession.id || '—'}</span></p>
-                <p>Support PIN Required: <span className="text-white">{supportPin || '------'}</span></p>
+                <p>Support verification: <span className="text-white">{supportPinConfigured ? 'Configured' : 'Not configured'}</span></p>
                 <p>Expires: <span className="text-white">{activeRemoteSession.expires_at ? new Date(activeRemoteSession.expires_at).toLocaleString() : '60 minutes'}</span></p>
                 <div className="p-3 bg-black border border-[#222222] rounded text-white text-[11px]">
-                  Votion One™ Support is authorized to connect to this panel. Share your Support PIN with the engineer. The session closes automatically at expiry or when you disconnect.
+                  Votion One™ Support is authorized to connect to this panel. Verification is handled through this authorized session. The session closes automatically at expiry or when you disconnect.
                 </div>
               </div>
             ) : (
