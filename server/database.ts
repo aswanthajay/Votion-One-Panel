@@ -533,7 +533,7 @@ export class DatabaseService {
 
   async assignVM(vmid: number, targetEmail: string, userEmail: string = 'admin@votioncloud.org') {
     const res = await pgPool.query("UPDATE vms SET owner_email = $1 WHERE vmid = $2 RETURNING *", [targetEmail.trim(), vmid]);
-    if (res.rowCount > 0) {
+    if ((res.rowCount ?? 0) > 0) {
       await this.logAudit(userEmail, 'REASSIGN_VM', `VMID ${vmid}`, `Reassigned to ${targetEmail}`);
       return res.rows[0];
     }
@@ -587,7 +587,7 @@ export class DatabaseService {
 
   async deleteVM(vmid: number, userEmail: string = 'admin@votioncloud.org') {
     const res = await pgPool.query('DELETE FROM vms WHERE vmid = $1', [vmid]);
-    if (res.rowCount > 0) {
+    if ((res.rowCount ?? 0) > 0) {
       await this.logAudit(userEmail, 'DELETE_VM', `VMID ${vmid}`, `Deleted VMID ${vmid}`);
       return true;
     }
@@ -713,7 +713,7 @@ export class DatabaseService {
       'DELETE FROM secondary_emails WHERE account_email = $1 AND secondary_email = $2',
       [accountEmail.toLowerCase().trim(), secondaryEmail.toLowerCase().trim()]
     );
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   // PASSKEYS
@@ -743,7 +743,7 @@ export class DatabaseService {
       'DELETE FROM passkeys WHERE account_email = $1 AND credential_id = $2',
       [accountEmail.toLowerCase().trim(), credentialId]
     );
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   // TOTP SECRETS
@@ -837,7 +837,7 @@ export class DatabaseService {
 
   async deleteVmSnapshot(vmid: number, snapshotName: string) {
     const res = await pgPool.query('DELETE FROM vm_snapshots WHERE vmid = $1 AND snapshot_name = $2', [vmid, snapshotName]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   // TASKS PANEL
@@ -946,7 +946,7 @@ export class DatabaseService {
 
   async removeVmFirewallRule(vmid: number, pos: number) {
     const res = await pgPool.query('DELETE FROM firewall_rules WHERE vmid = $1 AND id = $2', [vmid, pos]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   async setVmFirewallOptions(vmid: number, options: { enabled: boolean }) {
@@ -966,7 +966,7 @@ export class DatabaseService {
 
   async deleteUser(userId: number) {
     const res = await pgPool.query('DELETE FROM accounts WHERE id = $1', [userId]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   // PROXMOX CONNECTIONS
@@ -986,7 +986,7 @@ export class DatabaseService {
 
   async deleteProxmoxConnection(id: string) {
     const res = await pgPool.query('DELETE FROM proxmox_connections WHERE id = $1', [id]);
-    return res.rowCount > 0;
+    return (res.rowCount ?? 0) > 0;
   }
 
   // SYSTEM SETTINGS

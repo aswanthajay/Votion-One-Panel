@@ -287,8 +287,9 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
           try { clientWs.close(); } catch (_e) {}
         };
         try {
+          const tlsOptions = createProxmoxWebSocketTlsOptions(proxmoxConn.ssl_fingerprint) as import('ws').ClientOptions;
           upstream = new WebSocket(`wss://${cleanHost}:${pvePort}${upstreamPath}`, {
-            ...createProxmoxWebSocketTlsOptions(proxmoxConn.ssl_fingerprint),
+            ...tlsOptions,
             headers: { Authorization: req.proxmoxAuth }
           });
         } catch (e) {

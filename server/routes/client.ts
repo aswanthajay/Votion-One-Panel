@@ -209,7 +209,7 @@ clientRouter.get('/vms/:vmid/telemetry', async (req, res) => {
     if (!pveRes.ok) throw new Error('Failed to fetch from Proxmox');
     const json = await readPveJson<PveEnvelope<PveVmStatus>>(pveRes);
     
-    if (json.data) {
+    if (json?.data) {
       res.json({
         success: true,
         vmid,
@@ -250,8 +250,28 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
     const now = Date.now();
     const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
     
-    const currentPeriod: any[] = [];
-    const previousPeriod: any[] = [];
+    interface TelemetryPoint {
+      timestamp: string;
+      cpuPct: number;
+      ramBytes: number;
+      netInBytes: number;
+      netOutBytes: number;
+      diskReadBytes: number;
+      diskWriteBytes: number;
+    }
+    type NumericTelemetryKey = Exclude<keyof TelemetryPoint, 'timestamp'>;
+    interface TelemetryBucket {
+      cpuPct: number[];
+      ramBytes: number[];
+      netInBytes: number;
+      netOutBytes: number;
+      diskReadBytes: number;
+      diskWriteBytes: number;
+      count: number;
+    }
+
+    const currentPeriod: TelemetryPoint[] = [];
+    const previousPeriod: TelemetryPoint[] = [];
     
     rawHistory.forEach(row => {
       const time = new Date(row.timestamp).getTime();
@@ -272,16 +292,16 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
     });
 
     // Calculations
-    const calcAvg = (arr: any[], key: string) => arr.length ? arr.reduce((acc, curr) => acc + curr[key], 0) / arr.length : 0;
-    const calcMax = (arr: any[], key: string) => arr.length ? Math.max(...arr.map(x => x[key])) : 0;
-    const calcMin = (arr: any[], key: string) => arr.length ? Math.min(...arr.map(x => x[key])) : 0;
+    const calcAvg = (arr: TelemetryPoint[], key: NumericTelemetryKey) => arr.length ? arr.reduce((acc, curr) => acc + curr[key], 0) / arr.length : 0;
+    const calcMax = (arr: TelemetryPoint[], key: NumericTelemetryKey) => arr.length ? Math.max(...arr.map(x => x[key])) : 0;
+    const calcMin = (arr: TelemetryPoint[], key: NumericTelemetryKey) => arr.length ? Math.min(...arr.map(x => x[key])) : 0;
     
     const cpuAvgCurrent = calcAvg(currentPeriod, 'cpuPct');
     const cpuAvgPrev = calcAvg(previousPeriod, 'cpuPct');
     const memAvgCurrent = calcAvg(currentPeriod, 'ramBytes');
     const memAvgPrev = calcAvg(previousPeriod, 'ramBytes');
 
-    const getNetDiff = (arr: any[], key: string) => {
+    const getNetDiff = (arr: TelemetryPoint[], key: NumericTelemetryKey) => {
       if (arr.length < 2) return 0;
       // It's cumulative, so last - first
       const diff = arr[arr.length - 1][key] - arr[0][key];
@@ -299,12 +319,13 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
 
     // Downsample to hourly buckets for smooth chart rendering (max ~48 points)
     const bucketKey = (ts: string) => new Date(ts).toISOString().slice(0, 13);
-    const bucket = (arr: any[]) => {
-      const map = new Map<string, any>();
+    const bucket = (arr: TelemetryPoint[]) => {
+      const map = new Map<string, TelemetryBucket>();
       arr.forEach(pt => {
         const k = bucketKey(pt.timestamp);
-        if (!map.has(k)) map.set(k, { cpuPct: [], ramBytes: [], netInBytes: 0, netOutBytes: 0, diskReadBytes: 0, diskWriteBytes: 0, count: 0, first: pt });
+        if (!map.has(k)) map.set(k, { cpuPct: [], ramBytes: [], netInBytes: 0, netOutBytes: 0, diskReadBytes: 0, diskWriteBytes: 0, count: 0 });
         const b = map.get(k);
+        if (!b) return;
         b.cpuPct.push(pt.cpuPct);
         b.ramBytes.push(pt.ramBytes);
         b.count++;
@@ -313,6 +334,7 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
       arr.forEach(pt => {
         const k = bucketKey(pt.timestamp);
         const b = map.get(k);
+        if (!b) return;
         b.netInBytes = pt.netInBytes;
         b.netOutBytes = pt.netOutBytes;
         b.diskReadBytes = pt.diskReadBytes;
@@ -323,6 +345,7 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
         if (b.count > 1) {
           const first = arr.find(p => bucketKey(p.timestamp) === k);
           const last = [...arr].reverse().find(p => bucketKey(p.timestamp) === k);
+          if (!first || !last) return null;
           nIn = Math.max(0, last.netInBytes - first.netInBytes);
           nOut = Math.max(0, last.netOutBytes - first.netOutBytes);
           dR = Math.max(0, last.diskReadBytes - first.diskReadBytes);
@@ -330,16 +353,16 @@ clientRouter.get('/vms/:vmid/metrics', async (req, res) => {
         }
         return {
           timestamp: new Date(k + ':00:00Z').toISOString(),
-          cpuPct: Number((b.cpuPct.reduce((a, c) => a + c, 0) / b.count).toFixed(2)),
+          cpuPct: Number((b.cpuPct.reduce((a: number, c: number) => a + c, 0) / b.count).toFixed(2)),
           peakCpuPct: Number(Math.max(...b.cpuPct).toFixed(2)),
-          ramBytes: Math.round(b.ramBytes.reduce((a, c) => a + c, 0) / b.count),
+          ramBytes: Math.round(b.ramBytes.reduce((a: number, c: number) => a + c, 0) / b.count),
           peakRamBytes: Math.max(...b.ramBytes),
           netInBytes: nIn,
           netOutBytes: nOut,
           diskReadBytes: dR,
           diskWriteBytes: dW
         };
-      });
+      }).filter((item): item is NonNullable<typeof item> => item !== null);
     };
     const bucketedHistory = bucket(currentPeriod);
 

@@ -1,4 +1,7 @@
 import PDFDocument from 'pdfkit';
+
+type PdfDocument = InstanceType<typeof PDFDocument>;
+
 import { dbService, pgPool } from '../db/database.js';
 import { proxmoxApi } from './proxmox.js';
 
@@ -49,7 +52,7 @@ function chartDataPoints(points: { t: number; v: number }[], maxPoints: number =
   return out;
 }
 
-function drawSparkline(doc: PDFDocument, points: { t: number; v: number }[], x: number, y: number, w: number, h: number, color: string, maxV: number) {
+function drawSparkline(doc: PdfDocument, points: { t: number; v: number }[], x: number, y: number, w: number, h: number, color: string, maxV: number) {
   if (!points || points.length === 0) return;
   const maxVal = maxV > 0 ? maxV : Math.max(...points.map(p => p.v), 1);
   const minT = points[0].t;
@@ -69,7 +72,7 @@ function drawSparkline(doc: PDFDocument, points: { t: number; v: number }[], x: 
   doc.restore();
 }
 
-function sectionHeader(doc: PDFDocument, num: string, title: string, subtitle?: string) {
+function sectionHeader(doc: PdfDocument, num: string, title: string, subtitle?: string) {
   doc.moveDown(1);
   const y0 = doc.y;
   doc.rect(doc.page.margins.left - 8, y0 - 4, 8, 22).fill(ACCENT);
@@ -80,14 +83,15 @@ function sectionHeader(doc: PDFDocument, num: string, title: string, subtitle?: 
   }
 }
 
-function infoBox(doc: PDFDocument, text: string, y0?: number) {
+function infoBox(doc: PdfDocument, text: string, y0?: number) {
   doc.save();
   const y0b = doc.y;
   const boxW = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const h = doc.heightOfString(text, { width: boxW - 24, fontSize: 8.5, lineGap: 2, font: 'Helvetica-Oblique' }) + 16;
+  doc.fontSize(8.5).font('Helvetica-Oblique');
+  const h = doc.heightOfString(text, { width: boxW - 24, lineGap: 2 }) + 16;
   if (y0b + h > doc.page.height - 40) doc.addPage();
-  doc.fillColor(GRAY_BG).rect(doc.page.margins.left, y0b, boxW, h, 4).fill();
-  doc.strokeColor(GRAY_LINE).rect(doc.page.margins.left, y0b, boxW, h, 4).stroke();
+  doc.fillColor(GRAY_BG).roundedRect(doc.page.margins.left, y0b, boxW, h, 4).fill();
+  doc.strokeColor(GRAY_LINE).roundedRect(doc.page.margins.left, y0b, boxW, h, 4).stroke();
   doc.fillColor(INK_SOFT).fontSize(8.5).font('Helvetica-Oblique').text(text, doc.page.margins.left + 12, y0b + 8, {
     width: boxW - 24,
     lineGap: 2,
@@ -97,21 +101,21 @@ function infoBox(doc: PDFDocument, text: string, y0?: number) {
   doc.y = y0b + h + 8;
 }
 
-function kpiCard(doc: PDFDocument, label: string, value: string, color: string = ACCENT, y0?: number) {
+function kpiCard(doc: PdfDocument, label: string, value: string, color: string = ACCENT, y0?: number) {
   const cardW = (doc.page.width - doc.page.margins.left - doc.page.margins.right - 16) / 2;
   const baseY = doc.y;
   const x = doc.x;
   doc.save();
-  doc.fillColor(GRAY_BG).rect(x, baseY, cardW, 46, 4).fill();
-  doc.strokeColor(GRAY_LINE).rect(x, baseY, cardW, 46, 4).stroke();
+  doc.fillColor(GRAY_BG).roundedRect(x, baseY, cardW, 46, 4).fill();
+  doc.strokeColor(GRAY_LINE).roundedRect(x, baseY, cardW, 46, 4).stroke();
   doc.fillColor(INK_SOFT).fontSize(8).font('Helvetica').text(label.toUpperCase(), x + 10, baseY + 8, { width: cardW - 20, align: 'left' });
   doc.fillColor(color).fontSize(16).font('Helvetica-Bold').text(value, x + 10, baseY + 24, { width: cardW - 20 });
   doc.restore();
   doc.y = baseY; // keep vertical position stable across cards in the same row
-  doc.moveRight(cardW + 16);
+  doc.x = x + cardW + 16;
 }
 
-function row2Kpis(doc: PDFDocument, kpis: { label: string; value: string; color?: string }[]) {
+function row2Kpis(doc: PdfDocument, kpis: { label: string; value: string; color?: string }[]) {
   const startX = doc.page.margins.left;
   doc.save();
   const cardW = (doc.page.width - doc.page.margins.left - doc.page.margins.right - 16) / 2;
@@ -120,8 +124,8 @@ function row2Kpis(doc: PDFDocument, kpis: { label: string; value: string; color?
   let inRow = 0;
   for (const k of kpis) {
     if (doc.y > doc.page.height - 120) { doc.addPage(); rowY = doc.y; cx = startX; inRow = 0; }
-    doc.fillColor(GRAY_BG).rect(cx, rowY, cardW, 46, 4).fill();
-    doc.strokeColor(GRAY_LINE).rect(cx, rowY, cardW, 46, 4).stroke();
+    doc.fillColor(GRAY_BG).roundedRect(cx, rowY, cardW, 46, 4).fill();
+    doc.strokeColor(GRAY_LINE).roundedRect(cx, rowY, cardW, 46, 4).stroke();
     doc.fillColor(INK_SOFT).fontSize(8).font('Helvetica').text(k.label.toUpperCase(), cx + 10, rowY + 8, { width: cardW - 20 });
     doc.fillColor(k.color || ACCENT).fontSize(15).font('Helvetica-Bold').text(k.value, cx + 10, rowY + 24, { width: cardW - 20 });
     cx += cardW + 16;
@@ -136,13 +140,13 @@ function row2Kpis(doc: PDFDocument, kpis: { label: string; value: string; color?
   doc.y = rowY + (inRow > 0 ? 56 : 0);
 }
 
-function progressDoc(doc: PDFDocument) {
+function progressDoc(doc: PdfDocument) {
   if (doc.y > doc.page.height - 120) doc.addPage();
 }
 
 // Start a new page for the next section ONLY if the current page is already
 // substantially used — prevents blank pages at the end of short sections.
-function nextSection(doc: PDFDocument, usedThreshold: number = 420) {
+function nextSection(doc: PdfDocument, usedThreshold: number = 420) {
   if (doc.y > usedThreshold) doc.addPage();
   else doc.y = Math.max(doc.y, 20);
 }
@@ -197,7 +201,7 @@ export async function generateMetricsReportPdf(opts: {
   doc.fillColor(INK).fontSize(30).font('Helvetica-Bold').text('Stellar Panel', { align: 'left' });
   doc.fillColor(INK_SOFT).fontSize(12).font('Helvetica').text('Votion One Platform — Stellar Engine Management', { lineGap: 6 });
   doc.moveDown(1);
-  doc.fillColor(GRAY_BG).rect(doc.page.margins.left, doc.y, doc.page.width - doc.page.margins.left - doc.page.margins.right, 88, 6).fill();
+  doc.fillColor(GRAY_BG).roundedRect(doc.page.margins.left, doc.y, doc.page.width - doc.page.margins.left - doc.page.margins.right, 88, 6).fill();
   doc.fillColor(INK).fontSize(18).font('Helvetica-Bold').text(opts.title || 'Infrastructure & Performance Report', doc.page.margins.left + 18, doc.y + 20);
     doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Generated ${fmtDate(now)}  ·  Data window: ${fmtDate(since)} to ${fmtDate(now)}`, doc.page.margins.left + 18, doc.y + 52);
   doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Coverage: ${Math.round(hours)} hours (${(hours / 24).toFixed(1)} days)  ·  Source: PostgreSQL telemetry store`, doc.page.margins.left + 18, doc.y + 70);

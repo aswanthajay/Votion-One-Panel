@@ -1613,6 +1613,7 @@ apiRouter.post('/billing/server-costs', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
   try {
     const data = await dbService.upsertBillingServerCost(req.body || {});
+    if (!data) return res.status(400).json({ success: false, error: 'Unable to save dedicated server cost.' });
     await dbService.logAudit(billingActor(req), 'UPSERT_BILLING_SERVER_COST', data.id, `Saved dedicated server cost for ${data.nodeName}`);
     res.json({ success: true, data });
   } catch (err: any) {
