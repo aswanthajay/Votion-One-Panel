@@ -86,6 +86,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       },
     },
     {
+      id: 'nav-support',
+      category: 'Navigation',
+      title: 'Go to Support Center',
+      description: 'Review support requests, replies, and service updates',
+      shortcut: 'G T',
+      action: () => {
+        onNavigate('support');
+        onClose();
+      },
+    },
+    {
       id: 'nav-settings',
       category: 'Navigation',
       title: 'Go to User Settings & Security',

@@ -965,7 +965,7 @@ class ApiClient {
   }
 
   async getSupportAgents(): Promise<ApiSupportAgent[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/support/agents`, { headers: this.getHeaders() });
+    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/agents`, { headers: this.getHeaders() });
     const data = await this.readTicketResponse(res);
     return Array.isArray(data.data) ? data.data : [];
   }

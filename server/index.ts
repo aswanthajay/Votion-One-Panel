@@ -133,6 +133,8 @@ app.use('/api/operator', operatorRouter);
 app.use('/api/v1/operator', operatorRouter);
 app.use('/api/tickets', ticketRouter);
 app.use('/api/v1/tickets', ticketRouter);
+app.use('/api/support/tickets', ticketRouter);
+app.use('/api/v1/support/tickets', ticketRouter);
 app.use('/api/automation', automationRouter);
 app.use('/api/v1/automation', automationRouter);
 app.use('/api/client/scheduled-tasks', scheduledTasksRouter);

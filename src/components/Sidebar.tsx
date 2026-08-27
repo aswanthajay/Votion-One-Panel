@@ -49,6 +49,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     {
+      title: 'Ticket Management',
+      key: 'support',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h9A2.5 2.5 0 0 1 18 5.5v7A2.5 2.5 0 0 1 15.5 15H10l-4.5 3V15.2A2.5 2.5 0 0 1 4 12.5v-7Z" />
+          <path d="M7.5 8.5h7M7.5 11.5h4.5" />
+        </svg>
+      )
+    },
+    {
       title: 'Cluster Audit Logs',
       key: 'audit-logs',
       icon: (
@@ -163,6 +173,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     { 
+      title: 'Support Center',
+      key: 'support',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <path d="M8.7 8.5a2.4 2.4 0 1 1 3.55 2.1c-.86.46-1.25.94-1.25 1.9M11 15.2h.01" />
+        </svg>
+      )
+    },
+    {
       title: 'Firewall Rules', 
       key: 'client-instances-firewall',
       icon: (
@@ -179,7 +199,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Virtual Machines', key: 'instances-qemu' },
     { title: 'LXC Containers', key: 'instances-lxc' },
     { title: 'System Settings (SMTP)', key: 'system-settings' },
-    { title: 'Manage Users & Roles', key: 'user-management' }
+    { title: 'Manage Users & Roles', key: 'user-management' },
+    { title: 'Ticket Management', key: 'support' }
   ] : [
     { title: 'My Virtual Machines', key: 'instances-qemu' },
     { title: 'LXC Containers', key: 'instances-lxc' },
@@ -187,7 +208,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Resource Bandwidth', key: 'client-instances-metrics' },
     { title: 'Snapshot Backups', key: 'client-instances-backups' },
     { title: 'Network Firewall', key: 'client-instances-firewall' },
-    { title: 'User Profile Settings', key: 'user-settings' }
+    { title: 'User Profile Settings', key: 'user-settings' },
+    { title: 'Support Center', key: 'support' }
   ];
 
   const q = searchQuery.toLowerCase().trim();

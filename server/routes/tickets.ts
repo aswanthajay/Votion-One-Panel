@@ -8,7 +8,9 @@ ticketRouter.use(requireAuth);
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
 const ticketStatuses = new Set(['open', 'in-progress', 'replied', 'resolved', 'closed']);
+const ticketPriorities = new Set(['low', 'medium', 'high', 'urgent']);
 const isAdmin = (req: any) => adminRoles.has(req.authUser?.role);
+const queryValue = (value: unknown, maxLength = 100) => typeof value === 'string' ? value.trim().slice(0, maxLength) : undefined;
 
 // 1. POST /api/tickets — Create a new support ticket
 const handleCreateTicket = async (req: any, res: any) => {
@@ -16,18 +18,21 @@ const handleCreateTicket = async (req: any, res: any) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const { subject, category, priority, vmid, message } = req.body;
 
-  if (!subject || !subject.trim()) {
+  if (!subject || typeof subject !== 'string' || !subject.trim()) {
     return res.status(400).json({ success: false, error: 'Subject is required' });
   }
 
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
+  const normalizedPriority = ticketPriorities.has(String(priority)) ? String(priority) : 'medium';
+  const normalizedCategory = typeof category === 'string' && category.trim() ? category.trim().slice(0, 100) : 'General';
+  const normalizedMessage = typeof message === 'string' ? message.trim().slice(0, 10_000) : undefined;
   const ticket = await dbService.createSupportTicketWithInitialReply(
-    subject.trim(),
-    category || 'General',
-    priority || 'medium',
-    parsedVmid,
+    subject.trim().slice(0, 255),
+    normalizedCategory,
+    normalizedPriority,
+    Number.isInteger(parsedVmid) ? parsedVmid : undefined,
     userEmail,
-    message,
+    normalizedMessage,
   );
 
   // createSupportTicketWithInitialReply returns { ticket, replies }; use the nested ticket.id
@@ -45,12 +50,50 @@ ticketRouter.post('/', handleCreateTicket);
 const handleGetTickets = async (req: any, res: any) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const filterEmail = isAdmin(req) ? undefined : userEmail;
-
-  const tickets = await dbService.getSupportTickets(filterEmail);
+  const adminViewer = isAdmin(req);
+  const filterEmail = adminViewer ? undefined : userEmail;
+  const tickets = await dbService.getSupportTickets(filterEmail, {
+    search: queryValue(req.query.search),
+    status: queryValue(req.query.status, 20),
+    priority: queryValue(req.query.priority, 20),
+    assignedTo: queryValue(req.query.assignedTo, 255),
+    viewerEmail: userEmail,
+    viewerRole: adminViewer ? 'admin' : 'client',
+  });
   res.json({ success: true, count: tickets.length, data: tickets });
 };
 ticketRouter.get('/', handleGetTickets);
+
+ticketRouter.get('/summary', async (req: any, res: any) => {
+  const userEmail = req.authUser?.email;
+  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const adminViewer = isAdmin(req);
+  const tickets = await dbService.getSupportTickets(adminViewer ? undefined : userEmail, {
+    viewerEmail: userEmail,
+    viewerRole: adminViewer ? 'admin' : 'client',
+  });
+  const byStatus = Object.fromEntries([...ticketStatuses].map(status => [status, 0])) as Record<string, number>;
+  const byPriority = Object.fromEntries([...ticketPriorities].map(priority => [priority, 0])) as Record<string, number>;
+  for (const ticket of tickets) {
+    byStatus[ticket.status] = (byStatus[ticket.status] || 0) + 1;
+    byPriority[ticket.priority] = (byPriority[ticket.priority] || 0) + 1;
+  }
+  res.json({
+    success: true,
+    data: {
+      total: tickets.length,
+      open: (byStatus.open || 0) + (byStatus['in-progress'] || 0) + (byStatus.replied || 0),
+      unassigned: adminViewer ? tickets.filter(ticket => !ticket.assignedTo).length : undefined,
+      unread: tickets.filter(ticket => ticket.unread).length,
+      byStatus,
+      byPriority,
+    },
+  });
+});
+
+ticketRouter.get('/agents', requireAdmin, async (_req: any, res: any) => {
+  res.json({ success: true, data: await dbService.getSupportAgents() });
+});
 
 // 3. GET /api/tickets/:id — Fetch full ticket thread history with replies
 const handleGetTicketDetails = async (req: any, res: any) => {
@@ -64,6 +107,32 @@ const handleGetTicketDetails = async (req: any, res: any) => {
   }
 };
 ticketRouter.get('/:id', handleGetTicketDetails);
+
+ticketRouter.post('/:id/read', async (req: any, res: any) => {
+  const viewerEmail = req.authUser?.email;
+  if (!viewerEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const details = await dbService.getTicketDetails(req.params.id);
+  const adminViewer = isAdmin(req);
+  if (!details || (!adminViewer && String(details.ticket?.userEmail || '').toLowerCase() !== String(viewerEmail).toLowerCase())) {
+    return res.status(404).json({ success: false, error: 'Support ticket not found' });
+  }
+  const data = await dbService.markTicketRead(details.ticket.id, viewerEmail, adminViewer ? 'admin' : 'client');
+  res.json({ success: true, data });
+});
+
+ticketRouter.put('/:id/priority', requireAdmin, async (req: any, res: any) => {
+  const priority = queryValue(req.body?.priority, 20);
+  if (!priority || !ticketPriorities.has(priority)) return res.status(400).json({ success: false, error: 'Invalid ticket priority' });
+  const data = await dbService.updateTicketPriority(req.params.id, priority, req.authUser!.email);
+  res.json({ success: true, data });
+});
+
+ticketRouter.put('/:id/assignment', requireAdmin, async (req: any, res: any) => {
+  const assigneeEmail = req.body?.assigneeEmail === null ? null : queryValue(req.body?.assigneeEmail, 255);
+  if (assigneeEmail !== null && !assigneeEmail) return res.status(400).json({ success: false, error: 'A valid assignee email or null is required' });
+  const data = await dbService.assignTicket(req.params.id, assigneeEmail, req.authUser!.email);
+  res.json({ success: true, data });
+});
 
 // 4. POST /api/tickets/:id/reply — Add reply to ticket
 const handleAddReply = async (req: any, res: any) => {
@@ -95,6 +164,7 @@ const handleAddReply = async (req: any, res: any) => {
   });
 };
 ticketRouter.post('/:id/reply', handleAddReply);
+ticketRouter.post('/:id/replies', handleAddReply);
 
 // 5. PUT /api/tickets/:id/status — Update ticket status ('open', 'replied', 'closed')
 const handleUpdateStatus = async (req: any, res: any) => {

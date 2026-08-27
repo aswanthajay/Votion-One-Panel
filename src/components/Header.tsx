@@ -337,9 +337,9 @@ export const Header: React.FC<HeaderProps> = ({
                 User settings
               </button>
 
-              {/* Inbox — shows count from live tasks */}
+              {/* Inbox — opens the dedicated ticket workspace */}
               <button 
-                onClick={() => { onOpenModal('inbox'); setUserMenuOpen(false); }}
+                onClick={() => { onNavigate('support'); setUserMenuOpen(false); }}
                 className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors flex items-center gap-2 cursor-pointer"
               >
                 <span>Inbox</span>
@@ -356,10 +356,10 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
 
               <button 
-                onClick={() => { onOpenModal('support'); setUserMenuOpen(false); }}
+                onClick={() => { onNavigate('support'); setUserMenuOpen(false); }}
                 className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors cursor-pointer"
               >
-                VOTION Support Center
+                {userRole === 'admin' ? 'Ticket management' : 'Support center'}
               </button>
 
               <button 
