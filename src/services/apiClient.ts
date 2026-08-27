@@ -1474,6 +1474,15 @@ class ApiClient {
     return await res.json();
   }
 
+  async fetchProxmoxFingerprint(payload: { host_ip: string; port: number }): Promise<{ success: boolean; fingerprint?: string; message?: string; error?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/fingerprint`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return await this.readApiResponse(res, 'Unable to retrieve the Proxmox certificate fingerprint.');
+  }
+
   // ==========================================
   // USER SECURITY & SETTINGS ENDPOINTS
   // ==========================================

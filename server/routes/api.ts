@@ -19,7 +19,7 @@ import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
-import { proxmoxFetch } from '../services/proxmoxHttp.js';
+import { fetchProxmoxTlsFingerprint, proxmoxFetch } from '../services/proxmoxHttp.js';
 import { createSessionToken, rateLimit, requireAdmin, requireAuth } from '../middleware.js';
 import {
   isProviderCredentialKeyConfigured,
@@ -1987,6 +1987,24 @@ apiRouter.get('/admin/proxmox/vm-identity-conflicts', async (_req, res) => {
     res.json({ success: true, count: conflicts.length, data: conflicts });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message, data: [] });
+  }
+});
+
+apiRouter.post('/admin/proxmox/fingerprint', async (req, res) => {
+  const host = typeof req.body?.host_ip === 'string' ? req.body.host_ip : '';
+  const port = Number(req.body?.port ?? 8006);
+  try {
+    const fingerprint = await fetchProxmoxTlsFingerprint(host, port);
+    return res.json({
+      success: true,
+      fingerprint,
+      message: 'Certificate fingerprint retrieved. Review it before saving this connection.',
+    });
+  } catch (error: any) {
+    const message = error?.code === 'ETIMEDOUT'
+      ? 'Certificate lookup timed out. Check that the host and port are reachable from this panel.'
+      : (error?.message || 'Unable to retrieve the server certificate fingerprint.');
+    return res.status(502).json({ success: false, error: message });
   }
 });
 

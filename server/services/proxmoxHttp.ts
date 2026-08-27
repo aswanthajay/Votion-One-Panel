@@ -29,6 +29,69 @@ export function normalizeProxmoxFingerprint(value?: string | null): string {
     .toUpperCase();
 }
 
+function formatProxmoxFingerprint(value?: string | null): string {
+  const normalized = normalizeProxmoxFingerprint(value);
+  if (normalized.length !== 64) {
+    throw new ProxmoxHttpError('The server did not present a SHA-256 certificate fingerprint.');
+  }
+  return `SHA256:${normalized.match(/.{1,2}/g)?.join(':')}`;
+}
+
+function normalizeProxmoxHost(value: string): string {
+  const host = String(value || '').trim().replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  if (!host || host.length > 253 || /[\s/@?#]/.test(host)) {
+    throw new ProxmoxHttpError('Enter a valid Proxmox host name or IP address.');
+  }
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
+/**
+ * Read the SHA-256 fingerprint of the certificate currently presented by a
+ * Proxmox HTTPS endpoint. The certificate is intentionally not trusted during
+ * this bounded discovery handshake; callers must display the returned value
+ * for administrator review before saving it with a connection.
+ */
+export async function fetchProxmoxTlsFingerprint(hostInput: string, portInput: number): Promise<string> {
+  const host = normalizeProxmoxHost(hostInput);
+  const port = Number(portInput);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new ProxmoxHttpError('Enter a valid Proxmox HTTPS port.');
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error, fingerprint?: string) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      if (error) reject(error);
+      else resolve(fingerprint!);
+    };
+
+    const socket = tls.connect({
+      host,
+      port,
+      rejectUnauthorized: false,
+      servername: /^[\d.]+$/.test(host) || host.includes(':') ? undefined : host,
+    });
+
+    socket.setTimeout(10_000);
+    socket.once('secureConnect', () => {
+      try {
+        finish(undefined, formatProxmoxFingerprint(socket.getPeerCertificate()?.fingerprint256));
+      } catch (error) {
+        finish(error instanceof Error ? error : new ProxmoxHttpError('Unable to read the server certificate.'));
+      }
+    });
+    socket.once('timeout', () => finish(new ProxmoxHttpError('Certificate lookup timed out.', { code: 'ETIMEDOUT' })));
+    socket.once('error', (error) => {
+      const cause = error as NodeJS.ErrnoException;
+      finish(new ProxmoxHttpError('Unable to reach the Proxmox HTTPS endpoint.', { code: cause.code }));
+    });
+  });
+}
+
 function collectResponseHeaders(response: IncomingMessage): Headers {
   const headers = new Headers();
   for (const [key, value] of Object.entries(response.headers)) {

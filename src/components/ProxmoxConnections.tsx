@@ -35,7 +35,8 @@ export const ProxmoxConnections: React.FC = () => {
   const [newTokenId, setNewTokenId] = useState('');
   const [newTokenSecret, setNewTokenSecret] = useState('');
   const [newSslFingerprint, setNewSslFingerprint] = useState('');
-    const [isTesting, setIsTesting] = useState(false);
+  const [isFetchingNewFingerprint, setIsFetchingNewFingerprint] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   // Edit Connection State
@@ -46,6 +47,7 @@ export const ProxmoxConnections: React.FC = () => {
   const [editTokenId, setEditTokenId] = useState('');
   const [editTokenSecret, setEditTokenSecret] = useState('');
   const [editSslFingerprint, setEditSslFingerprint] = useState('');
+  const [isFetchingEditFingerprint, setIsFetchingEditFingerprint] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   const showToast = (msg: string) => {
@@ -137,6 +139,32 @@ export const ProxmoxConnections: React.FC = () => {
     } finally {
       setTestingConnectionId(null);
       await loadConnections();
+    }
+  };
+
+  const handleFetchFingerprint = async (mode: 'new' | 'edit') => {
+    const host = mode === 'new' ? newHostIp : editHostIp;
+    const port = mode === 'new' ? newPort : editPort;
+    if (!host.trim()) {
+      showToast('Enter the Proxmox host before retrieving its certificate fingerprint.');
+      return;
+    }
+
+    const setLoading = mode === 'new' ? setIsFetchingNewFingerprint : setIsFetchingEditFingerprint;
+    const setFingerprint = mode === 'new' ? setNewSslFingerprint : setEditSslFingerprint;
+    setLoading(true);
+    try {
+      const result = await apiClient.fetchProxmoxFingerprint({ host_ip: host, port });
+      if (!result.success || !result.fingerprint) {
+        showToast(result.error || 'Unable to retrieve the server certificate fingerprint.');
+        return;
+      }
+      setFingerprint(result.fingerprint);
+      showToast('Certificate fingerprint retrieved. Review it before saving the connection.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to retrieve the server certificate fingerprint.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -408,14 +436,26 @@ export const ProxmoxConnections: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint</label>
-                <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <label className="block text-xs font-semibold text-[#1a1a1a]">SSL Fingerprint</label>
+                  <button
+                    type="button"
+                    onClick={() => void handleFetchFingerprint('new')}
+                    disabled={isFetchingNewFingerprint || !newHostIp.trim()}
+                    className="text-[11px] font-semibold text-[#2563eb] transition-colors hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Read the SHA-256 certificate fingerprint from this host and port"
+                  >
+                    {isFetchingNewFingerprint ? 'Retrieving…' : 'Fetch fingerprint'}
+                  </button>
+                </div>
+                <p id="new-fingerprint-help" className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Fetch reads the presented SHA-256 certificate only; review it before saving.</p>
                 <input 
                   type="text" 
                   autoComplete="off"
                   value={newSslFingerprint}
                   onChange={(e) => setNewSslFingerprint(e.target.value)}
                   placeholder="SHA256:7B:44:91..."
+                  aria-describedby="new-fingerprint-help"
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                 />
               </div>
@@ -512,13 +552,25 @@ export const ProxmoxConnections: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">SSL Fingerprint</label>
-                <p className="text-[11px] text-[#656b6b] mb-1">Required for self-signed PVE certificates. Use the server’s SHA-256 fingerprint.</p>
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <label className="block text-xs font-semibold text-[#1a1a1a]">SSL Fingerprint</label>
+                  <button
+                    type="button"
+                    onClick={() => void handleFetchFingerprint('edit')}
+                    disabled={isFetchingEditFingerprint || !editHostIp.trim()}
+                    className="text-[11px] font-semibold text-[#2563eb] transition-colors hover:text-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Read the SHA-256 certificate fingerprint from this host and port"
+                  >
+                    {isFetchingEditFingerprint ? 'Retrieving…' : 'Fetch fingerprint'}
+                  </button>
+                </div>
+                <p id="edit-fingerprint-help" className="text-[11px] text-[#656b6b] mb-1">Fetch reads the presented SHA-256 certificate only. Review the value before saving these connection changes.</p>
                 <input
                   type="text"
                   autoComplete="off"
                   value={editSslFingerprint}
                   onChange={(e) => setEditSslFingerprint(e.target.value)}
+                  aria-describedby="edit-fingerprint-help"
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a] font-mono"
                 />
               </div>
