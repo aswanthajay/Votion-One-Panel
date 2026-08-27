@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit as expressRateLimit, ipKeyGenerator } from 'express-rate-limit';
 import { apiRouter } from './routes/api.js';
 import { adminRouter } from './routes/admin.js';
 import { clientRouter } from './routes/client.js';
@@ -47,12 +49,30 @@ async function getProxmoxTicket(host: string, port: number, username: string, pa
 }
 
 const app = express();
+app.disable('x-powered-by');
+const nodeEnvironment = process.env.NODE_ENV || 'development';
+const trustProxy = process.env.TRUST_PROXY?.trim() || 'false';
+if (trustProxy === 'true') {
+  app.set('trust proxy', true);
+} else if (/^\d+$/.test(trustProxy)) {
+  app.set('trust proxy', Number(trustProxy));
+} else {
+  app.set('trust proxy', false);
+}
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  hsts: nodeEnvironment === 'production',
+}));
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigins = (process.env.CORS_ORIGINS || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
+const allowedOrigins = (process.env.CORS_ORIGINS || (nodeEnvironment === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
+if (nodeEnvironment === 'production' && allowedOrigins.length === 0) {
+  throw new Error('CORS_ORIGINS must contain at least one trusted origin in production.');
+}
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -62,6 +82,16 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
+
+const apiRateLimiter = expressRateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.API_RATE_LIMIT_MAX || 300),
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.authUser?.id ? `account:${req.authUser.id}` : ipKeyGenerator(req.ip || req.socket.remoteAddress || 'unknown'),
+  skip: (req) => req.path === '/health' || req.path === '/healthz' || req.path === '/readyz',
+});
+app.use('/api', apiRateLimiter);
 
 // API Router Registrations
 app.use('/api/auth', authKeyRouter);
