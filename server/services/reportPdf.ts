@@ -426,12 +426,12 @@ export async function generateMetricsReportPdf(opts: {
   sectionHeader(doc, '6', 'How the data is collected and stored', 'Why you can trust these numbers: an explanation of the telemetry pipeline, for transparency.');
   const telemetryFilter = reportVmids.length > 0 ? 'WHERE vmid = ANY($1::int[])' : 'WHERE FALSE';
   const telemetryParams = reportVmids.length > 0 ? [reportVmids] : [];
-  const totalSamples = (await pgPool.query(`SELECT COUNT(*)::int AS t FROM vm_telemetry ${telemetryFilter}`, telemetryParams)).rows[0]?.t || 0;
-  const firstSample = (await pgPool.query(`SELECT MIN(timestamp)::text AS t FROM vm_telemetry ${telemetryFilter}`, telemetryParams)).rows[0]?.t || '—';
-  const perVm = (await pgPool.query(`SELECT vmid, COUNT(*)::int AS c FROM vm_telemetry ${telemetryFilter} GROUP BY vmid ORDER BY 1`, telemetryParams)).rows;
+  const totalSamples = (await pgPool.query(`SELECT COUNT(*)::int AS t FROM vm_metrics ${telemetryFilter}`, telemetryParams)).rows[0]?.t || 0;
+  const firstSample = (await pgPool.query(`SELECT MIN(timestamp)::text AS t FROM vm_metrics ${telemetryFilter}`, telemetryParams)).rows[0]?.t || '—';
+  const perVm = (await pgPool.query(`SELECT vmid, COUNT(*)::int AS c FROM vm_metrics ${telemetryFilter} GROUP BY vmid ORDER BY 1`, telemetryParams)).rows;
   const perVmText = perVm.map((r: any) => `VMID ${r.vmid}: ${r.c} samples`).join('   ·   ');
   doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(
-    'Every 15 seconds, the panel asks the cluster for the live status of each running virtual machine. The raw numbers — CPU load, memory, network counters, and disk counters — are written directly into the PostgreSQL database (table vm_telemetry), timestamped at the moment of collection. ' +
+    'Every 15 seconds, the panel asks the cluster for the live status of each running virtual machine. The raw numbers — CPU load, memory, network counters, and disk counters — are written directly into the PostgreSQL database (table vm_metrics), timestamped at the moment of collection. ' +
     'Charts, alerts, and exports all read from this same table, so what you see in the dashboard and what ends up in this PDF is one and the same dataset. ' +
     'The panel never invents, interpolates, or smooths data: if a VM is stopped, no samples exist for it, and the report says so plainly.',
     { lineGap: 5 }

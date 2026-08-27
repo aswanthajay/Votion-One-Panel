@@ -1,4 +1,7 @@
 import { dbService } from '../db/database.js';
+import { proxmoxFetch } from './proxmoxHttp.js';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 
 export interface PveResult<T = any> {
   ok: boolean;
@@ -12,10 +15,55 @@ interface ProxmoxConn {
   port: number | string;
   token_id: string;
   token_secret: string | null;
+  ssl_fingerprint?: string | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_RETRIES = 2;
+
+function isBlockedAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+  if (net.isIP(normalized) === 4) {
+    const octets = normalized.split('.').map(Number);
+    const [a, b] = octets;
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) ||
+      (a === 198 && b === 51) || (a === 203 && b === 0) || a >= 224;
+  }
+  if (net.isIP(normalized) === 6) {
+    return normalized === '::' || normalized === '::1' || normalized.startsWith('fc') ||
+      normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') || normalized.startsWith('feb');
+  }
+  return true;
+}
+
+async function validateOutboundProviderUrl(rawUrl: string): Promise<URL> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error('The configured provider endpoint is not a valid URL.');
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    throw new Error('Provider endpoints must use HTTPS without embedded credentials.');
+  }
+  const allowedHosts = (process.env.RDNS_PROVIDER_HOSTS || '')
+    .split(',')
+    .map(host => host.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowedHosts.length === 0 || !allowedHosts.includes(parsed.hostname.toLowerCase())) {
+    throw new Error('The provider endpoint host is not present in RDNS_PROVIDER_HOSTS.');
+  }
+  const addresses = net.isIP(parsed.hostname)
+    ? [parsed.hostname]
+    : (await dns.lookup(parsed.hostname, { all: true, verbatim: true })).map(result => result.address);
+  if (addresses.length === 0 || addresses.some(isBlockedAddress)) {
+    throw new Error('The provider endpoint resolves to a blocked or private network address.');
+  }
+  return parsed;
+}
 
 /**
  * Defensive Proxmox API wrapper: retry loop, execution timeout via AbortController,
@@ -43,15 +91,13 @@ async function pveRequest<T = any>(
   let lastErr = '';
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(url, {
+      const res = await proxmoxFetch(url, {
         method,
         headers,
         body,
-        signal: controller.signal,
+        timeoutMs,
+        sslFingerprint: conn.ssl_fingerprint,
       });
-      clearTimeout(timer);
       const text = await res.text();
       let json: any = null;
       try { json = JSON.parse(text); } catch { json = null; }
@@ -86,10 +132,21 @@ export function pveRequestExported(...args: Parameters<typeof pveRequest>) {
   return pveRequest(...args);
 }
 
-async function requireConn(): Promise<ProxmoxConn> {
+async function requireConn(vmid?: number): Promise<ProxmoxConn> {
   const conns = await dbService.getProxmoxConnectionCredentials();
   if (!conns || conns.length === 0) {
     throw new Error('No cluster connection configured.');
+  }
+  if (vmid !== undefined) {
+    const vm = await dbService.getVMByVMID(vmid);
+    const connectionId = vm?.proxmoxConnectionId;
+    if (!connectionId) throw new Error(`VMID ${vmid} has no associated cluster connection.`);
+    const connection = conns.find(candidate => String(candidate.id) === String(connectionId));
+    if (!connection) throw new Error(`The cluster connection for VMID ${vmid} is unavailable.`);
+    return connection as ProxmoxConn;
+  }
+  if (conns.length !== 1) {
+    throw new Error('A VM-specific cluster connection is required when multiple connections are configured.');
   }
   return conns[0] as ProxmoxConn;
 }
@@ -125,7 +182,7 @@ export class AutomationService {
     hostname?: string;
     sshkeys?: string;
   }, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
     if (vm.type !== 'qemu') {
       throw new Error('OS rebuild with Cloud-Init is only supported for KVM virtual machines.');
@@ -165,7 +222,7 @@ export class AutomationService {
   // 2. Rescue Mode (ephemeral ISO attach via ide2 + boot order change)
   // ---------------------------------------------------------------
   async enterRescueMode(vmid: number, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
     if (vm.type !== 'qemu') throw new Error('Rescue mode is only supported for KVM virtual machines.');
 
@@ -201,7 +258,7 @@ export class AutomationService {
 
   /** Non-destructive readiness check: list storages with ISO images on the cluster. */
   async checkRescueReadiness(vmid: number) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     await requireVm(vmid);
     const storages = await pveRequest<any[]>(conn, 'GET', '/storage?content=images');
     const storageList = (storages.ok ? storages.data : []) || [];
@@ -235,7 +292,7 @@ export class AutomationService {
   }
 
   async exitRescueMode(vmid: number, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
     if (vm.type !== 'qemu') throw new Error('Rescue exit is only supported for KVM virtual machines.');
 
@@ -257,7 +314,7 @@ export class AutomationService {
   // 3. Self-Service Backups (vzdump + restore)
   // ---------------------------------------------------------------
   async triggerBackup(vmid: number, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
 
     // Find a storage that supports backups
@@ -300,7 +357,7 @@ export class AutomationService {
   async listBackups(vmid?: number) {
     if (vmid) {
       const vm = await requireVm(vmid);
-      const conn = await requireConn();
+      const conn = await requireConn(vmid);
       // Cluster-wide vzdump view is the most reliable listing endpoint
       const r = await pveRequest<any[]>(conn, 'GET', `/nodes/${vm.node}/vzdump`);
       if (!r.ok) throw new Error(`Failed to list backups: ${r.error}`);
@@ -313,7 +370,7 @@ export class AutomationService {
   }
 
   async restoreBackup(vmid: number, backupVolid: string, targetStorage: string, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
     // Restore into a new VMID to avoid data loss; caller controls the target via db record afterward
     const r = await pveRequest<any>(conn, 'PUT', `/nodes/${vm.node}/restore`, {
@@ -331,7 +388,7 @@ export class AutomationService {
   // ---------------------------------------------------------------
   async getLiveRrd(vmid: number, timeframe: string = 'hour') {
     const vm = await requireVm(vmid);
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const r = await pveRequest<any[]>(conn, 'GET', `/nodes/${vm.node}/qemu/${vm.vmid}/rrddata?timeframe=${encodeURIComponent(timeframe)}`);
     if (!r.ok) throw new Error(`RRD stream unavailable: ${r.error}`);
     const rows = (r.data || []).map((d: any) => ({
@@ -350,7 +407,7 @@ export class AutomationService {
 
   async getMonthlyBandwidth(vmid: number) {
     const vm = await requireVm(vmid);
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const r = await pveRequest<any[]>(conn, 'GET', `/nodes/${vm.node}/qemu/${vm.vmid}/rrddata?timeframe=month`);
     if (!r.ok) throw new Error(`Bandwidth data unavailable: ${r.error}`);
     const rows = (r.data || []) as any[];
@@ -447,10 +504,12 @@ export class AutomationService {
             await dbService.markRdnsProcessed(item.id, 'skipped_no_provider', `Provider '${settings.provider}' requires rdns_ptr_endpoint in Settings.`);
             continue;
           }
-          const r = await fetch(endpoint, {
+          const providerUrl = await validateOutboundProviderUrl(endpoint);
+          const r = await fetch(providerUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiToken}` },
             body: JSON.stringify({ ip: item.ip, ptr: item.ptr, vmid: item.vmid }),
+            redirect: 'error',
             signal: AbortSignal.timeout(15000),
           });
           await dbService.markRdnsProcessed(item.id, r.ok ? 'completed' : 'failed', r.ok ? undefined : `Downstream provider returned HTTP ${r.status}`);
@@ -466,7 +525,7 @@ export class AutomationService {
   // 6. App Marketplace (1-click deploy via template clone)
   // ---------------------------------------------------------------
   async deployApp(vmid: number, appId: string, userEmail: string) {
-    const conn = await requireConn();
+    const conn = await requireConn(vmid);
     const vm = await requireVm(vmid);
     const app = (await dbService.getAppCatalogAll()).find(a => a.id === appId);
     if (!app) throw new Error(`Unknown app: ${appId}`);
