@@ -1,0 +1,16 @@
+flowchart TD
+  classDef start fill:#172554,stroke:#60a5fa,stroke-width:2px,color:#eff6ff
+  classDef secure fill:#312e81,stroke:#a5b4fc,stroke-width:2px,color:#eef2ff
+  classDef validation fill:#3f1d0a,stroke:#fb923c,stroke-width:2px,color:#fff7ed
+  classDef data fill:#052e1d,stroke:#34d399,stroke-width:2px,color:#ecfdf5
+  classDef done fill:#14532d,stroke:#4ade80,stroke-width:2px,color:#f0fdf4
+
+  Start[Start Votion One]:::start --> Config{Core configuration\npresent?}
+  Config -- No --> Code[Console issues one-time\nsetup code]:::secure
+  Code --> Wizard[Open /install and redeem code]:::secure
+  Wizard --> Validate[Validate PostgreSQL access\nand temporary write permission]:::validation
+  Validate --> Configure[Set public URL, CORS origin,\nport, and administrator password]:::validation
+  Configure --> Persist[Apply migrations, provision\nadmin@votioncloud.org, persist runtime config]:::data
+  Persist --> Restart[Restart application]:::start
+  Restart --> Config
+  Config -- Yes --> Ready[Serve normal application\nand sign-in experience]:::done

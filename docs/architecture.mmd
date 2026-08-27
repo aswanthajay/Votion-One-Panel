@@ -1,0 +1,15 @@
+flowchart LR
+  classDef client fill:#edf4ff,stroke:#2563eb,stroke-width:2px,color:#102a56
+  classDef service fill:#111827,stroke:#60a5fa,stroke-width:2px,color:#f8fafc
+  classDef data fill:#052e1d,stroke:#34d399,stroke-width:2px,color:#ecfdf5
+  classDef integration fill:#3f1d0a,stroke:#fb923c,stroke-width:2px,color:#fff7ed
+  classDef security fill:#312e81,stroke:#a5b4fc,stroke-width:2px,color:#eef2ff
+
+  Browser[Browser workspace]:::client --> SPA[React + Vite interface]:::service
+  SPA --> API[Express application API]:::service
+  API --> DB[(PostgreSQL\napplication data)]:::data
+  API --> PVE[Proxmox VE\nconnections + console relay]:::integration
+  API --> Mail[Optional SMTP\nnotifications and OTP]:::integration
+  API --> Runtime[Protected runtime configuration\nbootstrap values + encryption key]:::security
+  DB --> Jobs[Telemetry, billing, alerts\nand operations jobs]:::service
+  Jobs --> API
