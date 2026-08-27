@@ -468,7 +468,6 @@ apiRouter.post('/user/remote-session/start', async (req, res) => {
     message: 'Remote support session opened (30-minute window)',
     data: {
       sessionId: session.sessionId,
-      supportPin: session.supportPin,
       expiresAt: session.expiresAt,
     },
   });

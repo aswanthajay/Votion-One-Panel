@@ -212,12 +212,13 @@ const proxmoxProxy = createProxyMiddleware({
 
 app.use(['/novnc', '/api2', '/pve2', '/proxmox-console'], requireAuth, attachProxyConnection, proxmoxProxy);
 
-// Initialize and validate the database before any route, worker, or proxy queries run.
-await initializeDatabaseSchema();
+// Apply versioned migrations before any route, worker, or proxy queries run.
 const appliedMigrations = await runMigrations();
 if (appliedMigrations.length > 0) {
   console.log(`[MIGRATIONS] Applied ${appliedMigrations.length} migration(s)`);
 }
+// Validate schema prerequisites without mutating database objects.
+await initializeDatabaseSchema();
 const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
 if (migratedProxmoxCredentials > 0) {
   console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);

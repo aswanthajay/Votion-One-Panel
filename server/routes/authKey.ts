@@ -32,22 +32,7 @@ const KEY_FILE_VALIDITY_HOURS = 24 * 90; // 90 days default validity window
 
 export const authKeyRouter = Router();
 
-// Ensure the key_files table exists (self-migrating)
-async function ensureKeyFilesTable(): Promise<void> {
-  await pgPool.query(`
-    CREATE TABLE IF NOT EXISTS key_files (
-      id SERIAL PRIMARY KEY,
-      account_id INTEGER NOT NULL,
-      kid VARCHAR(64) UNIQUE NOT NULL,
-      secret_hash VARCHAR(64) NOT NULL,
-      file_name VARCHAR(120) NOT NULL DEFAULT 'stellar-key.stk',
-      revoked BOOLEAN NOT NULL DEFAULT false,
-      last_used_at TIMESTAMP NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-}
-ensureKeyFilesTable().catch(err => console.error('[authKey] table init failed:', err?.message || err));
+// The key_files table is provisioned by the ordered database migrations before this router is mounted.
 
 /** POST /auth/key-file/create — generate a new key file bound to the session owner */
 authKeyRouter.post('/key-file/create', requireAuth, async (req, res) => {
@@ -201,7 +186,7 @@ authKeyRouter.post('/login-key', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, k
     }
 
     const account = (
-      await pgPool.query('SELECT id, email, name, role FROM accounts WHERE id = $1', [row.account_id])
+      await pgPool.query('SELECT id, email, name, role, two_factor_active AS "twoFactorActive", support_pin IS NOT NULL AS "supportPinConfigured" FROM accounts WHERE id = $1', [row.account_id])
     ).rows[0];
     if (!account) {
       return res.status(401).json({ success: false, error: 'Account no longer exists' });
@@ -233,8 +218,8 @@ authKeyRouter.post('/login-key', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, k
         name: account.name,
         role: account.role,
         phone: null,
-        supportPin: null,
-        twoFactorActive: false,
+        supportPinConfigured: account.supportPinConfigured === true,
+        twoFactorActive: account.twoFactorActive === true,
       },
     });
   } catch (err: any) {

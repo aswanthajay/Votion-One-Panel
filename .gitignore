@@ -13,6 +13,7 @@ pgsql/
 
 # Local databases, backups, and exported artifacts
 *.sql
+!server/db/migrations/*.sql
 *.db
 *.sqlite
 *.sqlite3
