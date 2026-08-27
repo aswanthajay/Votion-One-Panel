@@ -153,7 +153,7 @@ export const InstallationWizard: React.FC = () => {
 
   return (
     <main className="auth-page min-h-screen bg-white px-4 py-8 sm:px-8 lg:px-12">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-2xl border border-[#dedfdf] bg-white shadow-2xl lg:grid-cols-[0.9fr_1.1fr]">
+      <div className="installation-wizard-shell mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-2xl border border-[#dedfdf] bg-white shadow-2xl lg:grid-cols-[0.9fr_1.1fr]">
         <section className="installation-wizard-editorial bg-black p-8 text-white sm:p-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-400">Votion One™</p>
           <h1 className="mt-8 max-w-md font-serif text-4xl leading-tight italic sm:text-5xl">Install your control plane with confidence.</h1>
@@ -166,11 +166,11 @@ export const InstallationWizard: React.FC = () => {
           </div>
         </section>
 
-        <section className="auth-page-panel p-6 sm:p-12">
+        <section className="auth-page-panel installation-wizard-panel p-6 sm:p-12">
           <div className="mx-auto max-w-xl">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#656b6b]">First-run installation</p>
             <h2 className="mt-3 text-3xl font-medium text-[#1a1a1a]" style={{ fontFamily: 'var(--ink-font-global-family-prominent), Georgia, serif' }}>Configure Votion One™</h2>
-            <p className="mt-2 text-sm leading-6 text-[#656b6b]">Required values are stored in the protected runtime configuration after validation. The installation link becomes unavailable when setup is complete.</p>
+            <p className="mt-2 text-sm leading-6 text-[#656b6b]">Required values are stored in the protected runtime configuration after validation. The one-time setup code becomes unavailable after it is redeemed or installation is complete.</p>
 
             {error && <div className="mt-6 rounded-lg border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#dc2626]" role="alert">{error}</div>}
             {message && <div className="mt-6 rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3 text-sm text-[#16a34a]" role="status">{message}</div>}
