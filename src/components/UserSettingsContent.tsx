@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient, ApiAccount } from '../services/apiClient';
+import { TeamAccessContent } from './TeamAccessContent';
 import { getStoredThemeMode, setThemeMode, ThemeMode } from '../theme';
 
 export const UserSettingsContent: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'security' | 'signature' | 'appearance'>('security');
+  const [activeTab, setActiveTab] = useState<'security' | 'signature' | 'appearance' | 'team-access'>('security');
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => getStoredThemeMode());
   const [openActionRow, setOpenActionRow] = useState<string | null>(null);
 
@@ -241,6 +242,12 @@ export const UserSettingsContent: React.FC = () => {
           >
             Appearance
           </button>
+          <button
+            onClick={() => setActiveTab('team-access')}
+            className={`user-settings-subnav-link cursor-pointer ${activeTab === 'team-access' ? 'active' : ''}`}
+          >
+            Team access
+          </button>
         </nav>
 
         {/* RIGHT COLUMN: MAIN CONTENT PANEL */}
@@ -250,6 +257,8 @@ export const UserSettingsContent: React.FC = () => {
             <div className="p-12 text-center text-[#656b6b] font-mono text-xs border border-[#dedfdf] rounded-xl bg-white">
               Fetching user profile and security details from PostgreSQL...
             </div>
+          ) : activeTab === 'team-access' ? (
+            <TeamAccessContent embedded />
           ) : activeTab === 'security' ? (
             <>
               {/* BLOCK 1: ACCOUNT CREDENTIALS & INK TABLE */}

@@ -11,7 +11,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 
 
 const serviceLabel = (vm: { vmid: number; name: string }) => `${vm.name || 'Service'} · VM-${vm.vmid}`;
 
-export const TeamAccessContent: React.FC = () => {
+export const TeamAccessContent: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [overview, setOverview] = useState<ApiTeamAccessOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -123,7 +123,7 @@ export const TeamAccessContent: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="app-content p-4 md:p-8" aria-busy="true">
+      <div className={embedded ? 'p-1' : 'app-content p-4 md:p-8'} aria-busy="true">
         <div className="h-10 w-56 rounded bg-[#f1f1f1] animate-pulse" />
         <div className="mt-3 h-5 w-full max-w-xl rounded bg-[#f1f1f1] animate-pulse" />
         <div className="mt-8 grid gap-5 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
@@ -137,12 +137,12 @@ export const TeamAccessContent: React.FC = () => {
   const activeInvitations = overview?.invitations.filter((invitation) => invitation.isActive) || [];
 
   return (
-    <div className="app-content max-w-[1280px] p-4 md:p-8">
+    <div className={embedded ? 'team-access-settings' : 'app-content max-w-[1280px] p-4 md:p-8'}>
       <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#656b6b]">Client workspace</p>
-          <h1 className="page-heading mb-2">Team access</h1>
-          <p className="max-w-2xl text-sm leading-6 text-[#656b6b]">Give colleagues only the service access they need. Invitations and every permission change are recorded against your account.</p>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#656b6b]">{embedded ? 'Account governance' : 'Client workspace'}</p>
+          {embedded ? <h2 className="font-serif text-3xl font-medium tracking-[-0.02em] text-[#1a1a1a]">Team access</h2> : <h1 className="page-heading mb-2">Team access</h1>}
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[#656b6b]">Give colleagues only the service access they need. Invitations and every permission change are recorded against your account.</p>
         </div>
         <div className="rounded-lg border border-[#dedfdf] bg-ink-card px-4 py-3 text-xs leading-5 text-[#656b6b]">
           <span className="font-semibold text-[#1a1a1a]">Owner control.</span> You can revoke access immediately at any time.
