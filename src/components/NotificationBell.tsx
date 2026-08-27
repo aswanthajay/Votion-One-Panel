@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, X } from 'lucide-react';
 import { apiClient } from '../services/apiClient';
+import { useToast } from './ToastContext';
 
 interface Notification {
   id: number;
@@ -20,6 +21,8 @@ interface NotificationBellProps {
 export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onToggle, onClose }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isClearing, setIsClearing] = useState(false);
+  const { showToast } = useToast();
   const ref = useRef<HTMLDivElement>(null);
 
   const load = async () => {
@@ -61,13 +64,17 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
   };
 
   const handleClear = async () => {
-    if (!window.confirm('Delete all notifications? This cannot be undone.')) return;
+    if (isClearing || notifications.length === 0) return;
+    setIsClearing(true);
     try {
       await apiClient.clearNotifications();
       setNotifications([]);
       setUnreadCount(0);
+      showToast('All notifications cleared.');
     } catch {
-      // ignore
+      showToast('Unable to clear notifications. Please try again.');
+    } finally {
+      setIsClearing(false);
     }
   };
 
@@ -127,8 +134,12 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
                 </button>
               )}
               {notifications.length > 0 && (
-                <button onClick={handleClear} className="notification-panel-action notification-panel-action-danger">
-                  Clear
+                <button
+                  onClick={handleClear}
+                  disabled={isClearing}
+                  className="notification-panel-action notification-panel-action-danger"
+                >
+                  {isClearing ? 'Clearing…' : 'Clear'}
                 </button>
               )}
             </div>
