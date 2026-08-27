@@ -200,7 +200,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'LXC Containers', key: 'instances-lxc' },
     { title: 'System Settings (SMTP)', key: 'system-settings' },
     { title: 'Manage Users & Roles', key: 'user-management' },
-    { title: 'Ticket Management', key: 'support' }
   ] : [
     { title: 'My Virtual Machines', key: 'instances-qemu' },
     { title: 'LXC Containers', key: 'instances-lxc' },
@@ -209,7 +208,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Snapshot Backups', key: 'client-instances-backups' },
     { title: 'Network Firewall', key: 'client-instances-firewall' },
     { title: 'User Profile Settings', key: 'user-settings' },
-    { title: 'Support Center', key: 'support' }
   ];
 
   const q = searchQuery.toLowerCase().trim();
