@@ -69,6 +69,52 @@ export const pgPool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
+export const REQUIRED_DATABASE_TABLES = [
+  'accounts',
+  'password_reset_tokens',
+  'proxmox_connections',
+  'nodes',
+  'vms',
+  'vm_identity_conflicts',
+  'vm_reimage_requests',
+  'vm_reimage_image_profiles',
+  'vm_reimage_executions',
+  'vm_reimage_audit_events',
+  'audit_logs',
+  'tickets',
+  'ticket_replies',
+  'alert_rules',
+  'notifications',
+  'vm_metrics',
+  'system_settings',
+  'pricing_plans',
+  'vm_billing_profiles',
+  'billing_invoices',
+  'billing_payments',
+  'billing_cost_bases',
+  'billing_server_costs',
+  'billing_events',
+  'billing_suspension_actions',
+  'secondary_emails',
+  'passkeys',
+  'totp_secrets',
+  'support_sessions',
+  'uploaded_files',
+  'vm_snapshots',
+  'tasks',
+  'firewall_rules',
+  'key_files',
+  'scheduled_tasks',
+  'mail_templates',
+  'provider_operations',
+  'stellar_api_keys',
+  'vm_backup_queue',
+  'rdns_requests',
+  'app_catalog',
+  'app_instances',
+  'vm_sub_users',
+] as const;
+
 export function hashPassword(password: string, customSalt?: string): { hash: string; salt: string } {
   const salt = customSalt || crypto.randomBytes(32).toString('hex');
   const derivedKey = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512');
@@ -89,10 +135,10 @@ export async function initializeDatabaseSchema() {
       const result = await pgPool.query<{ missing: string[] }>(`
         SELECT ARRAY(
           SELECT required.name
-          FROM unnest(ARRAY['accounts', 'vms', 'vm_metrics', 'system_settings']) AS required(name)
+          FROM unnest($1::text[]) AS required(name)
           WHERE to_regclass('public.' || required.name) IS NULL
         ) AS missing
-      `);
+      `, [REQUIRED_DATABASE_TABLES]);
       const missing = result.rows[0]?.missing || [];
       if (missing.length > 0) throw new Error(`Required database tables are missing: ${missing.join(', ')}`);
       return;

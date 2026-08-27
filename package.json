@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "server": "tsx server/index.ts",
     "migrate": "tsx server/db/migrate.ts",
+    "db:verify": "tsx server/db/verify.ts",
+    "db:verify:fresh": "tsx server/db/verifyFresh.ts",
     "start": "tsx server/index.ts"
   },
   "dependencies": {

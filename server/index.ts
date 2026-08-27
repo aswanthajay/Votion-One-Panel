@@ -16,6 +16,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { runMigrations } from './db/migrate.js';
+import { bootstrapInitialAdmin } from './db/bootstrapAdmin.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
@@ -253,6 +254,10 @@ if (appliedMigrations.length > 0) {
 }
 // Validate schema prerequisites without mutating database objects.
 await initializeDatabaseSchema();
+const initialAdminBootstrap = await bootstrapInitialAdmin();
+if (initialAdminBootstrap.status === 'created') {
+  log('info', 'startup.initial_admin_created', { email: initialAdminBootstrap.email });
+}
 const migratedProxmoxCredentials = await dbService.migrateProxmoxCredentials();
 if (migratedProxmoxCredentials > 0) {
   console.log(`[PROXMOX] Encrypted ${migratedProxmoxCredentials} legacy credential record(s)`);
