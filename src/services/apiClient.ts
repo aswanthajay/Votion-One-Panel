@@ -881,16 +881,38 @@ class ApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
       });
-      const data = await res.json();
+      const data = await this.readApiResponse(res, 'Registration failed.');
       if (res.ok && data.success) {
+        if (data.user) {
+          localStorage.setItem('votion_jwt_token', data.token);
+          localStorage.setItem('votion_user_email', data.user.email);
+          localStorage.setItem('votion_user_role', data.user.role);
+        }
+        return data;
+      }
+      return { success: false, error: data.error || 'Registration failed' };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error. Please check your connection and try again.' };
+    }
+  }
+
+  async verifyRegistrationEmail(email: string, verificationToken: string, otp: string) {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/auth/register/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, verificationToken, otp }),
+      });
+      const data = await this.readApiResponse(res, 'Unable to verify your email address.');
+      if (res.ok && data.success && data.user) {
         localStorage.setItem('votion_jwt_token', data.token);
         localStorage.setItem('votion_user_email', data.user.email);
         localStorage.setItem('votion_user_role', data.user.role);
         return data;
       }
-      return { success: false, error: data.error || 'Registration failed' };
+      return { success: false, error: data.error || 'Unable to verify your email address.' };
     } catch (err) {
-      return { success: false, error: 'Network error. Please check your connection and try again.' };
+      return { success: false, error: err instanceof Error ? err.message : 'Network error. Please check your connection and try again.' };
     }
   }
 

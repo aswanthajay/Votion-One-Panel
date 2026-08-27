@@ -59,6 +59,21 @@ class EmailService {
   }
 
   // Common transactional templates
+  async sendRegistrationVerificationCode(to: string, name: string, otp: string) {
+    const displayName = String(name || 'there').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #1a1a1a; line-height: 1.5;">
+        <h2>Verify your Votion One™ email</h2>
+        <p>Hello ${displayName},</p>
+        <p>Use the verification code below to complete your account registration. This code expires in 15 minutes and can be used once.</p>
+        <p style="margin: 24px 0; font-size: 28px; font-weight: 700; letter-spacing: 0.22em;">${otp}</p>
+        <p>If you did not request an account, you can ignore this email.</p>
+        <p>Votion Cloud</p>
+      </div>
+    `;
+    return this.sendEmail(to, 'Verify your Votion One™ email', html);
+  }
+
   async sendWelcomeEmail(to: string, name: string) {
     const html = `
       <div style="font-family: sans-serif; color: #1a1a1a;">

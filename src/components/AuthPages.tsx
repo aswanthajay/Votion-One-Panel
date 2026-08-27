@@ -30,6 +30,8 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [registrationVerificationToken, setRegistrationVerificationToken] = useState<string | null>(null);
+  const [registrationOtp, setRegistrationOtp] = useState('');
 
   // Password reset form inputs
   const [resetPassword, setResetPassword] = useState('');
@@ -75,6 +77,10 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     setAuthMode(mode);
     setErrorMsg(null);
     setSuccessMsg(null);
+    if (mode !== 'register') {
+      setRegistrationVerificationToken(null);
+      setRegistrationOtp('');
+    }
     if (onNavigateToAuth) onNavigateToAuth(mode);
   };
 
@@ -108,13 +114,48 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     const res = await apiClient.register(regName, regEmail, regPassword);
 
     setIsLoading(false);
-    if (res.success && res.user) {
+    if (res.success && res.verificationRequired && res.verificationToken) {
+      setRegistrationVerificationToken(res.verificationToken);
+      setRegistrationOtp('');
+      setSuccessMsg(res.message || 'A verification code has been sent to your email address.');
+    } else if (res.success && res.user) {
       setSuccessMsg(`Account created successfully for ${res.user.email}! Logging in...`);
       setTimeout(() => {
         triggerSuccess('client');
       }, 1000);
     } else {
       setErrorMsg(res.error || 'Registration failed');
+    }
+  };
+
+  const handleRegistrationVerificationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!registrationVerificationToken) return;
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setIsLoading(true);
+    const res = await apiClient.verifyRegistrationEmail(regEmail, registrationVerificationToken, registrationOtp);
+    setIsLoading(false);
+    if (res.success && res.user) {
+      setSuccessMsg(`Email verified for ${res.user.email}! Logging in...`);
+      setTimeout(() => triggerSuccess('client'), 700);
+    } else {
+      setErrorMsg(res.error || 'Unable to verify your email address.');
+    }
+  };
+
+  const resendRegistrationVerification = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setIsLoading(true);
+    const res = await apiClient.register(regName, regEmail, regPassword);
+    setIsLoading(false);
+    if (res.success && res.verificationRequired && res.verificationToken) {
+      setRegistrationVerificationToken(res.verificationToken);
+      setRegistrationOtp('');
+      setSuccessMsg(res.message || 'A new verification code has been sent.');
+    } else {
+      setErrorMsg(res.error || 'Unable to resend the verification code.');
     }
   };
 
@@ -442,66 +483,99 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                   className="text-[26px] text-[#1a1a1a] leading-tight mb-1 font-medium"
                   style={{ fontFamily: 'var(--ink-font-global-family-prominent), Georgia, serif' }}
                 >
-                  Create client account
+                  {registrationVerificationToken ? 'Verify your email' : 'Create client account'}
                 </h2>
-                <p className="text-xs text-[#656b6b]">Register a new client on the VOTION Cloud.</p>
+                <p className="text-xs text-[#656b6b]">{registrationVerificationToken ? `Enter the six-digit code sent to ${regEmail}.` : 'Register a new client on Votion Cloud.'}</p>
               </div>
 
-              <form onSubmit={handleRegisterSubmit} className="flex flex-col gap-5">
-                <div>
-                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Full Name</label>
-                  <input
-                    type="text"
-                    value={regName}
-                    onChange={(e) => setRegName(e.target.value)}
-                    placeholder="Jane Doe"
-                    className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Work Email</label>
-                  <input
-                    type="email"
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="jane@company.com"
-                    className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Password</label>
-                  <input
-                    type="password"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="Minimum 8 characters"
-                    className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
-                    required
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full py-3 rounded-full bg-[#000000] text-[#ffffff] text-sm font-semibold tracking-wide hover:bg-[#1c1c1c] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {isLoading && (
-                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  )}
-                  Create Account
-                </button>
-                <div className="flex items-center justify-center gap-2 text-xs text-[#656b6b]">
-                  Already have an account?{' '}
+              {registrationVerificationToken ? (
+                <form onSubmit={handleRegistrationVerificationSubmit} className="flex flex-col gap-5">
+                  <div>
+                    <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Verification code</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={registrationOtp}
+                      onChange={(e) => setRegistrationOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm tracking-[0.32em] text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      required
+                      minLength={6}
+                      maxLength={6}
+                    />
+                  </div>
                   <button
-                    type="button"
-                    onClick={() => changeMode('login')}
-                    className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70"
+                    type="submit"
+                    disabled={isLoading || registrationOtp.length !== 6}
+                    className="w-full py-3 rounded-full bg-[#000000] text-[#ffffff] text-sm font-semibold tracking-wide hover:bg-[#1c1c1c] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    Log in
+                    {isLoading && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
+                    Verify and create account
                   </button>
-                </div>
-              </form>
+                  <div className="flex items-center justify-center gap-3 text-xs text-[#656b6b]">
+                    <button type="button" disabled={isLoading} onClick={() => void resendRegistrationVerification()} className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70 disabled:opacity-50">Resend code</button>
+                    <button type="button" disabled={isLoading} onClick={() => { setRegistrationVerificationToken(null); setRegistrationOtp(''); setErrorMsg(null); setSuccessMsg(null); }} className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70 disabled:opacity-50">Change details</button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleRegisterSubmit} className="flex flex-col gap-5">
+                  <div>
+                    <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Full Name</label>
+                    <input
+                      type="text"
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="Jane Doe"
+                      autoComplete="name"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Work Email</label>
+                    <input
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="jane@company.com"
+                      autoComplete="email"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Password</label>
+                    <input
+                      type="password"
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="Minimum 8 characters"
+                      autoComplete="new-password"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3 rounded-full bg-[#000000] text-[#ffffff] text-sm font-semibold tracking-wide hover:bg-[#1c1c1c] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isLoading && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
+                    Create account
+                  </button>
+                  <div className="flex items-center justify-center gap-2 text-xs text-[#656b6b]">
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => changeMode('login')}
+                      className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70"
+                    >
+                      Log in
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           )}
 

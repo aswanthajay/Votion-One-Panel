@@ -1,4 +1,5 @@
 import { Router } from 'express';
+
 import multer from 'multer';
 import os from 'os';
 
@@ -157,15 +158,41 @@ apiRouter.post('/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, key
 
 // 4. POST /api/v1/auth/register & /api/auth/register (New User Registration)
 const handleRegister = async (req: any, res: any) => {
-  const { name, email, password } = req.body;
+  const name = String(req.body?.name || '').trim();
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
 
   if (!name || !email || !password) {
-    return res.status(400).json({ success: false, error: 'Full Name, Email, and Password are required' });
+    return res.status(400).json({ success: false, error: 'Full Name, Email, and Password are required.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ success: false, error: 'Enter a valid email address.' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ success: false, error: 'Password must contain at least 8 characters.' });
   }
 
   const existing = await dbService.findUserByEmail(email);
   if (existing) {
     return res.status(400).json({ success: false, error: `Account with email ${email} already exists.` });
+  }
+
+  const requiresEmailVerification = await dbService.isSmtpRegistrationVerificationEnabled();
+  if (requiresEmailVerification) {
+    const verification = await dbService.createRegistrationVerification(name, email, password);
+    const delivered = await emailService.sendRegistrationVerificationCode(email, name, verification.otp);
+    if (!delivered) {
+      await dbService.discardRegistrationVerification(email, verification.tokenId);
+      return res.status(503).json({ success: false, error: 'We could not send a verification email. Please try again later.' });
+    }
+    await dbService.logAudit(email, 'REGISTRATION_OTP_SENT', 'auth', 'Sent registration email verification code');
+    return res.status(202).json({
+      success: true,
+      verificationRequired: true,
+      verificationToken: verification.tokenId,
+      expiresInMinutes: verification.expiresInMinutes,
+      message: 'A verification code has been sent to your email address.',
+    });
   }
 
   const newAcc = await dbService.registerUser(name, email, password, 'client');
@@ -178,8 +205,8 @@ const handleRegister = async (req: any, res: any) => {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
-  // Async trigger welcome email
-  emailService.sendWelcomeEmail(newAcc.email, newAcc.name);
+  // SMTP is disabled by default; welcome delivery is opportunistic when explicitly enabled.
+  void emailService.sendWelcomeEmail(newAcc.email, newAcc.name);
 
   res.json({
     success: true,
@@ -194,6 +221,42 @@ const handleRegister = async (req: any, res: any) => {
   });
 };
 apiRouter.post('/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, keyPrefix: 'auth-register' }), handleRegister);
+
+apiRouter.post('/auth/register/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-register-verify' }), async (req: any, res: any) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const verificationToken = String(req.body?.verificationToken || '').trim();
+  const otp = String(req.body?.otp || '').trim();
+  if (!email || !verificationToken || !/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ success: false, error: 'Enter the six-digit verification code from your email.' });
+  }
+
+  const completed = await dbService.completeRegistrationVerification(email, verificationToken, otp);
+  if (!completed.success || !completed.account) {
+    return res.status(400).json({ success: false, error: completed.error || 'Unable to verify your email address.' });
+  }
+
+  const token = createSessionToken(completed.account.id);
+  res.cookie('votion_auth_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+  void emailService.sendWelcomeEmail(completed.account.email, completed.account.name);
+  await dbService.logAudit(completed.account.email, 'REGISTRATION_VERIFIED', 'auth', 'Completed registration email verification');
+
+  res.json({
+    success: true,
+    message: 'Email verified and account created successfully.',
+    token,
+    user: {
+      id: completed.account.id,
+      email: completed.account.email,
+      name: completed.account.name,
+      role: completed.account.role,
+    },
+  });
+});
 
 // 4b. POST /api/v1/auth/forgot-password (Send reset instructions — anti-enumeration)
 apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-forgot' }), async (req, res) => {

@@ -72,6 +72,7 @@ export const pgPool = new Pool({
 export const REQUIRED_DATABASE_TABLES = [
   'accounts',
   'password_reset_tokens',
+  'registration_verification_tokens',
   'proxmox_connections',
   'nodes',
   'vms',
@@ -699,7 +700,7 @@ export class DatabaseService {
     const clean = email.toLowerCase().trim();
     const { hash, salt } = hashPassword(password);
     const storedHash = `${hash}:${salt}`;
-    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    const pin = crypto.randomInt(100000, 1000000).toString();
 
     const res = await pgPool.query(
       `INSERT INTO accounts (email, password_hash, name, role, support_pin, two_factor_active, created_at)
@@ -707,6 +708,107 @@ export class DatabaseService {
       [clean, storedHash, name, role, hashSupportPin(pin)]
     );
     return res.rows[0];
+  }
+
+  async isSmtpRegistrationVerificationEnabled() {
+    const config = await this.getSystemSetting('smtp_config');
+    return Boolean(config?.enabled);
+  }
+
+  async createRegistrationVerification(name: string, email: string, password: string) {
+    const cleanEmail = email.toLowerCase().trim();
+    const tokenId = crypto.randomBytes(24).toString('base64url');
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    const { hash, salt } = hashPassword(password);
+    const secret = process.env.TOKEN_SECRET;
+    if (!secret) throw new Error('Registration verification is unavailable.');
+    const otpHash = crypto.createHmac('sha256', secret).update(`${cleanEmail}:${tokenId}:${otp}`).digest('hex');
+
+    await pgPool.query(
+      `INSERT INTO registration_verification_tokens (email, token_id, name, password_hash, otp_hash, attempt_count, expires_at, created_at, last_sent_at)
+       VALUES ($1, $2, $3, $4, $5, 0, NOW() + INTERVAL '15 minutes', NOW(), NOW())
+       ON CONFLICT (email) DO UPDATE SET
+         token_id = EXCLUDED.token_id,
+         name = EXCLUDED.name,
+         password_hash = EXCLUDED.password_hash,
+         otp_hash = EXCLUDED.otp_hash,
+         attempt_count = 0,
+         expires_at = EXCLUDED.expires_at,
+         created_at = NOW(),
+         last_sent_at = NOW()`,
+      [cleanEmail, tokenId, name.trim().slice(0, 255), `${hash}:${salt}`, otpHash],
+    );
+
+    return { tokenId, otp, expiresInMinutes: 15 };
+  }
+
+  async discardRegistrationVerification(email: string, tokenId?: string) {
+    const cleanEmail = email.toLowerCase().trim();
+    await pgPool.query(
+      tokenId
+        ? 'DELETE FROM registration_verification_tokens WHERE email = $1 AND token_id = $2'
+        : 'DELETE FROM registration_verification_tokens WHERE email = $1',
+      tokenId ? [cleanEmail, tokenId] : [cleanEmail],
+    );
+  }
+
+  async completeRegistrationVerification(email: string, tokenId: string, otp: string) {
+    const cleanEmail = email.toLowerCase().trim();
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const pending = await client.query(
+        'SELECT * FROM registration_verification_tokens WHERE email = $1 AND token_id = $2 FOR UPDATE',
+        [cleanEmail, tokenId],
+      );
+      const verification = pending.rows[0];
+      if (!verification) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'This verification code is invalid or has expired.' };
+      }
+      if (new Date(verification.expires_at).getTime() <= Date.now()) {
+        await client.query('DELETE FROM registration_verification_tokens WHERE email = $1', [cleanEmail]);
+        await client.query('COMMIT');
+        return { success: false, error: 'This verification code has expired. Request a new code to continue.' };
+      }
+      if (Number(verification.attempt_count) >= 5) {
+        await client.query('DELETE FROM registration_verification_tokens WHERE email = $1', [cleanEmail]);
+        await client.query('COMMIT');
+        return { success: false, error: 'Too many verification attempts. Request a new code to continue.' };
+      }
+
+      const secret = process.env.TOKEN_SECRET;
+      if (!secret) throw new Error('Registration verification is unavailable.');
+      const expected = crypto.createHmac('sha256', secret).update(`${cleanEmail}:${tokenId}:${otp}`).digest('hex');
+      const isValid = crypto.timingSafeEqual(Buffer.from(verification.otp_hash, 'hex'), Buffer.from(expected, 'hex'));
+      if (!isValid) {
+        await client.query('UPDATE registration_verification_tokens SET attempt_count = attempt_count + 1 WHERE email = $1', [cleanEmail]);
+        await client.query('COMMIT');
+        return { success: false, error: 'The verification code is incorrect.' };
+      }
+
+      const existing = await client.query('SELECT id FROM accounts WHERE email = $1 FOR UPDATE', [cleanEmail]);
+      if (existing.rows[0]) {
+        await client.query('DELETE FROM registration_verification_tokens WHERE email = $1', [cleanEmail]);
+        await client.query('COMMIT');
+        return { success: false, error: 'An account with this email address already exists.' };
+      }
+
+      const supportPin = crypto.randomInt(100000, 1000000).toString();
+      const account = await client.query(
+        `INSERT INTO accounts (email, password_hash, name, role, support_pin, two_factor_active, created_at)
+         VALUES ($1, $2, $3, 'client', $4, false, NOW()) RETURNING *`,
+        [cleanEmail, verification.password_hash, verification.name, hashSupportPin(supportPin)],
+      );
+      await client.query('DELETE FROM registration_verification_tokens WHERE email = $1', [cleanEmail]);
+      await client.query('COMMIT');
+      return { success: true, account: account.rows[0] };
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async updateUserProfile(email: string, updates: any) {
