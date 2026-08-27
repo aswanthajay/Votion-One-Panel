@@ -2,7 +2,7 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
-import { decryptCredential, encryptCredential, isEncryptedCredential } from '../services/secretBox.js';
+import { decryptCredential, encryptCredential, hashSupportPin, isEncryptedCredential, isHashedSupportPin, verifySupportPin } from '../services/secretBox.js';
 const { Pool } = pg;
 
 export type ProxmoxConnectionPublic = {
@@ -105,10 +105,23 @@ export async function initializeDatabaseSchema() {
         name VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL DEFAULT 'client',
         phone VARCHAR(50),
-        support_pin VARCHAR(10),
+        support_pin VARCHAR(100),
         two_factor_active BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      ALTER TABLE accounts ALTER COLUMN support_pin TYPE VARCHAR(100);
+
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id BIGSERIAL PRIMARY KEY,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        token_hash VARCHAR(64) UNIQUE NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_account_idx ON password_reset_tokens(account_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS password_reset_tokens_expiry_idx ON password_reset_tokens(expires_at) WHERE used_at IS NULL;
 
       CREATE TABLE IF NOT EXISTS proxmox_connections (
         id VARCHAR(50) PRIMARY KEY,
@@ -515,7 +528,7 @@ export async function initializeDatabaseSchema() {
         id VARCHAR(100) PRIMARY KEY,
         account_email VARCHAR(255) NOT NULL,
         status VARCHAR(50) NOT NULL DEFAULT 'active',
-        support_pin VARCHAR(10),
+        support_pin VARCHAR(100),
         expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 minutes'),
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -631,7 +644,7 @@ export async function initializeDatabaseSchema() {
         const { hash, salt } = hashPassword(password);
         await client.query(
           'INSERT INTO accounts (email, password_hash, name, role, support_pin) VALUES ($1, $2, $3, $4, $5)',
-          [email, `${hash}:${salt}`, name, role, supportPin]
+          [email, `${hash}:${salt}`, name, role, hashSupportPin(supportPin)]
         );
       }
     };
@@ -1229,7 +1242,7 @@ export class DatabaseService {
   }
 
   async getAccounts() {
-    const res = await pgPool.query('SELECT id, email, name, role, phone, support_pin as "supportPin", two_factor_active as "twoFactorActive", created_at FROM accounts ORDER BY id ASC');
+    const res = await pgPool.query('SELECT id, email, name, role, phone, two_factor_active as "twoFactorActive", created_at FROM accounts ORDER BY id ASC');
     return res.rows;
   }
 
@@ -1239,10 +1252,61 @@ export class DatabaseService {
     return res.rows[0] || null;
   }
 
-  async findUserBySupportPin(pin: string) {
+  async findUserBySupportPin(pin: string, email?: string) {
     const cleanPin = pin.trim();
-    const res = await pgPool.query('SELECT * FROM accounts WHERE support_pin = $1 LIMIT 1', [cleanPin]);
-    return res.rows[0] || null;
+    const cleanEmail = email?.toLowerCase().trim();
+    const res = await pgPool.query('SELECT * FROM accounts WHERE support_pin IS NOT NULL');
+    let matched: Record<string, unknown> | null = null;
+    for (const row of res.rows as Array<Record<string, unknown>>) {
+      const emailMatches = !cleanEmail || String(row.email || '').toLowerCase() === cleanEmail;
+      if (emailMatches && verifySupportPin(cleanPin, typeof row.support_pin === 'string' ? row.support_pin : null) && !matched) {
+        matched = row;
+      }
+    }
+    if (matched && typeof matched.support_pin === 'string' && !isHashedSupportPin(matched.support_pin)) {
+      await pgPool.query('UPDATE accounts SET support_pin = $1 WHERE id = $2', [hashSupportPin(cleanPin), matched.id]);
+    }
+    return matched;
+  }
+
+  async createPasswordResetToken(email: string): Promise<string | null> {
+    const user = await this.findUserByEmail(email);
+    if (!user) return null;
+    const rawToken = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    await pgPool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE account_id = $1 AND used_at IS NULL', [user.id]);
+    await pgPool.query(
+      `INSERT INTO password_reset_tokens (account_id, token_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '15 minutes')`,
+      [user.id, tokenHash],
+    );
+    return rawToken;
+  }
+
+  async resetPasswordWithToken(rawToken: string, newPassword: string): Promise<boolean> {
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const tokenResult = await client.query<{ account_id: number }>(
+        'SELECT account_id FROM password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW() FOR UPDATE',
+        [tokenHash],
+      );
+      const accountId = tokenResult.rows[0]?.account_id;
+      if (!accountId) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      const { hash, salt } = hashPassword(newPassword);
+      await client.query('UPDATE accounts SET password_hash = $1, updated_at = NOW() WHERE id = $2', [`${hash}:${salt}`, accountId]);
+      await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [tokenHash]);
+      await client.query('COMMIT');
+      return true;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async validateCredentials(email: string, candidatePassword: string) {
@@ -1273,7 +1337,8 @@ export class DatabaseService {
         name: user.name,
         role: user.role,
         phone: user.phone,
-        supportPin: user.support_pin,
+                supportPinConfigured: Boolean(user.support_pin),
+
         twoFactorActive: user.two_factor_active,
       },
     };
@@ -1288,7 +1353,7 @@ export class DatabaseService {
     const res = await pgPool.query(
       `INSERT INTO accounts (email, password_hash, name, role, support_pin, two_factor_active, created_at)
        VALUES ($1, $2, $3, $4, $5, false, NOW()) RETURNING *`,
-      [clean, storedHash, name, role, pin]
+      [clean, storedHash, name, role, hashSupportPin(pin)]
     );
     return res.rows[0];
   }
@@ -1300,7 +1365,7 @@ export class DatabaseService {
 
     const name = updates.name || user.name;
     const phone = updates.phone || user.phone;
-    const support_pin = updates.supportPin || user.support_pin;
+    const support_pin = updates.supportPin ? hashSupportPin(String(updates.supportPin)) : user.support_pin;
     const two_factor_active = updates.twoFactorActive !== undefined ? updates.twoFactorActive : user.two_factor_active;
     
     await pgPool.query(
@@ -1309,7 +1374,7 @@ export class DatabaseService {
     );
     
     await this.logAudit(clean, 'UPDATE_PROFILE', clean, 'Updated profile fields in PostgreSQL');
-    return { id: user.id, email: clean, name, role: user.role, phone, supportPin: support_pin, twoFactorActive: two_factor_active };
+    return { id: user.id, email: clean, name, role: user.role, phone, supportPinConfigured: Boolean(support_pin), twoFactorActive: two_factor_active };
   }
 
   async changeUserPassword(email: string, currentPass: string, newPass: string) {
@@ -1330,8 +1395,8 @@ export class DatabaseService {
   async regenerateSupportPin(email: string) {
     const clean = email.toLowerCase().trim();
     const newPin = Math.floor(100000 + Math.random() * 900000).toString();
-    await pgPool.query('UPDATE accounts SET support_pin = $1 WHERE email = $2', [newPin, clean]);
-    await this.logAudit(clean, 'REGENERATE_PIN', clean, `Generated new 6-digit Support PIN: ${newPin}`);
+    await pgPool.query('UPDATE accounts SET support_pin = $1 WHERE email = $2', [hashSupportPin(newPin), clean]);
+    await this.logAudit(clean, 'REGENERATE_PIN', clean, 'Generated a new Support PIN');
     return { success: true, supportPin: newPin };
   }
 

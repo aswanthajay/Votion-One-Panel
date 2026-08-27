@@ -7,6 +7,7 @@ import { clientRouter } from './routes/client.js';
 import { operatorRouter } from './routes/operator.js';
 import { ticketRouter } from './routes/tickets.js';
 import { vncRouter } from './routes/vnc.js';
+import { authKeyRouter } from './routes/authKey.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
@@ -62,6 +63,8 @@ app.use(cors({
 app.use(express.json({ limit: '1mb' }));
 
 // API Router Registrations
+app.use('/api/auth', authKeyRouter);
+app.use('/api/v1/auth', authKeyRouter);
 app.use('/api/v1', apiRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', adminRouter);

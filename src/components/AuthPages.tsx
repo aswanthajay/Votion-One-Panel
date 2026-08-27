@@ -32,6 +32,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   const [regPassword, setRegPassword] = useState('');
 
   // Recovery Form Inputs
+  const [recoveryEmail, setRecoveryEmail] = useState('');
   const [recoveryPin, setRecoveryPin] = useState('');
 
   // Status & Error Banners
@@ -141,6 +142,10 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    if (!recoveryEmail.trim() || !recoveryEmail.includes('@')) {
+      setErrorMsg('Enter the email address associated with your account.');
+      return;
+    }
     if (recoveryPin.trim().length !== 6) {
       setErrorMsg('Support PIN must be exactly 6 digits.');
       return;
@@ -150,7 +155,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
       const res = await fetch(`${API_BASE_URL}/auth/recover-pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: recoveryPin.trim() }),
+        body: JSON.stringify({ email: recoveryEmail.trim(), pin: recoveryPin.trim() }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -551,10 +556,22 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                 >
                   Account recovery
                 </h2>
-                <p className="text-xs text-[#656b6b]">Enter your 6-digit Support PIN to log in.</p>
+                <p className="text-xs text-[#656b6b]">Enter your account email and 6-digit Support PIN to continue.</p>
               </div>
 
               <form onSubmit={handleRecoverySubmit} className="flex flex-col gap-5">
+                <div>
+                  <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Account email</label>
+                  <input
+                    type="email"
+                    value={recoveryEmail}
+                    onChange={(e) => setRecoveryEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    autoComplete="username"
+                    className="w-full px-3 py-3 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                    required
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-[#1a1a1a] mb-1.5">6-Digit Support PIN</label>
                   <input

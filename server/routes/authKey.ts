@@ -17,7 +17,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { pgPool } from '../db/database.js';
-import { requireAuth, TOKEN_SECRET, type AuthenticatedRequest } from '../middleware.js';
+import { rateLimit, requireAuth, TOKEN_SECRET, type AuthenticatedRequest } from '../middleware.js';
 
 function signToken(payload: string): string {
   const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
@@ -160,7 +160,7 @@ authKeyRouter.get('/key-file/download', requireAuth, async (req, res) => {
 });
 
 /** POST /auth/login-key — public endpoint: verify a key file and mint a session */
-authKeyRouter.post('/login-key', async (req, res) => {
+authKeyRouter.post('/login-key', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-login-key' }), async (req, res) => {
   const kf = req.body?.keyFile || req.body;
   const kid = typeof kf?.kid === 'string' ? kf.kid.trim() : '';
   const secret = typeof kf?.secret === 'string' ? kf.secret.trim() : '';

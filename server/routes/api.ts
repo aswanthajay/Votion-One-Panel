@@ -13,7 +13,7 @@ import { emailService } from '../services/email.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
-import { createSessionToken, requireAdmin, requireAuth } from '../middleware.js';
+import { createSessionToken, rateLimit, requireAdmin, requireAuth } from '../middleware.js';
 
 export const apiRouter = Router();
 
@@ -139,12 +139,13 @@ const handleLogin = async (req: any, res: any) => {
       name: account.name,
       role: account.role,
       phone: account.phone,
-      supportPin: account.supportPin,
+              supportPinConfigured: account.supportPinConfigured,
+
       twoFactorActive: account.twoFactorActive,
     },
   });
 };
-apiRouter.post('/auth/login', handleLogin);
+apiRouter.post('/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' }), handleLogin);
 
 // 4. POST /api/v1/auth/register & /api/auth/register (New User Registration)
 const handleRegister = async (req: any, res: any) => {
@@ -184,10 +185,10 @@ const handleRegister = async (req: any, res: any) => {
     },
   });
 };
-apiRouter.post('/auth/register', handleRegister);
+apiRouter.post('/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, keyPrefix: 'auth-register' }), handleRegister);
 
 // 4b. POST /api/v1/auth/forgot-password (Send reset instructions — anti-enumeration)
-apiRouter.post('/auth/forgot-password', async (req, res) => {
+apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-forgot' }), async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ success: false, error: 'Email address is required' });
@@ -195,32 +196,58 @@ apiRouter.post('/auth/forgot-password', async (req, res) => {
   // Always return success to prevent user enumeration
   const user = await dbService.findUserByEmail(email);
   if (user) {
-    await dbService.logAudit(email, 'PASSWORD_RESET_REQUEST', 'auth', `Password reset requested for ${email}`);
-    const html = `
-      <div style="font-family: sans-serif; color: #1a1a1a;">
-        <h2>Password Reset Request</h2>
-        <p>A password reset was requested for your Stellar Panel account. Since this is a local setup, please use your 6-digit Support PIN (${user.support_pin}) to recover your account via the PIN Recovery page.</p>
-        <p>Best regards,<br/>Stellar Panel</p>
-      </div>
-    `;
-    emailService.sendEmail(email, 'Stellar Panel Password Reset', html);
+    const token = await dbService.createPasswordResetToken(email);
+    await dbService.logAudit(email, 'PASSWORD_RESET_REQUEST', 'auth', 'Password reset requested');
+    if (token) {
+      const appUrl = process.env.PUBLIC_APP_URL || 'http://localhost:3000';
+      const resetUrl = `${appUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
+      const html = `
+        <div style="font-family: sans-serif; color: #1a1a1a;">
+          <h2>Password Reset Request</h2>
+          <p>A password reset was requested for your Stellar Panel account.</p>
+          <p><a href="${resetUrl}">Reset your password</a>. This link expires in 15 minutes and can be used once.</p>
+          <p>If you did not initiate this request, no further action is required.</p>
+        </div>
+      `;
+      await emailService.sendEmail(email, 'Stellar Panel Password Reset', html);
+    }
   }
-  res.json({ success: true, message: `If an account exists for ${email}, reset instructions have been sent.` });
+  res.json({ success: true, message: 'If an account exists, password reset instructions have been sent.' });
+});
+
+apiRouter.post('/auth/reset-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-reset-password' }), async (req, res) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!token || password.length < 12) {
+    return res.status(400).json({ success: false, error: 'A valid reset token and password of at least 12 characters are required.' });
+  }
+  try {
+    const changed = await dbService.resetPasswordWithToken(token, password);
+    if (!changed) return res.status(400).json({ success: false, error: 'The reset link is invalid or has expired.' });
+    res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
+  } catch {
+    res.status(500).json({ success: false, error: 'Unable to reset the password at this time.' });
+  }
 });
 
 // 4c. POST /api/v1/auth/recover-pin (Verify Support PIN against PostgreSQL)
-apiRouter.post('/auth/recover-pin', async (req, res) => {
-  const { pin } = req.body;
-  if (!pin || String(pin).trim().length !== 6) {
-    return res.status(400).json({ success: false, error: 'Valid 6-digit support PIN is required' });
+apiRouter.post('/auth/recover-pin', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-recover-pin' }), async (req, res) => {
+  const { email, pin } = req.body;
+  if (!email || !String(email).includes('@') || !pin || !/^\d{6}$/.test(String(pin).trim())) {
+    return res.status(400).json({ success: false, error: 'Account email and valid 6-digit Support PIN are required' });
   }
   try {
-    const account = await dbService.findUserBySupportPin(String(pin).trim());
+    const account = await dbService.findUserBySupportPin(String(pin).trim(), String(email));
     if (!account) {
       return res.status(401).json({ success: false, error: 'Invalid Support PIN. Contact VOTION administrator.' });
     }
-    const token = createSessionToken(account.id);
-    await dbService.logAudit(account.email, 'PIN_RECOVERY_LOGIN', 'auth', `Account recovered via Support PIN`);
+    const accountId = Number(account.id);
+    const accountEmail = String(account.email || '');
+    if (!Number.isInteger(accountId) || !accountEmail) {
+      return res.status(401).json({ success: false, error: 'Invalid Support PIN. Contact VOTION administrator.' });
+    }
+    const token = createSessionToken(accountId);
+    await dbService.logAudit(accountEmail, 'PIN_RECOVERY_LOGIN', 'auth', 'Account recovered via Support PIN');
     res.cookie('votion_auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -230,7 +257,7 @@ apiRouter.post('/auth/recover-pin', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: { id: account.id, email: account.email, name: account.name, role: account.role },
+      user: { id: accountId, email: accountEmail, name: String(account.name || ''), role: String(account.role || 'client') },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: 'Server error during PIN verification' });

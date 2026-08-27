@@ -19,6 +19,29 @@ export const TOKEN_SECRET = configuredTokenSecret;
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+type RateLimitOptions = { windowMs: number; max: number; keyPrefix: string };
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+
+export function rateLimit(options: RateLimitOptions) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const identity = `${options.keyPrefix}:${req.ip || req.socket.remoteAddress || 'unknown'}`;
+    const now = Date.now();
+    const current = rateLimitBuckets.get(identity);
+    if (!current || current.resetAt <= now) {
+      rateLimitBuckets.set(identity, { count: 1, resetAt: now + options.windowMs });
+      next();
+      return;
+    }
+    if (current.count >= options.max) {
+      res.setHeader('Retry-After', Math.ceil((current.resetAt - now) / 1000));
+      res.status(429).json({ success: false, error: 'Too many requests. Please try again later.' });
+      return;
+    }
+    current.count++;
+    next();
+  };
+}
+
 export function createSessionToken(accountId: number): string {
   const payload = `votion_${accountId}_${Date.now()}`;
   const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
