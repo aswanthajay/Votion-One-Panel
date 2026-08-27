@@ -16,7 +16,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { WebSocketServer, WebSocket } from 'ws';
 import { dbService, initializeDatabaseSchema } from './db/database.js';
 import { runMigrations } from './db/migrate.js';
-import { bootstrapInitialAdmin } from './db/bootstrapAdmin.js';
+import { beginInitialAdminSetup, bootstrapInitialAdmin } from './db/bootstrapAdmin.js';
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
@@ -285,10 +285,15 @@ if (initialAdminBootstrap.status === 'promoted') {
   log('info', 'startup.initial_admin_promoted', { email: initialAdminBootstrap.email });
 }
 if (initialAdminBootstrap.status === 'pending-configuration') {
+  const setup = beginInitialAdminSetup();
+  const appUrl = (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const setupLink = `${appUrl}/setup?token=${encodeURIComponent(setup.token)}`;
   log('warn', 'startup.initial_admin_pending', {
     email: initialAdminBootstrap.email,
-    reason: 'INITIAL_ADMIN_PASSWORD is not configured; no administrator was created.',
+    reason: 'No initial administrator is configured. A one-time setup link was issued to the operator console.',
+    expiresAt: setup.expiresAt,
   });
+  console.log(`[SETUP] Initial administrator setup link (expires ${setup.expiresAt}): ${setupLink}`);
 }
 const providerCredentialsAvailable = isProviderCredentialKeyConfigured();
 if (providerCredentialsAvailable) {

@@ -3,9 +3,9 @@ import { apiClient, API_BASE_URL } from '../services/apiClient';
 const ThreeBackground = lazy(() => import('./ThreeBackground').then(module => ({ default: module.ThreeBackground })));
 
 interface AuthPagesProps {
-  initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password';
+  initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin';
   onNavigateToDashboard?: () => void;
-  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'reset-password') => void;
+  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin') => void;
   onLoginSuccess?: (userRole: 'admin' | 'client') => void;
 }
 
@@ -15,7 +15,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   onNavigateToAuth,
   onLoginSuccess,
 }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password'>(initialMode);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin'>(initialMode);
 
   useEffect(() => {
     setAuthMode(initialMode);
@@ -36,6 +36,12 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   // Password reset form inputs
   const [resetPassword, setResetPassword] = useState('');
   const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState('');
+
+  // One-time administrator setup inputs
+  const [setupToken, setSetupToken] = useState(() => new URLSearchParams(window.location.search).get('token')?.trim() || '');
+  const [setupPassword, setSetupPassword] = useState('');
+  const [setupPasswordConfirmation, setSetupPasswordConfirmation] = useState('');
+  const [setupStatus, setSetupStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
 
   // Status & Error Banners
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -73,7 +79,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     if (onLoginSuccess) onLoginSuccess(role);
   };
 
-  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'reset-password') => {
+  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin') => {
     setAuthMode(mode);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -82,6 +88,61 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
       setRegistrationOtp('');
     }
     if (onNavigateToAuth) onNavigateToAuth(mode);
+  };
+
+  useEffect(() => {
+    if (authMode !== 'setup-admin') return;
+    const tokenFromLink = new URLSearchParams(window.location.search).get('token')?.trim() || '';
+    setSetupToken(tokenFromLink);
+    if (!tokenFromLink) {
+      setSetupStatus('unavailable');
+      setErrorMsg('This setup link is missing its security token. Restart the service to issue a new link.');
+      return;
+    }
+    window.history.replaceState({}, document.title, '/setup');
+
+    let active = true;
+    setSetupStatus('checking');
+    void apiClient.getInitialAdminSetupStatus().then((status) => {
+      if (!active) return;
+      setSetupStatus(status.success && status.setupAvailable ? 'available' : 'unavailable');
+      if (!status.success) setErrorMsg(status.error || 'Unable to verify initial administrator setup status.');
+      if (status.success && !status.setupAvailable) setErrorMsg('This administrator setup link is no longer available.');
+    });
+    return () => { active = false; };
+  }, [authMode]);
+
+  const handleInitialAdminSetupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!setupToken) {
+      setErrorMsg('This setup link is missing its security token. Restart the service to issue a new link.');
+      return;
+    }
+    if (setupPassword.length < 12) {
+      setErrorMsg('Use a password with at least 12 characters.');
+      return;
+    }
+    if (setupPassword !== setupPasswordConfirmation) {
+      setErrorMsg('The password confirmation does not match.');
+      return;
+    }
+
+    setIsLoading(true);
+    const result = await apiClient.completeInitialAdminSetup(setupToken, setupPassword);
+    setIsLoading(false);
+    if (!result.success) {
+      setErrorMsg(result.error || 'Unable to complete administrator setup.');
+      return;
+    }
+
+    setSetupToken('');
+    setSetupPassword('');
+    setSetupPasswordConfirmation('');
+    setSetupStatus('unavailable');
+    setSuccessMsg('Administrator setup is complete. Opening the control panel...');
+    window.setTimeout(() => triggerSuccess('admin'), 700);
   };
 
   // Handle Login Submission
@@ -379,6 +440,79 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
             <div className="mb-5 px-4 py-3 bg-[#f0fdf4] border border-[#bbf7d0] text-[#16a34a] text-xs rounded-lg font-medium">
               {successMsg}
             </div>
+          )}
+
+          {authMode === 'setup-admin' && (
+            <>
+              <div className="mb-6">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#656b6b]">Secure first-run setup</p>
+                <h2
+                  className="text-[26px] text-[#1a1a1a] leading-tight mb-1 font-medium"
+                  style={{ fontFamily: 'var(--ink-font-global-family-prominent), Georgia, serif' }}
+                >
+                  Configure your administrator
+                </h2>
+                <p className="text-xs text-[#656b6b]">Create the protected administrator password for admin@votioncloud.org.</p>
+              </div>
+
+              {setupStatus === 'checking' ? (
+                <div className="rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-3 text-xs text-[#656b6b]" role="status">
+                  Verifying the one-time setup link…
+                </div>
+              ) : setupStatus === 'available' ? (
+                <form onSubmit={handleInitialAdminSetupSubmit} className="flex flex-col gap-5">
+                  <div>
+                    <label htmlFor="votion-setup-password" className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Administrator password</label>
+                    <input
+                      id="votion-setup-password"
+                      type="password"
+                      value={setupPassword}
+                      onChange={(e) => setSetupPassword(e.target.value)}
+                      autoComplete="new-password"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      placeholder="At least 12 characters"
+                      required
+                      minLength={12}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="votion-setup-password-confirmation" className="block text-sm font-medium text-[#1a1a1a] mb-1.5">Confirm administrator password</label>
+                    <input
+                      id="votion-setup-password-confirmation"
+                      type="password"
+                      value={setupPasswordConfirmation}
+                      onChange={(e) => setSetupPasswordConfirmation(e.target.value)}
+                      autoComplete="new-password"
+                      className="w-full px-3 py-2.5 border border-[#111111] rounded-md outline-none text-sm text-[#1a1a1a] placeholder:text-[#9a9a9a] focus:border-[#1a1a1a] focus:ring-2 focus:ring-[#1a1a1a]/10 transition-shadow"
+                      placeholder="Re-enter password"
+                      required
+                      minLength={12}
+                    />
+                  </div>
+                  <p className="-mt-1 text-[11px] leading-relaxed text-[#656b6b]">
+                    This one-time link is issued only for a new installation and becomes unavailable after administrator setup completes.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3 rounded-full bg-[#000000] text-[#ffffff] text-sm font-semibold tracking-wide hover:bg-[#1c1c1c] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isLoading && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
+                    Complete secure setup
+                  </button>
+                </form>
+              ) : (
+                <div className="rounded-lg border border-[#dedfdf] bg-[#fafafa] px-4 py-4 text-xs leading-relaxed text-[#656b6b]" role="status">
+                  This setup link is unavailable. An administrator may already be configured, or the link may have expired. Restart the service to issue a replacement only if no administrator account exists.
+                </div>
+              )}
+
+              <div className="mt-6 flex items-center justify-center text-xs text-[#656b6b]">
+                <button type="button" onClick={() => changeMode('login')} className="text-[#1a1a1a] underline underline-offset-2 hover:opacity-70">
+                  Back to log in
+                </button>
+              </div>
+            </>
           )}
 
           {authMode === 'login' && (

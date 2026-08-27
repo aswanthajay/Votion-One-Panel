@@ -890,10 +890,46 @@ class ApiClient {
     }
   }
 
+    async getInitialAdminSetupStatus(): Promise<{ success: boolean; setupAvailable: boolean; expiresAt: string | null; error?: string }> {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/auth/setup/status`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        return { success: false, setupAvailable: false, expiresAt: null, error: data.error || 'Unable to check setup status.' };
+      }
+      return { success: true, setupAvailable: Boolean(data.setupAvailable), expiresAt: data.expiresAt || null };
+    } catch (error) {
+      return { success: false, setupAvailable: false, expiresAt: null, error: error instanceof Error ? error.message : 'Unable to check setup status.' };
+    }
+  }
+
+  async completeInitialAdminSetup(token: string, password: string): Promise<{ success: boolean; token?: string; user?: ApiAccount; error?: string }> {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/auth/setup/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !data.user || !data.token) {
+        return { success: false, error: data.error || 'Unable to complete administrator setup.' };
+      }
+      localStorage.setItem('votion_jwt_token', data.token);
+      localStorage.setItem('votion_user_email', data.user.email);
+      localStorage.setItem('votion_user_role', data.user.role);
+      return { success: true, token: data.token, user: data.user as ApiAccount };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unable to complete administrator setup.' };
+    }
+  }
+
   /**
    * User Registration Endpoint
    */
   async register(name: string, email: string, password: string) {
+
     try {
       const res = await this.apiFetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',

@@ -8,7 +8,11 @@ import QRCode from 'qrcode';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dbService } from '../db/database.js';
-import { INITIAL_ADMIN_EMAIL } from '../db/bootstrapAdmin.js';
+import {
+  completeInitialAdminSetup,
+  getInitialAdminSetupStatus,
+  INITIAL_ADMIN_EMAIL,
+} from '../db/bootstrapAdmin.js';
 
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
@@ -188,8 +192,52 @@ const handleLogin = async (req: any, res: any) => {
 };
 apiRouter.post('/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' }), handleLogin);
 
+// First-run administrator setup is available only while no administrator exists.
+apiRouter.get('/auth/setup/status', async (_req, res) => {
+  const setup = await getInitialAdminSetupStatus();
+  res.json({ success: true, setupAvailable: setup.available, expiresAt: setup.expiresAt || null });
+});
+
+apiRouter.post('/auth/setup/complete', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-initial-setup' }), async (req: any, res: any) => {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!token || password.length < 12) {
+    return res.status(400).json({
+      success: false,
+      error: 'A valid setup link and a password of at least 12 characters are required.',
+    });
+  }
+
+  const completed = await completeInitialAdminSetup(token, password);
+  if (!completed.success) {
+    if (completed.error === 'administrator-already-configured') {
+      return res.status(409).json({ success: false, error: 'An administrator account is already configured.' });
+    }
+    if (completed.error === 'setup-unavailable') {
+      return res.status(410).json({ success: false, error: 'This setup link is unavailable. Restart the service to issue a new link if setup is still required.' });
+    }
+    return res.status(401).json({ success: false, error: 'This setup link is invalid or has expired.' });
+  }
+
+  const sessionToken = createSessionToken(completed.account.id);
+  res.cookie('votion_auth_token', sessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+  await dbService.logAudit(completed.account.email, 'INITIAL_ADMIN_SETUP_COMPLETED', 'auth', 'Completed one-time initial administrator setup');
+  res.status(201).json({
+    success: true,
+    message: 'Initial administrator setup is complete.',
+    token: sessionToken,
+    user: completed.account,
+  });
+});
+
 // 4. POST /api/v1/auth/register & /api/auth/register (New User Registration)
 const handleRegister = async (req: any, res: any) => {
+
   const name = String(req.body?.name || '').trim();
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');

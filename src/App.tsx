@@ -62,7 +62,7 @@ export type ViewMode =
   | 'user-management';
 
 type UserRole = 'admin' | 'client';
-type AuthMode = 'login' | 'register' | 'forgot-password' | 'reset-password';
+type AuthMode = 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin';
 
 type ClientFilter = 'qemu' | 'lxc' | 'vnc' | 'metrics' | 'firewall' | 'backups';
 
@@ -100,6 +100,7 @@ const AUTH_PATHS: Record<AuthMode, string> = {
   register: '/register',
   'forgot-password': '/forgot-password',
   'reset-password': '/reset-password',
+  'setup-admin': '/setup',
 };
 
 const normalizePath = (pathname: string) => {

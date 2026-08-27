@@ -1387,7 +1387,16 @@ body {
   color: #52525b !important;
 }
 
+[data-theme="dark"] .auth-page-panel [class~="bg-[#fafafa]"] {
+  background-color: #121212 !important;
+}
+
+[data-theme="dark"] .auth-page-panel [class~="border-[#dedfdf]"] {
+  border-color: var(--theme-border-strong) !important;
+}
+
 [data-theme="dark"] .auth-page-panel [class~="border-[#111111]"] {
+
   border-color: var(--theme-border-strong) !important;
 }
 
