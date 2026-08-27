@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { dbService } from '../db/database.js';
 import { emailService } from '../services/email.js';
+import { hasTeamAccessScope, isDelegatedTeamAccessScope, type TeamAccessScope } from '../services/teamAccessPolicy.js';
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { requireAuth } from '../middleware.js';
@@ -82,7 +83,6 @@ clientRouter.post('/navigation-usage', async (req: any, res) => {
   res.status(204).end();
 });
 
-const teamAccessScopes = new Set(['readonly', 'power', 'full']);
 const isValidTeamEmail = (value: unknown): value is string => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
 clientRouter.get('/team-access', async (req: any, res) => {
@@ -98,7 +98,7 @@ clientRouter.post('/team-access', async (req: any, res) => {
   const vmid = Number(req.body?.vmid);
   const scope = String(req.body?.scope || '');
   if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
-  if (!Number.isInteger(vmid) || vmid <= 0 || !isValidTeamEmail(memberEmail) || !teamAccessScopes.has(scope)) {
+  if (!Number.isInteger(vmid) || vmid <= 0 || !isValidTeamEmail(memberEmail) || !isDelegatedTeamAccessScope(scope)) {
     return res.status(400).json({ success: false, error: 'Provide a valid service, email address, and access level.' });
   }
   if (memberEmail === ownerEmail) {
@@ -159,7 +159,7 @@ clientRouter.put('/team-access/vms/:vmid/members/:memberId', async (req: any, re
   const memberId = Number(req.params.memberId);
   const scope = String(req.body?.scope || '');
   if (!ownerEmail) return res.status(401).json({ success: false, error: 'Authentication required.' });
-  if (!Number.isInteger(vmid) || !Number.isInteger(memberId) || !teamAccessScopes.has(scope)) {
+  if (!Number.isInteger(vmid) || !Number.isInteger(memberId) || !isDelegatedTeamAccessScope(scope)) {
     return res.status(400).json({ success: false, error: 'Provide a valid service, team member, and access level.' });
   }
   const vm = await dbService.getVMByVMID(vmid);
@@ -205,16 +205,10 @@ const proxmoxService = new ProxmoxService({
 });
 
 const adminRoles = new Set(['administrator', 'admin', 'moderator']);
-type ClientVmScope = 'readonly' | 'power' | 'full' | 'owner';
-const clientVmScopeRank: Record<ClientVmScope, number> = {
-  readonly: 1,
-  power: 2,
-  full: 3,
-  owner: 4,
-};
+type ClientVmScope = TeamAccessScope;
 const requireClientVmScope = (requiredScope: ClientVmScope) => (req: any, res: any, next: any) => {
   const actualScope = req.clientVmScope as ClientVmScope | undefined;
-  if (!actualScope || clientVmScopeRank[actualScope] < clientVmScopeRank[requiredScope]) {
+  if (!hasTeamAccessScope(actualScope, requiredScope)) {
     return res.status(403).json({ success: false, error: 'Your delegated access level does not permit this action.' });
   }
   next();
@@ -248,8 +242,8 @@ clientRouter.use('/vms/:vmid', async (req, res, next) => {
 
   if (!clientVmScope && userEmail) {
     const delegatedAccess = await dbService.getSubUserAccess(vmid, userEmail);
-    if (delegatedAccess && ['readonly', 'power', 'full'].includes(String(delegatedAccess.scope))) {
-      clientVmScope = delegatedAccess.scope as ClientVmScope;
+    if (delegatedAccess && isDelegatedTeamAccessScope(delegatedAccess.scope)) {
+      clientVmScope = delegatedAccess.scope;
     }
   }
 

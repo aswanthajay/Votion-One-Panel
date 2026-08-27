@@ -134,7 +134,7 @@ export const TeamAccessContent: React.FC = () => {
     );
   }
 
-  const activeInvitations = overview?.invitations.filter((invitation) => !invitation.acceptedAt && !invitation.revokedAt) || [];
+  const activeInvitations = overview?.invitations.filter((invitation) => invitation.isActive) || [];
 
   return (
     <div className="app-content max-w-[1280px] p-4 md:p-8">

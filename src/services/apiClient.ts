@@ -145,6 +145,7 @@ export interface ApiTeamInvitation {
   sentAt?: string | null;
   acceptedAt?: string | null;
   revokedAt?: string | null;
+  isActive: boolean;
 }
 
 export interface ApiTeamAccessOverview {

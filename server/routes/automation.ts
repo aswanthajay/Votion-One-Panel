@@ -4,16 +4,9 @@ import { requireAdmin } from '../middleware.js';
 import { KeyedRequest } from '../types/apiKey.js';
 import { automationService } from '../services/automation.js';
 import { dbService } from '../db/database.js';
+import { hasTeamAccessScope, isDelegatedTeamAccessScope, type TeamAccessScope } from '../services/teamAccessPolicy.js';
 
 export const automationRouter = Router();
-
-type TeamAccessScope = 'readonly' | 'power' | 'full' | 'owner';
-const teamAccessScopeRank: Record<TeamAccessScope, number> = {
-  readonly: 1,
-  power: 2,
-  full: 3,
-  owner: 4,
-};
 
 /** Owner-or-admin gate with scoped, per-service delegated access for normal clients. */
 async function assertVmAccess(
@@ -37,8 +30,8 @@ async function assertVmAccess(
   }
 
   const delegatedAccess = await dbService.getSubUserAccess(vmid, email);
-  const actualScope = String(delegatedAccess?.scope || '') as TeamAccessScope;
-  if (!delegatedAccess || !teamAccessScopeRank[actualScope] || teamAccessScopeRank[actualScope] < teamAccessScopeRank[requiredScope]) {
+  const actualScope = String(delegatedAccess?.scope || '');
+  if (!delegatedAccess || !isDelegatedTeamAccessScope(actualScope) || !hasTeamAccessScope(actualScope, requiredScope)) {
     return res.status(403).json({ success: false, error: 'Your delegated access level does not permit this action.' });
   }
   return null;

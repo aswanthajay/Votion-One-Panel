@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
 import { loadRuntimeConfiguration } from '../services/runtimeConfig.js';
+import { isPendingTeamInvitationActive } from '../services/teamAccessPolicy.js';
 import {
   decryptCredential,
   encryptCredential,
@@ -3181,6 +3182,11 @@ export class DatabaseService {
         sentAt: row.sent_at || null,
         acceptedAt: row.accepted_at || null,
         revokedAt: row.revoked_at || null,
+        isActive: isPendingTeamInvitationActive({
+          expiresAt: row.expires_at,
+          acceptedAt: row.accepted_at || null,
+          revokedAt: row.revoked_at || null,
+        }),
       })),
     };
   }
