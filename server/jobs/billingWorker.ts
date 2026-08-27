@@ -12,13 +12,6 @@ import { emailService } from '../services/email.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const escapeHtml = (value: string) => value
-  .replaceAll('&', '&amp;')
-  .replaceAll('<', '&lt;')
-  .replaceAll('>', '&gt;')
-  .replaceAll('"', '&quot;')
-  .replaceAll("'", '&#39;');
-
 export class BillingLifecycleWorker {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -99,11 +92,15 @@ export class BillingLifecycleWorker {
       const message = `Invoice ${invoice.id} for VM-${invoice.vmid} ${dueText}. Outstanding balance: ${invoice.outstandingCents} ${invoice.currency}.`;
       await dbService.createNotification({ accountEmail: invoice.accountEmail, title, message, severity });
       if (config.reminderEmailsEnabled === true) {
-        await emailService.sendEmail(
-          invoice.accountEmail,
+        await emailService.sendBillingReminder(invoice.accountEmail, {
           title,
-          `<div style="font-family:Arial,sans-serif;color:#1a1a1a"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><p>Please review your billing details in the Votion One™ client portal.</p></div>`,
-        );
+          message,
+          invoiceId: invoice.id,
+          vmid: invoice.vmid,
+          dueText,
+          outstandingCents: invoice.outstandingCents,
+          currency: invoice.currency,
+        });
       }
     }
 

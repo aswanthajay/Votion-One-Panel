@@ -21,15 +21,18 @@ interface MailNotifs {
 }
 
 const PREVIEW_STYLES = {
-  color: '#1a1a1a',
-  fontFamily: 'sans-serif',
-  lineHeight: 1.5,
+  backgroundColor: '#050505',
+  color: '#f5f5f2',
+  fontFamily: 'Arial, Helvetica, sans-serif',
+  lineHeight: 1.6,
 };
 
 const friendlyKey = (key: string): string => {
   const map: Record<string, string> = {
+    registration_verification: 'Registration Verification',
     welcome: 'Welcome Email',
     ticket_update: 'Support Ticket Update',
+    billing_reminder: 'Billing Reminder',
     expiry_warning: 'Service Expiry Warning',
     alert_fired: 'Alert Triggered',
     password_reset: 'Password Changed',
@@ -383,6 +386,7 @@ export const SystemSettings: React.FC = () => {
               <div className="bg-[#fbfaf9] border border-[#dedfdf] rounded-lg p-3 text-xs">
                 <p className="font-semibold text-[#1a1a1a] mb-1">Subject: {t.subject}</p>
                 <p className="text-[#656b6b] line-clamp-2" dangerouslySetInnerHTML={{ __html: t.body.replace(/<[^>]+>/g, '').slice(0, 120) }} />
+              <p className="mt-2 text-[10px] font-medium text-[#656b6b]">Votion One™ automatically applies the signature black delivery shell.</p>
               </div>
               <button
                 onClick={() => openTemplateEdit(t)}
@@ -510,7 +514,7 @@ export const SystemSettings: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1010] flex items-center justify-center p-6 overflow-y-auto">
           <div className="w-full max-w-[640px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-6 my-8">
             <h3 className="text-base font-bold text-[#1a1a1a] mb-1">Edit Template: {friendlyKey(editTemplate.template_key)}</h3>
-            <p className="text-xs text-[#656b6b] mb-5">Use placeholders like {'{name}'}, {'{email}'}, {'{vmid}'}, {'{ticketNumber}'}, {'{status}'} — they are replaced with real values when the email is sent.</p>
+            <p className="text-xs text-[#656b6b] mb-5">Edit the message content below. Votion One™ automatically applies the signature deep-black shell, security footer, responsive layout, and plain-text alternative. Use placeholders such as {'{name}'}, {'{email}'}, {'{vmid}'}, {'{ticketNumber}'}, {'{status}'}, {'{message}'}, and {'{title}'} for context-specific values.</p>
 
             <div className="flex flex-col gap-4">
               <div>
@@ -534,7 +538,7 @@ export const SystemSettings: React.FC = () => {
               </div>
               <div>
                 <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Live Preview</label>
-                <div className="border border-[#dedfdf] rounded-lg p-4 bg-[#fbfaf9]" style={PREVIEW_STYLES} dangerouslySetInnerHTML={{ __html: editBody }} />
+                <div className="border border-[#dedfdf] rounded-lg p-4" style={PREVIEW_STYLES} dangerouslySetInnerHTML={{ __html: editBody }} />
               </div>
 
               <div className="flex items-center gap-3 pt-2 border-t border-[#dedfdf]">

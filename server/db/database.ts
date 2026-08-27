@@ -2141,9 +2141,14 @@ export class DatabaseService {
 
     // SYSTEM SETTINGS
 
-  async getMailTemplates() {
+    async getMailTemplates() {
     const res = await pgPool.query('SELECT * FROM mail_templates ORDER BY id ASC');
     return res.rows;
+  }
+
+  async getMailTemplate(templateKey: string) {
+    const res = await pgPool.query('SELECT * FROM mail_templates WHERE template_key = $1 LIMIT 1', [templateKey]);
+    return res.rows[0] || null;
   }
 
   async updateMailTemplate(templateKey: string, payload: { subject?: string; body?: string; enabled?: boolean }) {

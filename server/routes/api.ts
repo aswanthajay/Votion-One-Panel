@@ -358,15 +358,7 @@ apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, ma
     if (token) {
       const appUrl = process.env.PUBLIC_APP_URL || 'http://localhost:3000';
       const resetUrl = `${appUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
-      const html = `
-        <div style="font-family: sans-serif; color: #1a1a1a;">
-          <h2>Password Reset Request</h2>
-          <p>A password reset was requested for your Stellar Panel account.</p>
-          <p><a href="${resetUrl}">Reset your password</a>. This link expires in 15 minutes and can be used once.</p>
-          <p>If you did not initiate this request, no further action is required.</p>
-        </div>
-      `;
-      await emailService.sendEmail(email, 'Stellar Panel Password Reset', html);
+      await emailService.sendPasswordReset(email, resetUrl);
     }
   }
   res.json({ success: true, message: 'If an account exists, password reset instructions have been sent.' });
