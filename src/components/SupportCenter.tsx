@@ -183,7 +183,7 @@ export const SupportCenter: React.FC<SupportCenterProps> = ({ userRole }) => {
   };
 
   return (
-    <main className="app-content min-w-0 px-4 pb-8 pt-5 sm:px-6 lg:px-8">
+    <main className="support-center app-content min-w-0 px-4 pb-8 pt-5 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-[1560px] flex-col gap-5">
         <section className="rounded-xl border border-[#dedfdf] bg-white p-5 shadow-[0_1px_2px_rgba(26,26,26,0.04)] sm:p-6">
           <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
