@@ -279,7 +279,9 @@ export async function generateMetricsReportPdf(opts: {
   // ---------- SECTION 3: CLUSTER OVERVIEW ----------
   sectionHeader(doc, '3', 'Cluster-wide performance', `Aggregated across ${vms.length} assigned VMs for the selected window. Sparklines show the trend — an upward slope means growing load.`);
   // compute cluster aggregates from adminHist
-  let cpuVals: number[] = [], ramVals: number[] = [], inVals: number[] = [], outVals: number[] = [], dR = 0, dW = 0;
+  const cpuVals: number[] = [];
+  const ramVals: number[] = [];
+  let inVals: number[] = [], outVals: number[] = [], dR = 0, dW = 0;
   adminHist.forEach((r: any) => {
     cpuVals.push(Number(r.cpu_pct) || 0);
     ramVals.push(Number(r.ram_bytes) || 0);
