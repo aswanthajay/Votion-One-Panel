@@ -307,6 +307,7 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
 
     let allPveVMs: PveVmResource[] = [];
     for (const conn of conns) {
+      let connectionHasInventory = false;
       try {
         const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
 const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/cluster/resources?type=vm`, {
@@ -315,14 +316,20 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/clus
         });
         if (res.ok) {
           const json = await readPveJson<PveVmResource[]>(res);
-          allPveVMs = allPveVMs.concat(json.data || []);
+          const connectionVms = (json.data || []).map((vm: any) => ({
+            ...vm,
+            proxmoxConnectionId: conn.id,
+            proxmoxConnectionName: conn.name,
+          }));
+          allPveVMs = allPveVMs.concat(connectionVms);
+          connectionHasInventory = connectionVms.length > 0;
         }
       } catch (e) {
         console.error('Failed to fetch VMs from cluster', e);
       }
 
       // If cluster endpoint failed, try fetching per-node
-      if (allPveVMs.length === 0) {
+      if (!connectionHasInventory) {
         try {
           const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
 const nodesRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes`, {
@@ -339,7 +346,9 @@ const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
               });
               if (qemuRes.ok) {
                 const qemuJson = await readPveJson<PveVmResource[]>(qemuRes);
-                allPveVMs = allPveVMs.concat((qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node })));
+                const qemuVms = (qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node, proxmoxConnectionId: conn.id, proxmoxConnectionName: conn.name }));
+                allPveVMs = allPveVMs.concat(qemuVms);
+                connectionHasInventory = connectionHasInventory || qemuVms.length > 0;
               }
               // Fetch LXC
 const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/lxc`, {
@@ -348,7 +357,9 @@ const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/n
               });
               if (lxcRes.ok) {
                 const lxcJson = await readPveJson<PveVmResource[]>(lxcRes);
-                allPveVMs = allPveVMs.concat((lxcJson.data || []).map((v: any) => ({ ...v, type: 'lxc', node: node.node })));
+                const lxcVms = (lxcJson.data || []).map((v: any) => ({ ...v, type: 'lxc', node: node.node, proxmoxConnectionId: conn.id, proxmoxConnectionName: conn.name }));
+                allPveVMs = allPveVMs.concat(lxcVms);
+                connectionHasInventory = connectionHasInventory || lxcVms.length > 0;
               }
             }
           }
@@ -363,15 +374,17 @@ const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/n
 
     // Enrich VMs that have no real OS metadata: pull the guest config (ostype) from Proxmox.
     // This resolves the dashboard rows that currently display 'Unknown' as the OS.
-    const vmIdsNeedingOs = allPveVMs.filter(p => !dbVms.find(db => db.vmid === p.vmid)?.os || /^Unknown$/i.test(dbVms.find(db => db.vmid === p.vmid)?.os || ''));
-    const pveHost = conns[0].host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const pveToken = `${conns[0].token_id}=${conns[0].token_secret}`;
-    const osByVmid: Record<number, string> = {};
+    const vmIdsNeedingOs = allPveVMs.filter(p => !dbVms.find(db => db.vmid === p.vmid && db.proxmoxConnectionId === p.proxmoxConnectionId)?.os || /^Unknown$/i.test(dbVms.find(db => db.vmid === p.vmid && db.proxmoxConnectionId === p.proxmoxConnectionId)?.os || ''));
+    const osByIdentity: Record<string, string> = {};
     for (const p of vmIdsNeedingOs) {
       try {
-const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/api2/json/nodes/${p.node}/${p.type}/${p.vmid}/config`, {
+        const connection = conns.find(candidate => candidate.id === p.proxmoxConnectionId);
+        if (!connection) continue;
+        const pveHost = connection.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const pveToken = `${connection.token_id}=${connection.token_secret}`;
+const cfgRes = await proxmoxFetch(`https://${pveHost}:${connection.port || 8006}/api2/json/nodes/${p.node}/${p.type}/${p.vmid}/config`, {
           headers: { 'Authorization': `PVEAPIToken=${pveToken}` },
-          sslFingerprint: conns[0].ssl_fingerprint,
+          sslFingerprint: connection.ssl_fingerprint,
         });
         if (cfgRes.ok) {
           const cfgJson = await readPveJson<PveConfig>(cfgRes);
@@ -383,7 +396,7 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
             w2k12: 'Windows Server 2012', w2k16: 'Windows Server 2016', w2k19: 'Windows Server 2019',
             solaris: 'Solaris', other: 'Other OS',
           };
-          if (ostype) osByVmid[p.vmid] = ostypes[ostype] || ostype;
+          if (ostype) osByIdentity[`${p.proxmoxConnectionId}:${p.vmid}`] = ostypes[ostype] || ostype;
         }
       } catch (e) { /* keep Unknown, skip enrichment on failure */ }
     }
@@ -403,8 +416,8 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
     parentIps.push('103.118.182.14');
     // Merge Proxmox live VM data with DB allocations
     return allPveVMs.map(pve => {
-      const dbMatch = dbVms.find(db => db.vmid === pve.vmid);
-      const detectedOs = osByVmid[pve.vmid];
+      const dbMatch = dbVms.find(db => db.vmid === pve.vmid && db.proxmoxConnectionId === pve.proxmoxConnectionId);
+      const detectedOs = osByIdentity[`${pve.proxmoxConnectionId}:${pve.vmid}`];
       let safeIp = dbMatch?.ipAddress || '';
       
       // Strict scrubbing: if the DB IP contains any part of a parent host IP, wipe it.
@@ -412,6 +425,9 @@ const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/a
 
       return {
         vmid: pve.vmid,
+        vmKey: `${pve.proxmoxConnectionId || 'unassigned'}:${pve.node || 'unknown'}:${pve.vmid}`,
+        proxmoxConnectionId: pve.proxmoxConnectionId || null,
+        proxmoxConnectionName: pve.proxmoxConnectionName || 'Unassigned location',
         name: dbMatch?.name || pve.name,
         type: pve.type === 'qemu' ? 'qemu' : 'lxc',
         node: pve.node || (dbMatch?.node || 'stellar-node-01'),

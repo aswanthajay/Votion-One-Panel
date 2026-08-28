@@ -49,6 +49,8 @@ export interface ApiClusterOverview {
 }
 
 export interface ApiVM {
+  /** Stable identity: connection ID + node + VMID. VMID alone is not globally unique. */
+  vmKey?: string;
   vmid: number;
   name: string;
   type: 'qemu' | 'lxc';
