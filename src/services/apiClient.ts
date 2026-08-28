@@ -1,6 +1,6 @@
 /**
  * Production API Client for Stellar Panel
- * Connects Vite React Frontend directly to Express Backend Server (http://localhost:5000/api/v1)
+ * Connects the Vite React frontend to the Express backend through the deployment-aware API base URL.
  * with automated retries, JWT authorization header injection, and persistent database store.
  */
 
