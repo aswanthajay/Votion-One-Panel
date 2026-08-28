@@ -198,12 +198,15 @@ export class DatabaseService {
     // The old expiry-only loop is intentionally removed so an expired date alone
     // cannot silently suspend a VM outside the configured payment policy.
 
-    // Telemetry cleanup job (Runs every hour)
-    setInterval(async () => {
+    // Telemetry cleanup job (runs every hour). Unref keeps the job active in the
+    // application server without preventing one-off migration and verification
+    // commands from exiting after their database work completes.
+    const telemetryCleanupTimer = setInterval(async () => {
       try {
         await pgPool.query("DELETE FROM vm_metrics WHERE timestamp < NOW() - INTERVAL '7 days'");
       } catch (err) {}
     }, 3600000);
+    telemetryCleanupTimer.unref();
   }
 
   // ============ ALERT RULES ============
