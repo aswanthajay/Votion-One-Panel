@@ -23,14 +23,14 @@ adminRouter.post('/operator-access', async (req, res) => {
 
 adminRouter.get('/reimage-requests', async (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-  if (status && !new Set(['pending', 'approved', 'rejected', 'cancelled']).has(status)) {
+  if (status && !new Set(['pending', 'approved', 'rejected', 'cancelled', 'completed']).has(status)) {
     return res.status(400).json({ success: false, error: 'Unsupported reimage request status' });
   }
   const data = await dbService.getReimageRequests({ status });
   res.json({
     success: true,
     data,
-    message: 'Approval queue only. No Proxmox operation is performed by this endpoint.',
+    message: 'Manual approval queue only. Administrators perform the OS change separately and mark approved requests completed here.',
   });
 });
 
@@ -51,8 +51,23 @@ adminRouter.post('/reimage-requests/:requestId/review', async (req, res) => {
     success: true,
     data: request,
     message: decision === 'approved'
-      ? 'Request approved for a separate operator execution step. No Proxmox operation has started.'
+      ? 'Request approved for manual administrator processing. No Proxmox operation has started.'
       : 'Request rejected. No Proxmox operation was performed.',
+  });
+});
+
+adminRouter.post('/reimage-requests/:requestId/complete', async (req, res) => {
+  const completedBy = req.authUser?.email;
+  if (!completedBy) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const completionNote = typeof req.body?.completionNote === 'string' ? req.body.completionNote.trim().slice(0, 2000) : undefined;
+  const request = await dbService.completeReimageRequest(req.params.requestId, completedBy, completionNote);
+  if (!request) {
+    return res.status(409).json({ success: false, error: 'Only an approved reimage request can be marked completed.' });
+  }
+  res.json({
+    success: true,
+    data: request,
+    message: 'Request marked completed after manual administrator action. No automated Proxmox operation was performed.',
   });
 });
 

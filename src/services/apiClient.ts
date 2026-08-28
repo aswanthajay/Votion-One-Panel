@@ -455,13 +455,16 @@ export interface ApiReimageRequest {
   ownerEmail?: string;
   requesterEmail: string;
   requestedOs: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
   requesterNote?: string;
   reviewerEmail?: string;
   reviewerNote?: string;
   createdAt: string;
   reviewedAt?: string;
   cancelledAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  completionNote?: string;
 }
 
 export type ReimageExecutionState = 'created' | 'preflight_passed' | 'awaiting_confirmation' | 'queued' | 'processing' | 'verifying' | 'awaiting_cutover_confirmation' | 'cutover_processing' | 'completed' | 'failed' | 'blocked' | 'cancelled';
@@ -687,6 +690,19 @@ class ApiClient {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
       throw new Error(data.error || `Reimage request review failed (HTTP ${res.status})`);
+    }
+    return data as { success: true; message: string; data: ApiReimageRequest };
+  }
+
+  async completeAdminReimageRequest(requestId: string, completionNote?: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/reimage-requests/${encodeURIComponent(requestId)}/complete`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ completionNote }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Unable to complete reimage request (HTTP ${res.status})`);
     }
     return data as { success: true; message: string; data: ApiReimageRequest };
   }

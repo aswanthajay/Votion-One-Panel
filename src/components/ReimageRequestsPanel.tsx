@@ -7,6 +7,7 @@ type QueueFilter = 'all' | ApiReimageRequest['status'];
 const statusClass: Record<ApiReimageRequest['status'], string> = {
   pending: 'border-[#f0c36d] bg-[#fffaf0] text-[#7a4b00]',
   approved: 'border-[#b7dfcf] bg-[#f1fbf7] text-[#146c4a]',
+  completed: 'border-[#bfd7f1] bg-[#f4f8fd] text-[#245b91]',
   rejected: 'border-[#f0c6c2] bg-[#fff5f4] text-[#8f1d14]',
   cancelled: 'border-[#dedfdf] bg-[#f7f7f6] text-[#656b6b]',
 };
@@ -20,6 +21,9 @@ export const ReimageRequestsPanel: React.FC = () => {
   const [reviewTarget, setReviewTarget] = useState<{ request: ApiReimageRequest; decision: ReviewDecision } | null>(null);
   const [reviewerNote, setReviewerNote] = useState('');
   const [isReviewing, setIsReviewing] = useState(false);
+  const [completionTarget, setCompletionTarget] = useState<ApiReimageRequest | null>(null);
+  const [completionNote, setCompletionNote] = useState('');
+  const [isCompleting, setIsCompleting] = useState(false);
 
   const loadRequests = async () => {
     setIsLoading(true);
@@ -41,6 +45,27 @@ export const ReimageRequestsPanel: React.FC = () => {
   const openReview = (request: ApiReimageRequest, decision: ReviewDecision) => {
     setReviewerNote('');
     setReviewTarget({ request, decision });
+  };
+
+  const openCompletion = (request: ApiReimageRequest) => {
+    setCompletionTarget(request);
+    setCompletionNote('');
+  };
+
+  const submitCompletion = async () => {
+    if (!completionTarget || isCompleting) return;
+    setIsCompleting(true);
+    try {
+      const result = await apiClient.completeAdminReimageRequest(completionTarget.id, completionNote);
+      setRequests(prev => prev.map(request => request.id === result.data.id ? result.data : request));
+      setCompletionTarget(null);
+      setCompletionNote('');
+      setNotice(result.message);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Unable to complete the reimage request.');
+    } finally {
+      setIsCompleting(false);
+    }
   };
 
   const submitReview = async () => {
@@ -66,7 +91,7 @@ export const ReimageRequestsPanel: React.FC = () => {
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#656b6b]">Operations governance</p>
           <h1 className="mt-1 text-3xl font-normal text-[#1a1a1a]">OS reimage requests</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#656b6b]">
-            Review client requests before any separate operator execution. Approving a request records authorization only; it never calls Proxmox or starts a reimage.
+            Review client requests, perform approved OS changes manually in Proxmox, then record completion here. This workflow never performs automated reimaging.
           </p>
         </div>
         <button type="button" onClick={() => void loadRequests()} className="rounded border border-[#dedfdf] px-3 py-2 text-xs font-semibold text-[#1a1a1a] hover:bg-[#fbfaf9] cursor-pointer">
@@ -95,6 +120,7 @@ export const ReimageRequestsPanel: React.FC = () => {
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
               <option value="cancelled">Cancelled</option>
+              <option value="completed">Completed</option>
             </select>
           </label>
         </div>
@@ -150,6 +176,13 @@ export const ReimageRequestsPanel: React.FC = () => {
                           <button type="button" onClick={() => openReview(request, 'rejected')} className="rounded border border-[#f0c6c2] px-2.5 py-1.5 font-semibold text-[#8f1d14] hover:bg-[#fff5f4] cursor-pointer">Reject</button>
                           <button type="button" onClick={() => openReview(request, 'approved')} className="rounded bg-[#1a1a1a] px-2.5 py-1.5 font-semibold text-white hover:bg-black cursor-pointer">Approve</button>
                         </div>
+                      ) : request.status === 'approved' ? (
+                        <button type="button" onClick={() => openCompletion(request)} className="rounded bg-[#1a1a1a] px-2.5 py-1.5 font-semibold text-white hover:bg-black cursor-pointer">Mark completed</button>
+                      ) : request.status === 'completed' ? (
+                        <div className="max-w-[220px] text-left text-[#656b6b]">
+                          <span className="font-semibold text-[#245b91]">Manual change recorded</span>
+                          {request.completionNote && <p className="mt-1 leading-5">{request.completionNote}</p>}
+                        </div>
                       ) : (
                         <span className="text-[#656b6b]">Reviewed</span>
                       )}
@@ -161,6 +194,23 @@ export const ReimageRequestsPanel: React.FC = () => {
           </div>
         )}
       </section>
+
+      {completionTarget && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1a1a1a]/45 p-4" role="presentation">
+          <div className="w-full max-w-md rounded-xl border border-[#dedfdf] bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="complete-reimage-title">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#656b6b]">Manual completion</p>
+            <h2 id="complete-reimage-title" className="mt-2 text-lg font-semibold text-[#1a1a1a]">Record OS change completed?</h2>
+            <p className="mt-3 text-sm leading-6 text-[#656b6b]">Confirm that an administrator manually changed the OS for <span className="font-semibold text-[#1a1a1a]">VM-{completionTarget.vmid}</span> in Proxmox.</p>
+            <div className="mt-4 rounded-lg border border-[#bfd7f1] bg-[#f4f8fd] p-3 text-xs leading-5 text-[#245b91]">This updates the panel record and audit trail only. It does not contact Proxmox or perform an automated reimage.</div>
+            <label className="mt-4 block text-xs font-semibold text-[#1a1a1a]" htmlFor="completion-note">Completion note <span className="font-normal text-[#656b6b]">(optional)</span></label>
+            <textarea id="completion-note" value={completionNote} onChange={event => setCompletionNote(event.target.value)} maxLength={2000} rows={3} className="mt-1 w-full resize-y rounded border border-[#dedfdf] p-2.5 text-xs outline-none focus:border-[#1a1a1a]" placeholder="Record the manual change, image version, and verification details." />
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setCompletionTarget(null)} disabled={isCompleting} className="rounded border border-[#dedfdf] px-4 py-2 text-xs font-semibold text-[#1a1a1a] hover:bg-[#fbfaf9] cursor-pointer disabled:opacity-50">Cancel</button>
+              <button type="button" onClick={() => void submitCompletion()} disabled={isCompleting} className="rounded bg-[#1a1a1a] px-4 py-2 text-xs font-semibold text-white hover:bg-black cursor-pointer disabled:opacity-50">{isCompleting ? 'Saving…' : 'Mark completed'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {reviewTarget && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1a1a1a]/45 p-4" role="presentation">

@@ -1068,6 +1068,9 @@ export class DatabaseService {
       createdAt: row.created_at,
       reviewedAt: row.reviewed_at || undefined,
       cancelledAt: row.cancelled_at || undefined,
+      completedAt: row.completed_at || undefined,
+      completedBy: row.completed_by || undefined,
+      completionNote: row.completion_note || undefined,
     };
   }
 
@@ -1420,6 +1423,51 @@ export class DatabaseService {
       [requestId],
     );
     return this.mapReimageRequest(detailed.rows[0]);
+  }
+
+  async completeReimageRequest(requestId: string, completedBy: string, completionNote?: string) {
+    const email = completedBy.toLowerCase().trim();
+    const note = completionNote?.trim().slice(0, 2000) || null;
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `UPDATE vm_reimage_requests
+         SET status = 'completed', completed_at = NOW(), completed_by = $2, completion_note = $3
+         WHERE id = $1 AND status = 'approved'
+         RETURNING *`,
+        [requestId, email, note],
+      );
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const row = result.rows[0];
+      await client.query(
+        `UPDATE vms SET os_type = $1 WHERE vmid = $2`,
+        [row.requested_os, row.vmid],
+      );
+      await client.query('COMMIT');
+      await this.logAudit(
+        email,
+        'COMPLETE_REIMAGE_REQUEST',
+        `VMID ${row.vmid}`,
+        `Marked OS reimage request ${requestId} completed after manual administrator action. No automated Proxmox operation was performed.`,
+      );
+      const detailed = await pgPool.query(
+        `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email
+         FROM vm_reimage_requests r
+         JOIN vms v ON v.vmid = r.vmid
+         WHERE r.id = $1`,
+        [requestId],
+      );
+      return this.mapReimageRequest(detailed.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async reinstallVMOS(vmid: number, osType: string, userEmail: string = 'client@votioncloud.org') {
