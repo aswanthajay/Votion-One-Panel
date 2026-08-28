@@ -53,11 +53,36 @@ At minimum, configure these Pterodactyl variables:
 
 Do not put credentials in the startup command, repository URL, or public install script.
 
-The Generic Node.js Egg installation flow normally runs `npm install --production`.[1] That is appropriate for the running application but means development-only tools such as ESLint, Vitest, and Vite may not exist inside the production container. The application runtime must therefore include `tsx` in production dependencies; this repository is configured accordingly. Therefore, the legacy database cleanup is a **one-time maintenance action**, not an application startup action.
+The Generic Node.js Egg installation flow normally runs `npm install --production`.[1] This application also needs a frontend build, and Vite is a development dependency, so the one-time installation step must install all dependencies, build the frontend, and only then start the runtime. The application runtime itself includes `tsx` in production dependencies. Therefore, the legacy database cleanup is a **one-time maintenance action**, not an application startup action.
+
+From `/home/container`, the initial deployment sequence is:
+
+```bash
+npm install
+npm run build
+npm run start
+```
+
+After `npm run build` succeeds, `/home/container/dist/index.html` must exist. Do not use `npm install --omit=dev` before the build; it omits Vite and the TypeScript build tooling. If you later prune development dependencies, keep the already-built `dist/` directory and the production `tsx` dependency.
 
 ## Pterodactyl cleanup procedure
 
-Upload or deploy the repository first, stop the server, and take a Pterodactyl backup/snapshot. Then run this once from `/home/container`:
+Upload or deploy the repository first, stop the server, and take a Pterodactyl backup/snapshot. The repository does not include the ignored `dist/` directory, so build it before starting. From `/home/container`, run:
+
+```bash
+npm install
+npm run build
+```
+
+Verify the frontend exists:
+
+```bash
+test -f dist/index.html && echo "frontend build is ready"
+```
+
+Then start the application with `npm run start`. If the server reports `ENOENT: no such file or directory, stat '/home/container/dist/index.html'`, return to `/home/container` and rerun `npm install` followed by `npm run build`.
+
+For the legacy cleanup itself, run this once:
 
 ```bash
 node scripts/cleanup-legacy-database.mjs
