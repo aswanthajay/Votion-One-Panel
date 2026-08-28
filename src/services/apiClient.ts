@@ -1946,9 +1946,13 @@ class ApiClient {
         headers: this.getHeaders(),
         body: JSON.stringify({ testEmail }),
       });
-      return await res.json();
-    } catch {
-      return { success: false, error: 'Network error sending test email.' };
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        return { success: false, error: data.error || data.message || `SMTP test failed (HTTP ${res.status}).` };
+      }
+      return data;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unable to reach the Votion API while testing SMTP.' };
     }
   }
 

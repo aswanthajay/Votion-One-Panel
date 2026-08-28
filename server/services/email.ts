@@ -78,6 +78,10 @@ class EmailService {
     void this.refreshTransporter();
   }
 
+  isReady(): boolean {
+    return this.isEnabled && this.transporter !== null;
+  }
+
   async refreshTransporter() {
     try {
       const config = await dbService.getSystemSetting('smtp_config');

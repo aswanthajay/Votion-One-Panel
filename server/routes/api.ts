@@ -1708,7 +1708,7 @@ apiRouter.post('/admin/settings/smtp', async (req, res) => {
     await dbService.updateSystemSetting('smtp_config', config);
     // Re-init the email service transporter with new settings
     if (typeof emailService.refreshTransporter === 'function') {
-      emailService.refreshTransporter();
+      await emailService.refreshTransporter();
     }
     await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_SMTP_CONFIG', 'system', 'SMTP configuration updated');
     res.json({ success: true, message: 'SMTP configuration saved and applied' });
@@ -1723,12 +1723,15 @@ apiRouter.post('/admin/settings/smtp/test', async (req, res) => {
     if (!testEmail) {
       return res.status(400).json({ success: false, error: 'testEmail is required' });
     }
-    const success = await emailService.sendEmail(testEmail, 'Stellar Panel SMTP Test', '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Stellar Panel SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Stellar Panel</p></div>');
+    if (!emailService.isReady()) {
+      return res.status(503).json({ success: false, error: 'SMTP is disabled or has not initialized. Save an enabled SMTP configuration first.' });
+    }
+    const success = await emailService.sendEmail(testEmail, 'Votion One SMTP Test', '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Votion One SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Votion One</p></div>');
     if (success) {
       await dbService.logAudit(req.authUser?.email || 'unknown', 'SMTP_TEST', testEmail, 'SMTP test email sent');
       res.json({ success: true, message: 'Test email sent successfully' });
     } else {
-      res.status(500).json({ success: false, error: 'Failed to send test email. Check your SMTP configuration and server logs.' });
+      res.status(502).json({ success: false, error: 'SMTP provider rejected the test message. Check the host, port, encryption mode, credentials, and sender address in the server logs.' });
     }
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
