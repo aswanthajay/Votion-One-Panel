@@ -10,6 +10,11 @@ interface MailTemplate {
   updated_at?: string;
 }
 
+interface PlatformSettings {
+  faviconUrl: string;
+  timezone: string;
+}
+
 interface MailNotifs {
   smtp_enabled?: boolean;
   alert_emails?: string;
@@ -43,7 +48,7 @@ const friendlyKey = (key: string): string => {
 };
 
 export const SystemSettings: React.FC = () => {
-  const [tab, setTab] = useState<'smtp' | 'templates' | 'notifications'>('smtp');
+  const [tab, setTab] = useState<'platform' | 'smtp' | 'templates' | 'notifications'>('platform');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -70,6 +75,8 @@ export const SystemSettings: React.FC = () => {
   // Notifications
   const [notifs, setNotifs] = useState<MailNotifs>({});
   const [notifsSaving, setNotifsSaving] = useState(false);
+  const [platform, setPlatform] = useState<PlatformSettings>({ faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' });
+  const [platformSaving, setPlatformSaving] = useState(false);
 
   const show = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -79,6 +86,8 @@ export const SystemSettings: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
+        const platformResponse = await apiClient.getPlatformSettings();
+        if (platformResponse.success && platformResponse.data) setPlatform(platformResponse.data);
         const smtp = await apiClient.getSmtpConfig();
         if (smtp.success && smtp.data) setConfig(smtp.data);
         const tpl = await apiClient.getMailTemplates();
@@ -169,6 +178,26 @@ export const SystemSettings: React.FC = () => {
     }
   };
 
+  const handleSavePlatform = async () => {
+    setPlatformSaving(true);
+    try {
+      const res = await apiClient.savePlatformSettings(platform);
+      if (res.success && res.data) {
+        setPlatform(res.data);
+        document.documentElement.dataset.timezone = res.data.timezone;
+        const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+        if (favicon) favicon.href = res.data.faviconUrl;
+        show('success', 'Platform branding and timezone saved.');
+      } else {
+        show('error', res.error || 'Failed to save platform settings.');
+      }
+    } catch {
+      show('error', 'Network error saving platform settings.');
+    } finally {
+      setPlatformSaving(false);
+    }
+  };
+
   const handleSaveNotifs = async () => {
     setNotifsSaving(true);
     try {
@@ -190,6 +219,7 @@ export const SystemSettings: React.FC = () => {
   }
 
   const tabs = [
+    { key: 'platform', label: 'Platform' },
     { key: 'smtp', label: 'SMTP Server' },
     { key: 'templates', label: 'Mail Templates' },
     { key: 'notifications', label: 'Notifications' },
@@ -222,6 +252,51 @@ export const SystemSettings: React.FC = () => {
       {message && (
         <div className={`mb-6 p-4 text-sm font-medium border rounded-lg ${message.type === 'success' ? 'bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0]' : 'bg-[#fef2f2] text-[#dc2626] border-[#fecaca]'}`}>
           {message.type === 'success' ? '✓ ' : '⚠ '}{message.text}
+        </div>
+      )}
+
+      {/* ================= PLATFORM TAB ================= */}
+      {tab === 'platform' && (
+        <div className="bg-ink-card border border-[#dedfdf] rounded-xl shadow-sm overflow-hidden mb-8">
+          <div className="px-6 py-5 border-b border-[#dedfdf] bg-[#fbfaf9]">
+            <h2 className="text-base font-bold text-[#1a1a1a]">Platform Identity &amp; Timezone</h2>
+            <p className="text-xs text-[#656b6b] mt-1">Control the browser badge and the timezone used for platform timestamps.</p>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Favicon URL</label>
+              <input
+                type="url"
+                value={platform.faviconUrl}
+                onChange={(e) => setPlatform({ ...platform, faviconUrl: e.target.value })}
+                className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
+                placeholder="/favicon.svg or https://cdn.example.com/favicon.png"
+                spellCheck={false}
+              />
+              <p className="mt-1.5 text-xs text-[#656b6b]">Use a same-origin path such as <code>/favicon.svg</code> or an HTTPS image URL. Unsafe URL schemes are rejected.</p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Display timezone</label>
+              <input
+                type="text"
+                list="votion-timezones"
+                value={platform.timezone}
+                onChange={(e) => setPlatform({ ...platform, timezone: e.target.value })}
+                className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
+                placeholder="Asia/Kolkata"
+                spellCheck={false}
+              />
+              <datalist id="votion-timezones">
+                {['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney', 'UTC'].map((zone) => <option key={zone} value={zone} />)}
+              </datalist>
+              <p className="mt-1.5 text-xs text-[#656b6b]">Use an IANA timezone identifier. Example: <code>Asia/Kolkata</code>.</p>
+            </div>
+            <div className="flex items-end justify-end">
+              <button type="button" onClick={handleSavePlatform} disabled={platformSaving} className="btn-primary px-6 py-2 cursor-pointer disabled:opacity-60">
+                {platformSaving ? 'Saving…' : 'Save Platform Settings'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

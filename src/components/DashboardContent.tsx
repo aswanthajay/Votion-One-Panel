@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { TextInput } from '@tremor/react';
 import { TelemetryChart } from './TelemetryChart';
 import { apiClient, ApiAccount, ApiVM, ApiSupportTicket, ApiClusterOverview, ApiReimageRequest, ApiNotification } from '../services/apiClient';
+import { formatDate, formatTime } from '../services/dateTime';
 
 interface StellarNode {
   id: string;
@@ -263,7 +264,7 @@ export const DashboardContent: React.FC<{
           <p className="mt-2 text-xs font-semibold text-[#2563eb]">Scope: {workspaceName}</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-[#656b6b]">
-          <span>{lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Waiting for telemetry'}</span>
+          <span>{lastUpdated ? `Updated ${formatTime(lastUpdated, { hour: '2-digit', minute: '2-digit' })}` : 'Waiting for telemetry'}</span>
           <button type="button" onClick={loadData} disabled={isLoading} className="btn-secondary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50">{isLoading ? 'Refreshing…' : 'Refresh'}</button>
         </div>
       </div>
@@ -528,7 +529,7 @@ export const DashboardContent: React.FC<{
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <span className={`text-[13px] font-sans font-medium ${vm.expiryDate && new Date(vm.expiryDate) < new Date() ? 'text-[#dc2626]' : 'text-[#1a1a1a]'}`}>
-                      {vm.expiryDate ? new Date(vm.expiryDate).toLocaleDateString() : '2026-03-15'}
+                      {vm.expiryDate ? formatDate(vm.expiryDate) : '2026-03-15'}
                     </span>
                   </td>
                   <td className="px-4 py-4">
@@ -591,7 +592,7 @@ export const DashboardContent: React.FC<{
             <form onSubmit={handleExtendExpirySubmit} className="flex flex-col gap-3 text-xs">
               <div>
                 <label className="block font-semibold mb-1">Current Expiry Date</label>
-                <input type="text" value={new Date(selectedVmForAction.expiryDate || Date.now()).toLocaleDateString()} disabled className="w-full p-2 bg-[#f1f1f1] border border-[#dedfdf] rounded text-[#1a1a1a]/60 font-mono" />
+                <input type="text" value={formatDate(selectedVmForAction.expiryDate || Date.now())} disabled className="w-full p-2 bg-[#f1f1f1] border border-[#dedfdf] rounded text-[#1a1a1a]/60 font-mono" />
               </div>
               <div>
                 <label className="block font-semibold mb-1">Additional Renewal Days</label>

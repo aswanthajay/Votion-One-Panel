@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan, ApiVmBillingProfile } from '../services/apiClient';
+import { formatDate, formatTime } from '../services/dateTime';
 
 /*
   OVERVIEW — v3 (editorial Carta Ink redesign)
@@ -348,7 +349,7 @@ export const OverviewDashboard: React.FC<{
       projectedMonthlyLabel,
       hasCompleteBillingProfiles,
       ceilings,
-      nextPayment: nextInvoice ? new Date(nextInvoice.dueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase() : '—',
+      nextPayment: nextInvoice ? formatDate(nextInvoice.dueAt, { month: 'short', day: 'numeric' }).toUpperCase() : '—',
       outstandingCents: billingSummary?.outstandingCents || 0,
       overdueCount: billingSummary?.overdueCount || 0,
       overdueCents: billingSummary?.overdueCents || 0,
@@ -723,7 +724,7 @@ export const OverviewDashboard: React.FC<{
               <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
                 {audit.slice(0, 12).map(a => (
                   <div key={a.id} className="flex items-start gap-2 text-[11px]">
-                    <span className="font-mono text-[10px] text-[#a0a1a2] shrink-0 w-14">{new Date(a.timestamp).toLocaleTimeString('en-GB')}</span>
+                    <span className="font-mono text-[10px] text-[#a0a1a2] shrink-0 w-14">{formatTime(a.timestamp, { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                     <span className="flex-1">
                       <span className="text-[#1a1a1a]">{customerAuditDetail(a)}</span>
                       {a.status === 'failed' && <span className="text-[9px] font-bold uppercase bg-[#1a1a1a] text-white px-1 py-0.5 rounded ml-1">Failed</span>}

@@ -431,7 +431,30 @@ const AppRouter: React.FC = () => {
   return <AppShell />;
 };
 
-export const App: React.FC = () => (
+export const App: React.FC = () => {
+  useEffect(() => {
+    let active = true;
+    void apiClient.getPublicPlatformSettings().then((response) => {
+      if (!active || !response?.success || !response.data) return;
+      const { faviconUrl, timezone } = response.data;
+      if (typeof timezone === 'string' && timezone) {
+        document.documentElement.dataset.timezone = timezone;
+      }
+      if (typeof faviconUrl === 'string' && faviconUrl) {
+        let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+        if (!favicon) {
+          favicon = document.createElement('link');
+          favicon.rel = 'icon';
+          document.head.appendChild(favicon);
+        }
+        favicon.type = faviconUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+        favicon.href = faviconUrl;
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  return (
   <BrowserRouter>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
@@ -443,7 +466,7 @@ export const App: React.FC = () => (
       <Route path="/legal/data-processing" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="data-processing" /></Suspense>} />
       <Route path="*" element={<AppRouter />} />
     </Routes>
-  </BrowserRouter>
-);
-
+    </BrowserRouter>
+  );
+};
 export default App;

@@ -1887,6 +1887,35 @@ class ApiClient {
     }
   }
 
+  // PLATFORM SETTINGS
+  async getPublicPlatformSettings() {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/settings/public`);
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.', data: { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' } };
+    }
+  }
+  async getPlatformSettings() {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/platform`, { headers: this.getHeaders() });
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.', data: null };
+    }
+  }
+  async savePlatformSettings(payload: { faviconUrl: string; timezone: string }) {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/platform`, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(payload),
+      });
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.' };
+    }
+  }
   // SMTP (API v1)
   async getSmtpConfig() {
     try {

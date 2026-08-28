@@ -29,8 +29,60 @@ import {
 
 export const apiRouter = Router();
 
+const DEFAULT_PLATFORM_SETTINGS = { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' };
+const isValidTimezone = (value: string): boolean => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+};
+const normalizePlatformSettings = (value: any) => {
+  const faviconUrl = typeof value?.faviconUrl === 'string' && value.faviconUrl.trim()
+    ? value.faviconUrl.trim().slice(0, 2048)
+    : DEFAULT_PLATFORM_SETTINGS.faviconUrl;
+  const timezone = typeof value?.timezone === 'string' && isValidTimezone(value.timezone.trim())
+    ? value.timezone.trim()
+    : DEFAULT_PLATFORM_SETTINGS.timezone;
+  const isSameOriginPath = faviconUrl.startsWith('/') && !faviconUrl.startsWith('//');
+  const isHttpsUrl = faviconUrl.toLowerCase().startsWith('https://');
+  if (!isSameOriginPath && !isHttpsUrl) {
+    throw new Error('faviconUrl must be a same-origin path or an HTTPS URL.');
+  }
+  return { faviconUrl, timezone };
+};
+
+// Public platform metadata contains no secrets and is used by the document shell.
+apiRouter.get('/settings/public', async (_req, res) => {
+  try {
+    const stored = await dbService.getSystemSetting('platform_settings');
+    res.json({ success: true, data: normalizePlatformSettings(stored || DEFAULT_PLATFORM_SETTINGS) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Public routes are declared explicitly below; sensitive namespaces are protected here.
 apiRouter.use('/admin', requireAuth, requireAdmin);
+apiRouter.get('/admin/settings/platform', async (_req, res) => {
+  try {
+    const stored = await dbService.getSystemSetting('platform_settings');
+    res.json({ success: true, data: normalizePlatformSettings(stored || DEFAULT_PLATFORM_SETTINGS) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+apiRouter.put('/admin/settings/platform', async (req, res) => {
+  try {
+    const settings = normalizePlatformSettings(req.body);
+    await dbService.updateSystemSetting('platform_settings', settings);
+    await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_PLATFORM_SETTINGS', 'system', 'Platform branding and timezone updated');
+    res.json({ success: true, data: settings });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'Invalid platform settings' });
+  }
+});
 apiRouter.use('/accounts', requireAuth, requireAdmin);
 apiRouter.use('/user', requireAuth);
 apiRouter.use('/support', requireAuth);
