@@ -15,7 +15,8 @@
     "migrate": "tsx server/db/migrate.ts",
     "db:verify": "tsx server/db/verify.ts",
     "db:verify:fresh": "tsx server/db/verifyFresh.ts",
-    "start": "tsx server/entry.ts"
+    "start": "tsx server/entry.ts",
+    "cleanup:legacy-db": "node scripts/cleanup-legacy-database.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.10",
