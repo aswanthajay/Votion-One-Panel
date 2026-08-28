@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import os from 'os';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -8,7 +7,7 @@ export const pgPool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: parseInt(process.env.PGPORT || '5432', 10),
   user: process.env.PGUSER || 'votion',
-  password: process.env.PGPASSWORD || 'votion_secret_2026',
+  password: process.env.PGPASSWORD,
   database: process.env.PGDATABASE || 'votion_proxmox_db',
   max: 20,
   idleTimeoutMillis: 30000,
