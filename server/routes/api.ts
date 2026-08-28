@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import { NextFunction, Request, Response, Router } from 'express';
 
+import fs from 'fs';
 import multer from 'multer';
 import os from 'os';
 
@@ -63,11 +64,42 @@ apiRouter.use(['/admin/nodes', '/admin/cluster/overview', '/vms/:vmid/action'], 
 // File upload handler (real multipart uploads to uploads/ directory)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.resolve(__dirname, '../../uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+const allowedUploadTypes = new Map([
+  ['.log', new Set(['text/plain', 'application/octet-stream'])],
+  ['.conf', new Set(['text/plain', 'application/octet-stream'])],
+  ['.json', new Set(['application/json', 'text/plain', 'application/octet-stream'])],
+  ['.txt', new Set(['text/plain', 'application/octet-stream'])],
+  ['.tar.gz', new Set(['application/gzip', 'application/x-gzip', 'application/octet-stream'])],
+]);
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${Buffer.from(file.originalname).toString('hex').slice(0, 8)}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
-export const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+const isAllowedUpload = (file: Express.Multer.File) => {
+  const originalName = file.originalname.toLowerCase();
+  const extension = originalName.endsWith('.tar.gz') ? '.tar.gz' : path.extname(originalName);
+  return Boolean(allowedUploadTypes.get(extension)?.has(file.mimetype));
+};
+export const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 10 },
+  fileFilter: (_req, file, cb) => {
+    if (!isAllowedUpload(file)) {
+      return cb(new Error('Unsupported upload type. Allowed formats: .log, .tar.gz, .conf, .json, .txt'));
+    }
+    cb(null, true);
+  },
+});
+const uploadSingleFile = (req: Request, res: Response, next: NextFunction) => {
+  upload.single('file')(req, res, (error: unknown) => {
+    if (!error) return next();
+    const message = error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+      ? 'File exceeds the 25 MB upload limit.'
+      : error instanceof Error ? error.message : 'Unable to process the uploaded file.';
+    return res.status(400).json({ success: false, error: message });
+  });
+};
 
 // Initialize Proxmox API Service instance with secure token headers
 const proxmoxService = new ProxmoxService({
@@ -642,7 +674,7 @@ apiRouter.post('/user/remote-session/disconnect', async (req, res) => {
 });
 
 // 9f. POST /api/v1/files/upload (Real multipart file upload)
-apiRouter.post('/files/upload', upload.single('file'), async (req, res) => {
+apiRouter.post('/files/upload', uploadSingleFile, async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const file = req.file as Express.Multer.File | undefined;
