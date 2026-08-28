@@ -1623,6 +1623,23 @@ class ApiClient {
     return await res.json();
   }
 
+  async verify2FA(totpCode: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/2fa/verify`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ email: this.getUserEmail(), totpCode }),
+    });
+    return await res.json();
+  }
+
+  async triggerPbsBackup() {
+    const res = await this.apiFetch(`${API_BASE_URL}/pbs/backup`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    return await res.json();
+  }
+
   async getPasskeys() {
     const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
@@ -1975,6 +1992,18 @@ class ApiClient {
   async getTelemetryHistoryFull() {
     const res = await this.apiFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
     return await res.json();
+  }
+
+  async downloadTelemetryReport(hours: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/telemetry/report?hours=${hours}`, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Telemetry report request failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stellar-performance-report-${hours}h-${Date.now()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async downloadTelemetryExport(format: 'csv' | 'json' = 'csv', range: '1h' | '24h' | '7d' = '24h') {

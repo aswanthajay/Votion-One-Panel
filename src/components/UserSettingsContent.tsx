@@ -668,12 +668,7 @@ export const UserSettingsContent: React.FC = () => {
               e.preventDefault();
               if (!inputEmail.trim()) return;
               try {
-                const res = await fetch('http://localhost:5000/api/v1/user/secondary-emails', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-                  body: JSON.stringify({ email: primaryEmail, secondaryEmail: inputEmail.trim() }),
-                });
-                const data = await res.json();
+                const data = await apiClient.addSecondaryEmail(inputEmail.trim());
                 if (data.success) {
                   setSecondaryEmails([...secondaryEmails, inputEmail.trim()]);
                   showToast(`Secondary backup email ${inputEmail.trim()} saved to PostgreSQL`);
@@ -801,12 +796,7 @@ export const UserSettingsContent: React.FC = () => {
                     return;
                   }
                   try {
-                    const res = await fetch('http://localhost:5000/api/v1/user/2fa/verify', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-                      body: JSON.stringify({ email: primaryEmail, totpCode: inputTotpCode }),
-                    });
-                    const data = await res.json();
+                    const data = await apiClient.verify2FA(inputTotpCode);
                     if (data.success && data.verified) {
                           showToast('2FA activated — the code matched your authenticator app');
                     } else {
