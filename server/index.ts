@@ -61,7 +61,14 @@ async function getProxmoxTicket(host: string, port: number, username: string, pa
 
 const app = express();
 app.disable('x-powered-by');
-const nodeEnvironment = process.env.NODE_ENV || 'development';
+const configuredNodeEnvironment = process.env.NODE_ENV?.trim().toLowerCase();
+const configuredPublicAppUrl = process.env.PUBLIC_APP_URL?.trim();
+const publicUrlIsLocal = !configuredPublicAppUrl || /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(configuredPublicAppUrl);
+const nodeEnvironment = configuredNodeEnvironment || (!publicUrlIsLocal ? 'production' : 'development');
+const isProduction = nodeEnvironment === 'production';
+if (isProduction && !configuredNodeEnvironment) {
+  console.warn('[CONFIG] NODE_ENV was not set; production mode was inferred from PUBLIC_APP_URL. Set NODE_ENV=production explicitly.');
+}
 const trustProxy = process.env.TRUST_PROXY?.trim() || 'false';
 if (trustProxy === 'true') {
   app.set('trust proxy', true);
@@ -73,16 +80,20 @@ if (trustProxy === 'true') {
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  hsts: nodeEnvironment === 'production',
+  hsts: isProduction,
 }));
 app.use(requestLogger);
-const PORT = process.env.PORT || 5000;
+const configuredPort = Number.parseInt(process.env.PORT || '5000', 10);
+if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65535) {
+  throw new Error('PORT must be an integer between 1 and 65535.');
+}
+const PORT = configuredPort;
 
-const allowedOrigins = (process.env.CORS_ORIGINS || (nodeEnvironment === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
+const allowedOrigins = (process.env.CORS_ORIGINS || (isProduction ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
-if (nodeEnvironment === 'production' && allowedOrigins.length === 0) {
+if (isProduction && allowedOrigins.length === 0) {
   throw new Error('CORS_ORIGINS must contain at least one trusted origin in production.');
 }
 
@@ -317,7 +328,7 @@ if (initialAdminBootstrap.status === 'promoted') {
 }
 if (initialAdminBootstrap.status === 'pending-configuration') {
   const setup = beginInitialAdminSetup();
-  const appUrl = (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const appUrl = (configuredPublicAppUrl || 'http://localhost:3000').replace(/\/$/, '');
   const setupLink = `${appUrl}/setup?token=${encodeURIComponent(setup.token)}`;
   log('warn', 'startup.initial_admin_pending', {
     email: initialAdminBootstrap.email,
@@ -376,7 +387,7 @@ billingWorker.start();
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);
   console.log(`🚀 Votion One™ Platform Backend Server running on port ${PORT}`);
-  console.log(`👉 API Endpoint: http://localhost:${PORT}/api/v1/health`);
+  console.log(`👉 API Endpoint: ${configuredPublicAppUrl || `http://localhost:${PORT}`}/api/v1/health`);
   console.log(`🗄️ Database: PostgreSQL + TimescaleDB (TSDB) Telemetry Layer`);
   console.log(providerCredentialsAvailable
     ? '🔐 Proxmox API Auth: configured; strict TLS fingerprint pinning enforced'
