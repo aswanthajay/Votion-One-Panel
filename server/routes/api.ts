@@ -1070,9 +1070,18 @@ apiRouter.post('/vms/:vmid/assign', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { targetEmail } = req.body;
+    const { targetEmail, expiryMode, expiryDate } = req.body;
+  if (typeof targetEmail !== 'string' || !targetEmail.trim()) return res.status(400).json({ success: false, error: 'Target account email is required' });
+  if (expiryMode !== undefined && !['keep', 'never', 'custom'].includes(expiryMode)) return res.status(400).json({ success: false, error: 'Invalid expiry mode' });
+  let normalizedExpiry: string | null | undefined;
+  if (expiryMode === 'never') normalizedExpiry = null;
+  if (expiryMode === 'custom') {
+    const parsedExpiry = typeof expiryDate === 'string' ? new Date(expiryDate) : new Date('invalid');
+    if (Number.isNaN(parsedExpiry.getTime())) return res.status(400).json({ success: false, error: 'A valid custom expiry date is required' });
+    normalizedExpiry = parsedExpiry.toISOString();
+  }
+  const vm = await dbService.assignVM(targetVmid, targetEmail, userEmail, normalizedExpiry);
 
-  const vm = await dbService.assignVM(targetVmid, targetEmail, userEmail);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} (${vm.name}) reassigned to ${vm.owner_email}`, data: vm });
   } else {

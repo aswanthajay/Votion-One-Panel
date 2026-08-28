@@ -986,7 +986,12 @@ export class DatabaseService {
   async createVM(vmData: any, userEmail: string = 'admin@votioncloud.org') {
     const vmid = Number(vmData.vmid) || Math.floor(100 + Math.random() * 900);
     const expiryDays = Number(vmData.expiryDays) || 30;
-    const expiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString();
+    const requestedExpiry = vmData.neverExpire === true
+      ? null
+      : vmData.expiryDate
+        ? new Date(vmData.expiryDate)
+        : new Date(Date.now() + expiryDays * 86400000);
+    const expiryDate = requestedExpiry === null ? null : Number.isNaN(requestedExpiry.getTime()) ? new Date(Date.now() + expiryDays * 86400000).toISOString() : requestedExpiry.toISOString();
     
     const name = vmData.name || `vm-${vmid}`;
     const type = vmData.type || 'qemu';
@@ -1008,8 +1013,15 @@ export class DatabaseService {
     return await this.getVMByVMID(vmid);
   }
 
-  async assignVM(vmid: number, targetEmail: string, userEmail: string = 'admin@votioncloud.org') {
-    const res = await pgPool.query("UPDATE vms SET owner_email = $1 WHERE vmid = $2 RETURNING *", [targetEmail.trim(), vmid]);
+  async assignVM(vmid: number, targetEmail: string, userEmail: string = 'admin@votioncloud.org', expiryDate?: string | null) {
+    const res = await pgPool.query(
+      `UPDATE vms
+       SET owner_email = $1,
+           expiry_date = CASE WHEN $3::boolean THEN NULL WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz ELSE expiry_date END
+       WHERE vmid = $2
+       RETURNING *`,
+      [targetEmail.trim(), vmid, expiryDate === null, expiryDate === null ? null : expiryDate || null],
+    );
     if ((res.rowCount ?? 0) > 0) {
       await this.logAudit(userEmail, 'REASSIGN_VM', `VMID ${vmid}`, `Reassigned to ${targetEmail}`);
       return res.rows[0];

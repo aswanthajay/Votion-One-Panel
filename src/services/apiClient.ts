@@ -1299,11 +1299,11 @@ class ApiClient {
   /**
    * Admin Reassign VM Ownership by VMID
    */
-  async assignVM(vmid: number, targetEmail: string) {
+  async assignVM(vmid: number, targetEmail: string, expiry?: { mode: 'keep' | 'never' | 'custom'; date?: string }) {
     const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/assign`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ targetEmail }),
+      body: JSON.stringify({ targetEmail, expiryMode: expiry?.mode, expiryDate: expiry?.date }),
     });
     return await res.json();
   }

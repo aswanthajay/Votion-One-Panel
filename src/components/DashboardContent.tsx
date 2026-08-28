@@ -49,8 +49,15 @@ export const DashboardContent: React.FC<{
 
   const [selectedVmForAction, setSelectedVmForAction] = useState<ApiVM | null>(null);
   const [targetAccountEmail, setTargetAccountEmail] = useState('');
+  const [assignExpiryMode, setAssignExpiryMode] = useState<'keep' | 'never' | 'custom'>('keep');
+  const [assignExpiryDate, setAssignExpiryDate] = useState('');
     const [extendDays, setExtendDays] = useState(30);
-  const visibleVms = typeFilter ? vms.filter(vm => vm.type === typeFilter) : vms;
+  const visibleVms = [...(typeFilter ? vms.filter(vm => vm.type === typeFilter) : vms)].sort((a, b) => {
+    const connectionOrder = (a.proxmoxConnectionName || 'Unassigned location').localeCompare(b.proxmoxConnectionName || 'Unassigned location');
+    if (connectionOrder !== 0) return connectionOrder;
+    const nodeOrder = a.node.localeCompare(b.node);
+    return nodeOrder !== 0 ? nodeOrder : a.vmid - b.vmid;
+  });
 
   const [selectedTargetOS, setSelectedTargetOS] = useState('Ubuntu 24.04 LTS');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -197,7 +204,10 @@ export const DashboardContent: React.FC<{
     e.preventDefault();
     if (!selectedVmForAction) return;
     try {
-      await apiClient.assignVM(selectedVmForAction.vmid, targetAccountEmail);
+      await apiClient.assignVM(selectedVmForAction.vmid, targetAccountEmail, {
+        mode: assignExpiryMode,
+        date: assignExpiryMode === 'custom' ? new Date(`${assignExpiryDate}T23:59:59`).toISOString() : undefined,
+      });
       setToastMessage(`VM ${selectedVmForAction.vmid} assigned to ${targetAccountEmail}.`);
       setModalType(null);
       loadData();
@@ -470,6 +480,7 @@ export const DashboardContent: React.FC<{
               <tr className="border-b border-[#dedfdf] bg-white">
                 <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider w-[30%]">Instance</th>
                 <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider w-[12%] whitespace-nowrap">Status</th>
+                <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider w-[18%] whitespace-nowrap">Cluster</th>
                 <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider w-[18%]">Account</th>
                 <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider w-[13%] whitespace-nowrap">Expiry</th>
                 <th className="px-4 py-3 text-xs font-bold text-[#1a1a1a] uppercase tracking-wider text-right whitespace-nowrap">Actions</th>
@@ -518,6 +529,12 @@ export const DashboardContent: React.FC<{
                     )}
                   </td>
                   <td className="px-4 py-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-[12px] font-semibold text-[#1a1a1a]" title={vm.proxmoxConnectionName || 'Unassigned location'}>{vm.proxmoxConnectionName || 'Unassigned location'}</p>
+                      <p className="truncate text-[11px] text-[#8a9090]" title={vm.node}>{vm.node}</p>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 rounded-full bg-[#fbfaf9] border border-[#dedfdf] flex items-center justify-center text-[10px] font-medium text-[#1a1a1a] uppercase shrink-0">
                         {vm.ownerEmail.charAt(0)}
@@ -529,7 +546,7 @@ export const DashboardContent: React.FC<{
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <span className={`text-[13px] font-sans font-medium ${vm.expiryDate && new Date(vm.expiryDate) < new Date() ? 'text-[#dc2626]' : 'text-[#1a1a1a]'}`}>
-                      {vm.expiryDate ? formatDate(vm.expiryDate) : '2026-03-15'}
+                      {vm.expiryDate ? formatDate(vm.expiryDate) : 'Never'}
                     </span>
                   </td>
                   <td className="px-4 py-4">
@@ -546,7 +563,7 @@ export const DashboardContent: React.FC<{
                       </button>
                       <button onClick={() => { setSelectedVmForAction(vm); setModalType('extend-expiry'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Extend</button>
                       <button onClick={() => { setSelectedVmForAction(vm); setModalType('reinstall-os'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Request OS</button>
-                      <button onClick={() => { setSelectedVmForAction(vm); setTargetAccountEmail(vm.ownerEmail); setModalType('assign-vm'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Assign</button>
+                      <button onClick={() => { setSelectedVmForAction(vm); setTargetAccountEmail(vm.ownerEmail); setAssignExpiryMode('keep'); setAssignExpiryDate(vm.expiryDate ? vm.expiryDate.slice(0, 10) : ''); setModalType('assign-vm'); }} className="btn-secondary py-1 px-2 text-[11px] whitespace-nowrap">Assign</button>
                       <button onClick={() => setConfirmTarget(vm.vmid)} className="theme-destructive-button btn-secondary py-1 px-2 text-[11px] whitespace-nowrap !text-[#dc2626] !border-[#fecaca] hover:!bg-[#fef2f2]">Remove</button>
                     </div>
                   </td>
@@ -681,6 +698,16 @@ export const DashboardContent: React.FC<{
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Service expiry</label>
+                <select value={assignExpiryMode} onChange={(e) => setAssignExpiryMode(e.target.value as 'keep' | 'never' | 'custom')} className="w-full p-2 bg-white border border-[#dedfdf] rounded-lg text-xs text-[#1a1a1a]" aria-label="Service expiry policy">
+                  <option value="keep">Keep current expiry</option>
+                  <option value="never">Never expire</option>
+                  <option value="custom">Custom expiry date</option>
+                </select>
+                {assignExpiryMode === 'custom' && <input type="date" value={assignExpiryDate} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setAssignExpiryDate(e.target.value)} className="mt-2 w-full p-2 bg-white border border-[#dedfdf] rounded-lg text-xs text-[#1a1a1a]" required aria-label="Custom expiry date" />}
+                <p className="mt-1.5 text-[11px] text-[#656b6b]">VM specifications remain sourced from the selected Proxmox inventory.</p>
               </div>
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] mt-2">
                 <button type="button" onClick={() => setModalType(null)} className="btn-secondary">Cancel</button>
