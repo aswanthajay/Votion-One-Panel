@@ -132,7 +132,9 @@ const navigateForView = (navigate: ReturnType<typeof useNavigate>, view: unknown
   const path = typeof view === 'string' && view in VIEW_PATHS
     ? VIEW_PATHS[view as ViewMode]
     : VIEW_PATHS.dashboard;
-  startTransition(() => navigate(path));
+  startTransition(() => {
+    navigate(path);
+  });
 };
 
 const RouteLoading = () => (
@@ -171,8 +173,12 @@ const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
     <Suspense fallback={<div className="min-h-screen bg-white" aria-busy="true" />}>
       <AuthPages
         initialMode={mode}
-        onNavigateToDashboard={() => startTransition(() => navigate(VIEW_PATHS.overview))}
-        onNavigateToAuth={(nextMode) => startTransition(() => navigate(AUTH_PATHS[nextMode]))}
+        onNavigateToDashboard={() => startTransition(() => {
+          navigate(VIEW_PATHS.overview);
+        })}
+        onNavigateToAuth={(nextMode) => startTransition(() => {
+          navigate(AUTH_PATHS[nextMode]);
+        })}
       />
     </Suspense>
   );
@@ -401,7 +407,9 @@ const AppRouter: React.FC = () => {
       localStorage.removeItem('votion_jwt_token');
       localStorage.removeItem('votion_user_email');
       localStorage.removeItem('votion_user_role');
-      startTransition(() => navigate(AUTH_PATHS.login, { replace: true }));
+      startTransition(() => {
+        navigate(AUTH_PATHS.login, { replace: true });
+      });
     };
 
     window.addEventListener('votion:auth-expired', handleAuthExpired);
@@ -424,7 +432,7 @@ const AppRouter: React.FC = () => {
 };
 
 export const App: React.FC = () => (
-  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+  <BrowserRouter>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/legal/terms" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="terms" /></Suspense>} />
