@@ -17,7 +17,10 @@ import { apiClient } from '../services/apiClient';
 // Types (aligned with server/adminVmFleet.ts + db/database.ts)
 // ---------------------------------------------------------------------------
 interface FleetVM {
+  vmKey: string;
   vmid: number;
+  proxmoxConnectionId: string | null;
+  proxmoxConnectionName: string;
   name: string;
   type: 'qemu' | 'lxc' | string;
   node: string;
@@ -243,11 +246,12 @@ export const AdminVMFleet: React.FC = () => {
   const [nodes, setNodes] = useState<NodeMetric[]>([]);
   const [capacity, setCapacity] = useState<NodeCapacity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actioning, setActioning] = useState<Record<number, string>>({});
+  const [actioning, setActioning] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [nodeFilter, setNodeFilter] = useState('all');
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'bad' | 'info' } | null>(null);
 
   // Modals
@@ -317,7 +321,10 @@ export const AdminVMFleet: React.FC = () => {
         const j = await vmsRes.json();
         // Normalize: /vms returns Proxmox-backed rows with ownerEmail camelCase fields
         const rows: FleetVM[] = (j.data || []).map((v: any) => ({
+          vmKey: v.vmKey ?? `${v.proxmoxConnectionId ?? 'legacy-local'}:${v.node ?? 'unknown'}:${v.vmid}`,
           vmid: v.vmid,
+          proxmoxConnectionId: v.proxmoxConnectionId ?? v.proxmox_connection_id ?? null,
+          proxmoxConnectionName: v.proxmoxConnectionName ?? v.proxmox_connection_name ?? 'Unassigned location',
           name: v.name ?? v.vm_name ?? `vm-${v.vmid}`,
           type: v.type || 'qemu',
           node: v.node || '—',
@@ -361,13 +368,23 @@ export const AdminVMFleet: React.FC = () => {
     return vms.filter(v => {
       if (statusFilter !== 'all' && (v.isSuspended ? 'suspended' : v.status.toLowerCase()) !== statusFilter) return false;
       if (nodeFilter !== 'all' && v.node !== nodeFilter) return false;
+      if (locationFilter !== 'all' && v.proxmoxConnectionId !== locationFilter) return false;
       if (q) {
-        const hay = `${v.vmid} ${v.name} ${v.ownerEmail} ${v.os} ${v.ipAddress ?? ''}`.toLowerCase();
+        const hay = `${v.vmid} ${v.vmKey} ${v.proxmoxConnectionName} ${v.name} ${v.ownerEmail} ${v.os} ${v.ipAddress ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [vms, search, statusFilter, nodeFilter]);
+  }, [vms, search, statusFilter, nodeFilter, locationFilter]);
+
+  const locationsList = useMemo(() => {
+    const locations = new Map<string, string>();
+    vms.forEach(v => { if (v.proxmoxConnectionId) locations.set(v.proxmoxConnectionId, v.proxmoxConnectionName); });
+    return Array.from(locations.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [vms]);
+
+  const assignedRows = useMemo(() => filtered.filter(vm => !/^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
+  const unassignedRows = useMemo(() => filtered.filter(vm => /^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
 
   const nodesList = useMemo(() => {
     const ids = Array.from(new Set(vms.map(v => v.node).filter(n => n && n !== '—')));
@@ -377,25 +394,25 @@ export const AdminVMFleet: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
-  const runAction = async (vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
-    setActioning(a => ({ ...a, [vmid]: action }));
+  const runAction = async (vm: FleetVM, action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
+    setActioning(a => ({ ...a, [vm.vmKey]: action }));
     try {
-      const res = await fetch(`${base}/vms/${vmid}/action`, {
+      const res = await fetch(`${base}/vms/${vm.vmid}/action`, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, proxmoxConnectionId: vm.proxmoxConnectionId }),
       });
       const j = await res.json();
       if (res.ok) {
-        flash(`VMID ${vmid} — ${action} issued. ${j.message}`, 'ok');
+        flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} — ${action} issued. ${j.message}`, 'ok');
         await fetchFleet();
       } else {
-        flash(`VMID ${vmid} — ${action} failed: ${j.error || 'Unknown error'}`, 'bad');
+        flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} — ${action} failed: ${j.error || 'Unknown error'}`, 'bad');
       }
     } catch (e: any) {
-      flash(`VMID ${vmid} — ${action} failed`, 'bad');
+      flash(`VMID ${vm.vmid} — ${action} failed`, 'bad');
     } finally {
-      setActioning(a => { const n = { ...a }; delete n[vmid]; return n; });
+      setActioning(a => { const n = { ...a }; delete n[vm.vmKey]; return n; });
     }
   };
 
@@ -415,15 +432,15 @@ export const AdminVMFleet: React.FC = () => {
     }
   };
 
-  const runUnassign = async (vmid: number) => {
-    if (!window.confirm(`Unassign VMID ${vmid}? The client loses access to this server.`)) return;
+  const runUnassign = async (vm: FleetVM) => {
+    if (!window.confirm(`Unassign VMID ${vm.vmid} from ${vm.proxmoxConnectionName}? The client loses access to this server.`)) return;
     try {
-      const res = await fetch(`${base}/vms/${vmid}/unassign`, {
+      const res = await fetch(`${base}/vms/${vm.vmid}/unassign?proxmoxConnectionId=${encodeURIComponent(vm.proxmoxConnectionId || '')}`, {
         method: 'DELETE',
         headers: apiHeaders(),
       });
       const j = await res.json();
-      if (res.ok) flash(`VMID ${vmid} unassigned — now in the free pool`, 'ok');
+      if (res.ok) flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} unassigned — now in the free pool`, 'ok');
       else flash(`Unassign failed: ${j.error}`, 'bad');
       await fetchFleet();
     } catch (e: any) {
@@ -433,9 +450,9 @@ export const AdminVMFleet: React.FC = () => {
 
   const bulkAction = async (action: 'start' | 'stop') => {
     if (selected.size === 0) { flash('Select servers first', 'info'); return; }
-    const ids = Array.from(selected);
-    flash(`Issuing ${action} on ${ids.length} server${ids.length > 1 ? 's' : ''}…`, 'info');
-    for (const id of ids) await runAction(id, action);
+    const selectedVms = vms.filter(vm => selected.has(vm.vmKey));
+    flash(`Issuing ${action} on ${selectedVms.length} server${selectedVms.length > 1 ? 's' : ''}…`, 'info');
+    for (const vm of selectedVms) await runAction(vm, action);
     setSelected(new Set());
   };
 
@@ -594,6 +611,14 @@ export const AdminVMFleet: React.FC = () => {
             <option value="all">All nodes</option>
             {nodesList.map(n => <option key={n} value={n}>{n}</option>)}
           </select>
+          <select
+            className="rounded-md border px-3 py-2 text-sm outline-none"
+            style={{ backgroundColor: '#1c1c1c', borderColor: '#313131', color: '#e8e8e8' }}
+            value={locationFilter}
+            onChange={e => setLocationFilter(e.target.value)}>
+            <option value="all">All locations</option>
+            {locationsList.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden text-xs text-[#71717a] sm:inline">{filtered.length}/{vms.length} servers</span>
             {selected.size > 0 && (
@@ -642,26 +667,35 @@ export const AdminVMFleet: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(v => {
+                {(['assigned', 'unassigned'] as const).map(section => {
+                  const rows = section === 'assigned' ? assignedRows : unassignedRows;
+                  if (rows.length === 0) return null;
+                  return <React.Fragment key={section}>
+                    <tr className="border-b" style={{ borderColor: '#313131', backgroundColor: '#1c1c1c' }}>
+                      <td colSpan={9} className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#a7aaaa]">
+                        {section === 'assigned' ? `Assigned servers · ${rows.length}` : `Unassigned servers · ${rows.length}`}
+                      </td>
+                    </tr>
+                    {rows.map(v => {
                   const memGb = Math.round((v.maxmem || 8 * 1073741824) / 1073741824);
                   const diskGb = Math.round((v.maxdisk || 64 * 1073741824) / 1073741824);
                   const isClient = /^unassigned@/i.test(v.ownerEmail || '');
                   const ex = expiryLabel(v.expiryDate, v.isSuspended);
-                  const busy = !!actioning[v.vmid];
+                  const busy = !!actioning[v.vmKey];
                   const live = v.live;
                   const memPct = live?.memPct ?? (v.memory ? Math.round((v.memory / Math.max(v.maxmem, 1)) * 100) : 0);
                   const cpuPct = live?.cpuPct ?? 0;
-                  const selectedRow = selected.has(v.vmid);
+                  const selectedRow = selected.has(v.vmKey);
 
                   return (
-                    <tr key={v.vmid} className="border-b transition-colors last:border-0"
+                    <tr key={v.vmKey} className="border-b transition-colors last:border-0"
                       style={{ borderColor: '#313131', backgroundColor: selectedRow ? '#1c1c1c' : 'transparent' }}>
                       <td className="px-3 py-3">
                         <input type="checkbox"
                           checked={selectedRow}
                           onChange={e => {
                             const n = new Set(selected);
-                            e.target.checked ? n.add(v.vmid) : n.delete(v.vmid);
+                            e.target.checked ? n.add(v.vmKey) : n.delete(v.vmKey);
                             setSelected(n);
                           }}
                           className="accent-[#5b8def]" />
@@ -671,7 +705,7 @@ export const AdminVMFleet: React.FC = () => {
                         <div className="flex flex-col">
                           <span className="font-medium text-[#e8e8e8]">{v.name}</span>
                           <span className="text-[11px] text-[#71717a]">
-                            {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
+                            {v.proxmoxConnectionName} · {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
                             {v.ipAddress ? ` · ${v.ipAddress}` : ''}
                           </span>
                         </div>
@@ -719,21 +753,21 @@ export const AdminVMFleet: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-1.5">
                           {(v.isSuspended || v.status.toLowerCase() === 'stopped') ? (
                             <ActionButton label="Start" disabled={busy} loading={busy}
-                              onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'start')}
+                              onHoverIn="#1c1c1c" onClick={() => runAction(v, 'start')}
                               tone="success" />
                           ) : (
                             <ActionButton label="Stop" disabled={busy} loading={busy}
-                              onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'stop')}
+                              onHoverIn="#1c1c1c" onClick={() => runAction(v, 'stop')}
                               tone="danger" />
                           )}
                           <ActionButton label="Reboot" disabled={busy} loading={busy}
-                            onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'reboot')}
+                            onHoverIn="#1c1c1c" onClick={() => runAction(v, 'reboot')}
                             tone="neutral" />
                           <button className="rounded border px-2 py-1 text-[11px] font-medium"
                             style={{ borderColor: '#313131', color: '#e8e8e8' }}
                             onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
                             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                            onClick={() => runAction(v.vmid, 'shutdown')}
+                            onClick={() => runAction(v, 'shutdown')}
                             title="Graceful shutdown">⏻</button>
                           <button className="rounded border px-2 py-1 text-[11px] font-medium"
                             style={{ borderColor: '#313131', color: '#5b8def' }}
@@ -746,13 +780,15 @@ export const AdminVMFleet: React.FC = () => {
                               style={{ borderColor: '#313131', color: '#a7aaaa' }}
                               onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
                               onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                              onClick={() => runUnassign(v.vmid)}
+                              onClick={() => runUnassign(v)}
                               title="Return to free pool">Free</button>
                           )}
                         </div>
                       </td>
                     </tr>
                   );
+                    })}
+                  </React.Fragment>;
                 })}
               </tbody>
             </table>

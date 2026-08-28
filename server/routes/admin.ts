@@ -75,17 +75,17 @@ adminRouter.post('/reimage-requests/:requestId/complete', async (req, res) => {
 adminRouter.post('/vms/assign', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { vmid, name, type, node, targetEmail, cpus, memoryGb, diskGb, expiryDays, os } = req.body;
+  const { vmid, name, type, node, targetEmail, cpus, memoryGb, diskGb, expiryDays, expiryDate, neverExpire, os, proxmoxConnectionId } = req.body;
   if (!targetEmail && !req.body.ownerEmail) {
     return res.status(400).json({ success: false, error: 'Target account email is required' });
   }
 
   const parsedVmid = Number(vmid) || Math.floor(100 + Math.random() * 900);
-  const existing = await dbService.getVMByVMID(parsedVmid);
+  const existing = await dbService.getVMByVMID(parsedVmid, proxmoxConnectionId || undefined);
 
   if (existing) {
     // Reassign existing VM
-    const vm = await dbService.assignVM(parsedVmid, targetEmail || req.body.ownerEmail, userEmail);
+    const vm = await dbService.assignVM(parsedVmid, targetEmail || req.body.ownerEmail, userEmail, neverExpire === true ? null : expiryDate, proxmoxConnectionId || undefined);
     return res.json({
       success: true,
       message: `Proxmox VMID ${parsedVmid} reassigned to ${targetEmail || req.body.ownerEmail}`,
@@ -104,6 +104,9 @@ adminRouter.post('/vms/assign', async (req, res) => {
     memoryGb: Number(memoryGb) || 8,
     diskGb: Number(diskGb) || 64,
     expiryDays: Number(expiryDays) || 30,
+    expiryDate,
+    neverExpire: neverExpire === true,
+    proxmoxConnectionId,
     os: os || 'Ubuntu 24.04 LTS',
   }, userEmail);
 
@@ -128,7 +131,8 @@ adminRouter.put('/vms/:vmid/expiry', async (req, res) => {
   const { additionalDays } = req.body;
 
   const days = Number(additionalDays) || 30;
-  const vm = await dbService.extendVMExpiry(vmid, days, userEmail);
+  const proxmoxConnectionId = String(req.body?.proxmoxConnectionId || '').trim() || undefined;
+  const vm = await dbService.extendVMExpiry(vmid, days, userEmail, proxmoxConnectionId);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${vmid} expiry date extended by ${days} days`, data: vm });
   } else {
@@ -142,8 +146,9 @@ adminRouter.post('/vms/:vmid/suspend', async (req, res) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const vmid = parseInt(req.params.vmid, 10);
   const { suspend } = req.body;
+  const proxmoxConnectionId = String(req.body?.proxmoxConnectionId || '').trim() || undefined;
 
-  const vm = await dbService.suspendVM(vmid, suspend === true, userEmail);
+  const vm = await dbService.suspendVM(vmid, suspend === true, userEmail, proxmoxConnectionId);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${vmid} ${suspend ? 'suspended' : 'unsuspended'}`, data: vm });
   } else {
@@ -156,8 +161,9 @@ adminRouter.delete('/vms/:vmid/unassign', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const vmid = parseInt(req.params.vmid, 10);
+  const proxmoxConnectionId = String(req.query.proxmoxConnectionId || '').trim() || undefined;
 
-  const vm = await dbService.assignVM(vmid, 'unassigned@votioncloud.org', userEmail);
+  const vm = await dbService.assignVM(vmid, 'unassigned@votioncloud.org', userEmail, undefined, proxmoxConnectionId);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${vmid} unassigned from user`, data: vm });
   } else {

@@ -110,9 +110,10 @@ export class ProxmoxSyncWorker {
     if (resources.length === 0) return;
 
     const syncResult = await dbService.upsertProxmoxVMs(resources, DEFAULT_OWNER_EMAIL);
-    const synchronizedVmids = new Set(syncResult.synchronizedVmids);
-    await dbService.insertVmMetricsBatch(resources.filter(resource => synchronizedVmids.has(resource.vmid)).map(resource => ({
+    const synchronizedVmKeys = new Set(syncResult.synchronizedVmKeys || resources.map(resource => `${resource.proxmoxConnectionId}:${resource.vmid}`));
+    await dbService.insertVmMetricsBatch(resources.filter(resource => synchronizedVmKeys.has(`${resource.proxmoxConnectionId}:${resource.vmid}`)).map(resource => ({
       vmid: resource.vmid,
+      proxmoxConnectionId: resource.proxmoxConnectionId,
       cpuPct: Number(resource.cpu || 0) * 100,
       ramBytes: Number(resource.mem || 0),
       netInBytes: Number(resource.netin || 0),

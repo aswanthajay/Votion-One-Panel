@@ -1070,7 +1070,7 @@ apiRouter.post('/vms/:vmid/assign', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-    const { targetEmail, expiryMode, expiryDate } = req.body;
+    const { targetEmail, expiryMode, expiryDate, proxmoxConnectionId } = req.body;
   if (typeof targetEmail !== 'string' || !targetEmail.trim()) return res.status(400).json({ success: false, error: 'Target account email is required' });
   if (expiryMode !== undefined && !['keep', 'never', 'custom'].includes(expiryMode)) return res.status(400).json({ success: false, error: 'Invalid expiry mode' });
   let normalizedExpiry: string | null | undefined;
@@ -1080,7 +1080,7 @@ apiRouter.post('/vms/:vmid/assign', async (req, res) => {
     if (Number.isNaN(parsedExpiry.getTime())) return res.status(400).json({ success: false, error: 'A valid custom expiry date is required' });
     normalizedExpiry = parsedExpiry.toISOString();
   }
-  const vm = await dbService.assignVM(targetVmid, targetEmail, userEmail, normalizedExpiry);
+  const vm = await dbService.assignVM(targetVmid, targetEmail, userEmail, normalizedExpiry, proxmoxConnectionId || undefined);
 
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} (${vm.name}) reassigned to ${vm.owner_email}`, data: vm });
@@ -1093,9 +1093,9 @@ apiRouter.post('/vms/:vmid/suspend', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { suspend } = req.body;
+  const { suspend, proxmoxConnectionId } = req.body;
 
-  const vm = await proxmoxService.suspendVM(targetVmid, suspend === true, userEmail);
+  const vm = await proxmoxService.suspendVM(targetVmid, suspend === true, userEmail, proxmoxConnectionId || undefined);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} ${suspend ? 'suspended' : 'unsuspended'}`, data: vm });
   } else {
@@ -1107,10 +1107,10 @@ apiRouter.post('/vms/:vmid/extend', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { additionalDays } = req.body;
+  const { additionalDays, proxmoxConnectionId } = req.body;
 
   const days = Number(additionalDays) || 30;
-  const vm = await proxmoxService.extendVMExpiry(targetVmid, days, userEmail);
+  const vm = await proxmoxService.extendVMExpiry(targetVmid, days, userEmail, proxmoxConnectionId || undefined);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} expiry date extended by ${days} days`, data: vm });
   } else {
@@ -1141,10 +1141,10 @@ apiRouter.post('/vms/:vmid/action', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { action } = req.body;
+  const { action, proxmoxConnectionId } = req.body;
 
   try {
-    const vm = await proxmoxService.executePowerAction('', targetVmid, action, userEmail);
+    const vm = await proxmoxService.executePowerAction('', targetVmid, action, userEmail, proxmoxConnectionId || undefined);
     res.json({
       success: true,
       message: `Proxmox PVE API: Task ${action.toUpperCase()} accepted for VMID ${targetVmid}; local status is now ${vm.status}`,

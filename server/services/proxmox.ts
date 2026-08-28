@@ -715,7 +715,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
                 const diskRead = json.data.diskread || 0;
                 const diskWrite = json.data.diskwrite || 0;
                 
-                await dbService.insertVmTelemetry(vm.vmid, cpuPct, ramBytes, netIn, netOut, diskRead, diskWrite);
+                await dbService.insertVmTelemetry(vm.vmid, cpuPct, ramBytes, netIn, netOut, diskRead, diskWrite, conn.id);
                 
                 // ---- Per-VM alert evaluation ----
                 const vmMaxMem = Number(vm.maxmem) || Number((vm as any).memory) || 0;

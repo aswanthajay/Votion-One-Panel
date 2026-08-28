@@ -49,8 +49,8 @@ export class ProxmoxService {
   /**
    * PHASE 2.2: Proxmox VM Power Control (Start, Stop, Shutdown, Reboot)
    */
-  async executePowerAction(node: string, vmid: number, action: 'start' | 'stop' | 'reset' | 'reboot' | 'shutdown', userEmail: string = 'system') {
-    const vm = await dbService.getVMByVMID(vmid);
+  async executePowerAction(node: string, vmid: number, action: 'start' | 'stop' | 'reset' | 'reboot' | 'shutdown', userEmail: string = 'system', proxmoxConnectionId?: string) {
+    const vm = await dbService.getVMByVMID(vmid, proxmoxConnectionId);
     if (!vm) {
       throw new Error(`Proxmox VMID ${vmid} not found on cluster.`);
     }
@@ -86,7 +86,7 @@ export class ProxmoxService {
     }
 
     const pendingStatus = action === 'stop' || action === 'shutdown' ? 'stopping' : 'starting';
-    const updated = await dbService.updateVmStatus(vmid, pendingStatus);
+    const updated = await dbService.updateVmStatus(vmid, pendingStatus, connection.id);
     await dbService.logAudit(userEmail, `VM_${action.toUpperCase()}`, `VMID ${vmid}`, `Proxmox action accepted; local status set to ${pendingStatus}`);
 
     return {
@@ -115,12 +115,12 @@ export class ProxmoxService {
   /**
    * PHASE 2.4: Admin Manual VM Suspension / Renewal Engine
    */
-  async suspendVM(vmid: number, suspend: boolean, userEmail: string) {
-    return await dbService.suspendVM(vmid, suspend, userEmail);
+  async suspendVM(vmid: number, suspend: boolean, userEmail: string, proxmoxConnectionId?: string) {
+    return await dbService.suspendVM(vmid, suspend, userEmail, proxmoxConnectionId);
   }
 
-  async extendVMExpiry(vmid: number, additionalDays: number, userEmail: string) {
-    return await dbService.extendVMExpiry(vmid, additionalDays, userEmail);
+  async extendVMExpiry(vmid: number, additionalDays: number, userEmail: string, proxmoxConnectionId?: string) {
+    return await dbService.extendVMExpiry(vmid, additionalDays, userEmail, proxmoxConnectionId);
   }
 
   /**
