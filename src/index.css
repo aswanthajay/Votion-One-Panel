@@ -1374,6 +1374,15 @@ body {
 }
 
 /* Public authentication surfaces follow the same theme tokens as the app shell. */
+.auth-grid {
+  background-image: linear-gradient(to right, rgba(17, 17, 17, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 17, 17, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+}
+
+[data-theme="dark"] .auth-grid {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
 
 [data-theme="dark"] .auth-page {
   background-color: #000000 !important;

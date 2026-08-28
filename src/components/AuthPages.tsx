@@ -1,6 +1,5 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { apiClient, API_BASE_URL } from '../services/apiClient';
-const ThreeBackground = lazy(() => import('./ThreeBackground').then(module => ({ default: module.ThreeBackground })));
 
 interface AuthPagesProps {
   initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin';
@@ -286,7 +285,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
 
   return (
     <div className="auth-page relative min-h-screen w-full font-sans bg-[#ffffff] overflow-hidden">
-      <div className="absolute inset-0 z-0 opacity-[0.12]"><Suspense fallback={<div className="absolute inset-0 bg-[#0b0f14]" aria-hidden="true" />}><ThreeBackground /></Suspense></div>
+      <div className="auth-grid absolute inset-0 z-0 opacity-[0.2]" aria-hidden="true" />
 
       {/* ================= LEFT BLACK EDITORIAL PANEL ================= */}
       <div className="hidden lg:flex fixed inset-y-0 left-0 w-[42%] bg-[#000000] flex-col justify-between p-12 z-10">
