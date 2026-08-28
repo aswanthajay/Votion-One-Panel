@@ -304,7 +304,6 @@ export const OverviewDashboard: React.FC<{
     const ivFull = setInterval(() => loadData(false), 20000);
     const ageTick = setInterval(() => setDataAge(a => a + 1), 1000);
     return () => { mountedRef.current = false; clearInterval(ivLight); clearInterval(ivFull); clearInterval(ageTick); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceConnectionId]);
 
   const openTickets = tickets.filter(t => t.status === 'pending' || t.status === 'open' || t.status === 'in-progress');

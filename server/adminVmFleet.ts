@@ -352,7 +352,7 @@ adminVmFleetRouter.get('/summary', requireAuth, requireAdmin, async (_req: Authe
         if (!nodesRes.ok) continue;
         const nodePayload = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
         for (const n of nodePayload.data || []) {
-          let cpus = n.maxcpu || 0;
+          const cpus = n.maxcpu || 0;
           let memTotal = 0;
           try {
             const stRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });

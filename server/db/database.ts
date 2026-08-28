@@ -1821,7 +1821,7 @@ export class DatabaseService {
 
   async getUploadedFiles(accountEmail?: string) {
     let query = 'SELECT file_name as "fileName", original_name as "originalName", size_bytes as "sizeBytes", mime_type as "mimeType", created_at FROM uploaded_files';
-    let params: any[] = [];
+    const params: any[] = [];
     if (accountEmail) {
       query += ' WHERE account_email = $1';
       params.push(accountEmail.toLowerCase().trim());

@@ -354,7 +354,6 @@ export const AdminVMFleet: React.FC = () => {
   useEffect(() => {
     const t = window.setInterval(fetchFleet, 30000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
@@ -949,7 +948,6 @@ const AssignWizard: React.FC<{
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

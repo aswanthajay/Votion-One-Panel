@@ -481,8 +481,8 @@ export class DatabaseService {
   // VMS & EXPIRY SUSPENSION ENGINE
   async getVMs(ownerEmail?: string, vmid?: number) {
     let query = "SELECT * FROM vms";
-    let params: any[] = [];
-    let conditions = [];
+    const params: any[] = [];
+    const conditions = [];
     
     if (vmid) {
       params.push(vmid);
@@ -597,7 +597,7 @@ export class DatabaseService {
   // SUPPORT TICKET SYSTEM & REPLIES
   async getSupportTickets(userEmail?: string) {
     let query = 'SELECT * FROM tickets';
-    let params: any[] = [];
+    const params: any[] = [];
     if (userEmail) {
       query += ' WHERE user_email = $1';
       params.push(userEmail.toLowerCase().trim());
@@ -807,7 +807,7 @@ export class DatabaseService {
 
   async getUploadedFiles(accountEmail?: string) {
     let query = 'SELECT file_name as "fileName", original_name as "originalName", size_bytes as "sizeBytes", mime_type as "mimeType", created_at FROM uploaded_files';
-    let params: any[] = [];
+    const params: any[] = [];
     if (accountEmail) {
       query += ' WHERE account_email = $1';
       params.push(accountEmail.toLowerCase().trim());
