@@ -2,6 +2,32 @@
 
 ## Recommended Node.js Egg setup
 
+### Does it need `index.js`?
+
+No. This project does **not** use a root-level `index.js`. Its production entrypoint is `server/entry.ts`, launched through the package script:
+
+```bash
+npm run start
+```
+
+The `server/entry.ts` bootstrap loads the persisted runtime configuration and then selects either the first-run installer or the normal application server. With the project’s current scripts, the correct Pterodactyl startup command is `npm run start`, not `node index.js`.
+
+The Node.js Egg may display a “main file” field. Leave it unused when the Egg allows a custom startup command. If the Egg requires a value, use `server/entry.ts` only with an image that has the project’s `tsx` runtime available; the safer option is still the explicit `npm run start` command because it matches `package.json`.
+
+### How many ports are required?
+
+You need **one Pterodactyl allocation port** for Votion One. The Express server binds one `PORT`, and the same listener handles the web UI, REST API, health endpoints, authenticated WebSocket console relay, and the `/novnc`, `/api2`, `/pve2`, and `/proxmox-console` proxy paths. Do not allocate separate public ports for the API, VNC, noVNC, or WebSockets.
+
+| Connection | Public Pterodactyl port required? | Explanation |
+| --- | ---: | --- |
+| Votion One HTTP/HTTPS web and API | **Yes: one port** | Set `PORT` to the Pterodactyl allocation port. |
+| Votion One WebSocket and console relay | **No additional port** | Uses the same Node listener and reverse-proxy path. |
+| PostgreSQL | **No** | Keep database access private; allow the Votion server to connect outbound to the database host, normally TCP 5432. |
+| Proxmox API | **No** | The panel connects outbound to each provider’s configured API port, normally 8006. Do not expose Proxmox through the Votion container. |
+| SMTP | **No** | Mail delivery is outbound, normally 587 or 465 depending on the provider. |
+
+If a reverse proxy or Cloudflare sits in front of Pterodactyl, proxy only the single allocated application port and enable WebSocket support. The browser should use the public HTTPS origin; it should not connect directly to PostgreSQL or Proxmox.
+
 Use the official **Generic Node.js** Egg with a Node.js 22 image. The Egg clones a repository or accepts uploaded files, installs `node_modules`, and starts the configured main file through Node.js or `ts-node`; its documentation also notes that the startup command and “done” detection text may need to be adjusted for the application.[1]
 
 For this repository, the normal application startup command should be:
@@ -10,9 +36,24 @@ For this repository, the normal application startup command should be:
 npm run start
 ```
 
-Set the Egg’s main file only if the Egg requires one; the project’s `start` script already launches `tsx server/entry.ts`, which selects the installer or application server based on runtime configuration. Set the Pterodactyl allocation port as the application `PORT` environment variable, and configure `NODE_ENV=production`, `PUBLIC_APP_URL`, and `CORS_ORIGINS` in the server variables. Do not put credentials in the startup command, repository URL, or public install script.
+The project’s `start` script launches `tsx server/entry.ts`, which selects the installer or application server based on runtime configuration. Set the Pterodactyl allocation port as the application `PORT` environment variable, and configure `NODE_ENV=production`, `PUBLIC_APP_URL`, and `CORS_ORIGINS` in the server variables. Do not put credentials in the startup command, repository URL, or public install script.
 
-The Generic Node.js Egg installation flow normally runs `npm install --production`.[1] That is appropriate for the running application but means development-only tools such as ESLint, Vitest, and Vite may not exist inside the production container. Therefore, the legacy database cleanup is a **one-time maintenance action**, not an application startup action.
+At minimum, configure these Pterodactyl variables:
+
+| Variable | Example form | Required for normal production? |
+| --- | --- | ---: |
+| `NODE_ENV` | `production` | Yes |
+| `PORT` | the allocated Pterodactyl port, such as `25580` | Yes |
+| `PUBLIC_APP_URL` | `https://panel.example.com` | Yes |
+| `CORS_ORIGINS` | `https://panel.example.com` | Yes |
+| `DATABASE_URL` | private PostgreSQL connection URL | Yes, unless the complete `PG*` set is used |
+| `TOKEN_SECRET` | long random secret | Yes |
+| `PROXMOX_CREDENTIALS_KEY` | long random secret | Required for live provider operations |
+| `TRUST_PROXY` | `true` only behind a trusted reverse proxy | Conditional |
+
+Do not put credentials in the startup command, repository URL, or public install script.
+
+The Generic Node.js Egg installation flow normally runs `npm install --production`.[1] That is appropriate for the running application but means development-only tools such as ESLint, Vitest, and Vite may not exist inside the production container. The application runtime must therefore include `tsx` in production dependencies; this repository is configured accordingly. Therefore, the legacy database cleanup is a **one-time maintenance action**, not an application startup action.
 
 ## Pterodactyl cleanup procedure
 
