@@ -396,9 +396,19 @@ export const SystemSettings: React.FC = () => {
                 type="number"
                 autoComplete="off"
                 value={config.port}
-                onChange={(e) => setConfig({ ...config, port: parseInt(e.target.value) || 587 })}
+                onChange={(e) => {
+                  const p = parseInt(e.target.value) || 587;
+                  setConfig({
+                    ...config,
+                    port: p,
+                    secure: p === 465,
+                  });
+                }}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
               />
+              <span className="text-[11px] text-[#656b6b] mt-1 block">
+                Standard: <strong>587</strong> (STARTTLS) or <strong>465</strong> (SSL)
+              </span>
             </div>
 
             <div>
@@ -437,7 +447,7 @@ export const SystemSettings: React.FC = () => {
               />
             </div>
 
-            <div className="flex items-center pt-6">
+            <div className="flex flex-col justify-center pt-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -445,8 +455,15 @@ export const SystemSettings: React.FC = () => {
                   onChange={(e) => setConfig({ ...config, secure: e.target.checked })}
                   className="rounded border-[#dedfdf]"
                 />
-                <span className="text-sm font-semibold text-[#1a1a1a]">Use SSL/TLS (Secure)</span>
+                <span className="text-sm font-semibold text-[#1a1a1a]">Use Direct SSL/TLS (Port 465)</span>
               </label>
+              <span className="text-[11px] text-[#656b6b] mt-1 ml-6">
+                {config.port === 587
+                  ? 'Port 587 automatically negotiates STARTTLS encryption. Keep this unchecked.'
+                  : config.port === 465
+                    ? 'Port 465 requires direct SSL encryption. Keep this checked.'
+                    : 'Unchecked for STARTTLS, checked for direct SSL.'}
+              </span>
             </div>
           </div>
 

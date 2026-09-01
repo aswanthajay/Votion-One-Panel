@@ -88,10 +88,16 @@ class EmailService {
       if (config && config.enabled) {
         this.isEnabled = true;
         this.fromEmail = config.from || 'noreply@votioncloud.org';
+        const portNum = Number(config.port) || 587;
+        // In SMTP specifications: port 465 is implicit SSL (secure: true).
+        // Port 587 uses STARTTLS (secure: false). Setting secure: true on 587 causes an OpenSSL protocol mismatch error.
+        const resolvedSecure = portNum === 465 ? true : false;
+
         this.transporter = nodemailer.createTransport({
           host: config.host,
-          port: config.port,
-          secure: config.secure,
+          port: portNum,
+          secure: resolvedSecure,
+          requireTLS: portNum === 587,
           auth: {
             user: config.user,
             pass: config.pass,
@@ -99,8 +105,11 @@ class EmailService {
           tls: {
             rejectUnauthorized: false,
           },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 10000,
         });
-        console.log('[SMTP] Mailer initialized and enabled.');
+        console.log(`[SMTP] Mailer initialized on ${config.host}:${portNum} (secure: ${resolvedSecure}, requireTLS: ${portNum === 587}).`);
       } else {
         this.isEnabled = false;
         this.transporter = null;
