@@ -500,10 +500,21 @@ export const DashboardContent: React.FC<{
         </div>
 
         {/* TILE 3: GUEST FLEET VITALITY */}
-        <div className="ink-block-wrapper flex flex-col justify-between p-4 sm:p-5 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs transition-all hover:border-[#656b6b] dark:hover:border-[#404040]">
+        <div 
+          onClick={() => navigate('/instances')}
+          className="ink-block-wrapper flex flex-col justify-between p-4 sm:p-5 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs transition-all hover:border-[#656b6b] dark:hover:border-[#404040] cursor-pointer group"
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              navigate('/instances');
+            }
+          }}
+        >
           <div>
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] group-hover:text-[#2563eb] dark:group-hover:text-[#60a5fa] transition-colors">
                 Guest Instances
               </span>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#f1f1f1] dark:bg-[#1f1f1f] text-[#1a1a1a] dark:text-white">
@@ -521,31 +532,22 @@ export const DashboardContent: React.FC<{
             </div>
           </div>
 
-          <div className="pt-3 border-t border-[#f1f1f1] dark:border-[#1f1f1f] flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2.5 sm:gap-3 font-mono">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
-                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.running}</span>
-                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Running</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#d97706]" />
-                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.suspended}</span>
-                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Suspended</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-[#8a9090]" />
-                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.stopped}</span>
-                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Stopped</span>
-              </div>
+          <div className="pt-3 border-t border-[#f1f1f1] dark:border-[#1f1f1f] flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
+              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.running}</span>
+              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Running</span>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate('/admin/vms')}
-              className="text-xs font-semibold text-[#2563eb] dark:text-[#60a5fa] hover:underline cursor-pointer"
-            >
-              Manage →
-            </button>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#d97706]" />
+              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.suspended}</span>
+              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Suspended</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#8a9090]" />
+              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.stopped}</span>
+              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Stopped</span>
+            </div>
           </div>
         </div>
 
