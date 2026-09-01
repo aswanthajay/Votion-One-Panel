@@ -4,6 +4,17 @@ import { apiClient, ApiVM } from '../services/apiClient';
 interface OvhStatus {
   ip: string;
   reverse: string | null;
+  virtualMac?: string | null;
+  vmMac?: string | null;
+  macAddress?: string | null;
+  macMatched?: boolean;
+  serviceName?: string;
+  boundVm?: {
+    vmid: number;
+    name: string;
+    node: string;
+    status: string;
+  } | null;
   ddos: {
     state: string;
     mode: 'automatic' | 'permanent';
@@ -68,7 +79,13 @@ export const OvhManager: React.FC = () => {
 
   // Status & Tab state
   const [status, setStatus] = useState<OvhStatus | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'firewall' | 'game' | 'antihack'>('general');
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'vmac' | 'firewall' | 'game' | 'antihack'>('general');
+
+  // Virtual MAC state
+  const [macSubmitting, setMacSubmitting] = useState(false);
+  const [customMacInput, setCustomMacInput] = useState('');
+  const [syncToVmChecked, setSyncToVmChecked] = useState(true);
+  const [showMacModal, setShowMacModal] = useState<'create' | 'reset' | null>(null);
 
   // rDNS state
   const [rdnsValue, setRdnsValue] = useState('');
@@ -335,6 +352,50 @@ export const OvhManager: React.FC = () => {
   const handleSelectIp = async (ip: string) => {
     setIpInput(ip);
     await fetchStatusForIp(ip);
+  };
+
+  const handleCreateMac = async (syncToVm = true) => {
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp) return;
+    setMacSubmitting(true);
+    try {
+      const res = await apiClient.createAdminOvhMac(targetIp, customMacInput || undefined, syncToVm);
+      if (res.success) {
+        showToast('success', res.message || 'Virtual MAC created successfully');
+        setShowMacModal(null);
+        setCustomMacInput('');
+        await fetchStatusForIp(targetIp);
+        void loadInitialData();
+      } else {
+        showToast('error', res.error || 'Failed to create Virtual MAC');
+      }
+    } catch {
+      showToast('error', 'Network error creating Virtual MAC');
+    } finally {
+      setMacSubmitting(false);
+    }
+  };
+
+  const handleResetMac = async (syncToVm = true) => {
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp) return;
+    setMacSubmitting(true);
+    try {
+      const res = await apiClient.resetAdminOvhMac(targetIp, customMacInput || undefined, syncToVm);
+      if (res.success) {
+        showToast('success', res.message || 'Virtual MAC reset successfully');
+        setShowMacModal(null);
+        setCustomMacInput('');
+        await fetchStatusForIp(targetIp);
+        void loadInitialData();
+      } else {
+        showToast('error', res.error || 'Failed to reset Virtual MAC');
+      }
+    } catch {
+      showToast('error', 'Network error resetting Virtual MAC');
+    } finally {
+      setMacSubmitting(false);
+    }
   };
 
   const refreshCurrentStatus = () => {
@@ -782,16 +843,23 @@ export const OvhManager: React.FC = () => {
                           {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" />}
                         </div>
                         {item.boundVm ? (
-                          <p className="text-[11px] text-[#2563eb] dark:text-[#60a5fa] truncate mt-0.5">
-                            VM {item.boundVm.vmid} · {item.boundVm.name}
-                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                            <span className="text-[11px] text-[#2563eb] dark:text-[#60a5fa] truncate">
+                              VM {item.boundVm.vmid} · {item.boundVm.name}
+                            </span>
+                            {item.boundVm.macAddress && (
+                              <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-[#f3f4f6] dark:bg-[#262626] text-[#4b5563] dark:text-[#9ca3af] border border-[#e5e7eb] dark:border-[#374151]">
+                                {item.boundVm.macAddress}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <p className="text-[11px] text-[#8a9090] truncate mt-0.5">
                             Unassigned Pool
                           </p>
                         )}
                       </div>
-                      <div className="text-right shrink-0">
+                      <div className="text-right shrink-0 flex flex-col items-end gap-1">
                         {item.boundVm ? (
                           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#eff6ff] text-[#2563eb] dark:bg-[#1e293b] dark:text-[#93c5fd]">
                             Bound
@@ -845,10 +913,25 @@ export const OvhManager: React.FC = () => {
               {/* INSPECTOR HEADER */}
               <div className="px-6 py-4 border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white px-2.5 py-0.5 rounded bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131]">
                       {status.ip}
                     </span>
+                    {status.macAddress ? (
+                      <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#f3f4f6] dark:bg-[#262626] border border-[#e5e7eb] dark:border-[#333] text-[#1a1a1a] dark:text-white flex items-center gap-1.5" title="Hardware / Virtual MAC Address">
+                        <span className="text-[#8a9090]">MAC:</span>
+                        <span>{status.macAddress}</span>
+                        {status.macMatched ? (
+                          <span className="text-[10px] text-[#16a34a] font-sans font-bold" title="Synced with Proxmox net0">● Synced</span>
+                        ) : status.virtualMac && status.vmMac ? (
+                          <span className="text-[10px] text-[#d97706] font-sans font-bold" title="vMAC differs from Proxmox VM net0">⚠️ Mismatch</span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-mono text-[#8a9090] px-2 py-0.5 rounded bg-[#f9fafb] dark:bg-[#222] border border-[#e5e7eb] dark:border-[#333]">
+                        No vMAC
+                      </span>
+                    )}
                     {activeVm ? (
                       <span className="text-xs font-semibold text-[#2563eb] dark:text-[#60a5fa] px-2 py-0.5 rounded bg-[#eff6ff] dark:bg-[#172554]">
                         VM {activeVm.vmid} ({activeVm.name})
@@ -879,6 +962,7 @@ export const OvhManager: React.FC = () => {
               <div className="flex border-b border-[#dedfdf] dark:border-[#262626] px-6 bg-white dark:bg-[#121212] overflow-x-auto text-xs">
                 {[
                   { key: 'general', label: 'General & rDNS' },
+                  { key: 'vmac', label: `Virtual MAC (${status.macAddress ? status.macAddress.slice(0, 8) + '…' : 'None'})` },
                   { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
                   { key: 'game', label: `Game DDoS (${gameRules.length})` },
                   { key: 'antihack', label: `Anti-Hack ${status.antiHack ? '(!)' : ''}` },
@@ -997,6 +1081,133 @@ export const OvhManager: React.FC = () => {
                         </button>
                       )}
                     </form>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB: VIRTUAL MAC (vMAC) */}
+              {activeSubTab === 'vmac' && (
+                <div className="p-6 text-xs flex flex-col gap-6">
+                  <div>
+                    <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white mb-1">
+                      Virtual MAC (vMAC) & Hardware Routing
+                    </h3>
+                    <p className="text-[#656b6b] dark:text-[#a0a0a0] leading-relaxed">
+                      OVH hardware border routers enforce MAC address filtering on bridged interfaces (<code>vmbr0</code>). To route traffic to guest VMs without triggering Anti-Hack port security locks, this Failover IP must have an authorized Virtual MAC that matches the VM network interface card (<code>net0</code>).
+                    </p>
+                  </div>
+
+                  {/* MAC Overview Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-1">
+                        Effective MAC ID
+                      </p>
+                      <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
+                        {status.macAddress || 'None'}
+                      </p>
+                      <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
+                        {status.macMatched ? 'Synchronized across OVH & Proxmox' : status.macAddress ? 'Active Interface Address' : 'No MAC allocated'}
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-1">
+                        OVH Virtual MAC (vMAC)
+                      </p>
+                      <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
+                        {status.virtualMac || 'Not Created on OVH'}
+                      </p>
+                      <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
+                        {status.serviceName ? `Dedicated Server: ${status.serviceName}` : 'OVH dedicated routing layer'}
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-1">
+                        Proxmox VM net0 MAC
+                      </p>
+                      <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
+                        {status.vmMac || 'No Bound VM'}
+                      </p>
+                      <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
+                        {status.boundVm ? `VM ${status.boundVm.vmid} (${status.boundVm.name})` : 'Unassigned pool IP'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Sync Status Alert */}
+                  {status.macMatched ? (
+                    <div className="p-4 rounded-xl border border-[#bbf7d0] dark:border-[#166534] bg-[#f0fdf4] dark:bg-[#052e16] text-[#166534] dark:text-[#86efac] flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">✓</span>
+                        <div>
+                          <p className="font-bold text-xs">Virtual MAC Fully Synchronized</p>
+                          <p className="text-[11px] opacity-90">OVH router and Proxmox VM net0 interface share the exact same hardware address ({status.macAddress}). Network traffic is fully optimized.</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : status.virtualMac && status.vmMac && !status.macMatched ? (
+                    <div className="p-4 rounded-xl border border-[#fed7aa] dark:border-[#9a3412] bg-[#fff7ed] dark:bg-[#2c1206] text-[#9a3412] dark:text-[#fdba74] flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">⚠️</span>
+                        <div>
+                          <p className="font-bold text-xs">MAC Mismatch Detected</p>
+                          <p className="text-[11px] opacity-90">OVH vMAC is {status.virtualMac}, but Proxmox VM net0 has {status.vmMac}. Packets may be dropped by OVH border security.</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCreateMac(true)}
+                        disabled={macSubmitting}
+                        className="px-3 py-1.5 bg-[#9a3412] text-white text-xs font-semibold rounded-lg hover:bg-[#7c2d12] cursor-pointer shrink-0"
+                      >
+                        {macSubmitting ? 'Syncing...' : 'Sync to VM net0 →'}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {/* Action Controls */}
+                  <div className="p-5 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col gap-4">
+                    <h4 className="font-bold text-xs text-[#1a1a1a] dark:text-white uppercase tracking-wider">
+                      Virtual MAC Controls
+                    </h4>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleCreateMac(syncToVmChecked)}
+                        disabled={macSubmitting}
+                        className="px-4 py-2 bg-[#1a1a1a] dark:bg-white text-white dark:text-[#1a1a1a] font-semibold text-xs rounded-lg hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <span>{macSubmitting ? '↻' : '✨'}</span>
+                        {status.macAddress ? 'Re-Apply Virtual MAC' : 'Create Virtual MAC'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleResetMac(syncToVmChecked)}
+                        disabled={macSubmitting}
+                        className="px-4 py-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#333] text-[#dc2626] dark:text-[#ef4444] font-semibold text-xs rounded-lg hover:bg-[#fef2f2] dark:hover:bg-[#2c0b0e] transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <span>{macSubmitting ? '↻' : '⟳'}</span>
+                        Reset & Generate New MAC ID
+                      </button>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#dedfdf] dark:border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-[#656b6b] dark:text-[#a0a0a0]">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={syncToVmChecked}
+                          onChange={e => setSyncToVmChecked(e.target.checked)}
+                          className="rounded border-[#dedfdf] accent-[#2563eb]"
+                        />
+                        <span className="font-medium text-[#1a1a1a] dark:text-white">
+                          Automatically synchronize new MAC address to bound Proxmox VM (net0 interface)
+                        </span>
+                      </label>
+                    </div>
                   </div>
                 </div>
               )}

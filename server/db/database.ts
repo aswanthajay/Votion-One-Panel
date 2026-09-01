@@ -557,7 +557,11 @@ export class DatabaseService {
 
   async updateVmIpAddress(vmid: number, proxmoxConnectionId: string, ipAddress: string) {
     await pgPool.query('UPDATE vms SET ip_address = $1 WHERE vmid = $2 AND proxmox_connection_id = $3', [ipAddress, vmid, proxmoxConnectionId]);
-  };
+  }
+
+  async updateVmMacAddress(vmid: number, proxmoxConnectionId: string, macAddress: string) {
+    await pgPool.query('UPDATE vms SET mac_address = $1 WHERE vmid = $2 AND proxmox_connection_id = $3', [macAddress.toUpperCase().trim(), vmid, proxmoxConnectionId]);
+  }
 
   async insertVmTelemetry(vmid: number, cpuPct: number, ramBytes: number, netIn: number, netOut: number, diskRead?: number, diskWrite?: number, proxmoxConnectionId?: string) {
     // UPSERT with a per-VMID+timestamp uniqueness rule: if a sample for this exact
@@ -998,7 +1002,7 @@ export class DatabaseService {
     const mapped = res.rows.map(v => ({
       vmid: v.vmid,
       vmKey: `${v.proxmox_connection_id || 'legacy-local'}:${v.node || 'unknown'}:${v.vmid}`,
-      name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
+      name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, macAddress: v.mac_address || null, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
     }));
     
         // Find all vmids that exist under an active Proxmox connection

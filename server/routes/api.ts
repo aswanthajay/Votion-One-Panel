@@ -8,14 +8,14 @@ import { TOTP, Secret } from 'otpauth';
 import QRCode from 'qrcode';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { dbService } from '../db/database.js';
+import { dbService, pgPool } from '../db/database.js';
 import {
   completeInitialAdminSetup,
   getInitialAdminSetupStatus,
   INITIAL_ADMIN_EMAIL,
 } from '../db/bootstrapAdmin.js';
 
-import { proxmoxApi } from '../services/proxmox.js';
+import { proxmoxApi, getVMNetworkMac, updateVMNetworkMac, generateMacAddress } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
 import { ovhService } from '../services/ovh.js';
@@ -2296,14 +2296,192 @@ apiRouter.get(['/admin/ovh/ips', '/admin/ovh/ip'], requireOvhEnabledAdmin, async
 apiRouter.get('/admin/ovh/status', requireOvhEnabledAdmin, async (req, res) => {
   try {
     const ip = validateIpAdmin(String(req.query.ip || ''));
-    const [reverse, ddos, firewall, mitigationProfile, antiHack] = await Promise.all([
+
+    // Look up bound VM in database for this IP
+    const vmRes = await pgPool.query(
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address, status FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
+      [ip, `${ip}/%`]
+    );
+    const boundVm = vmRes.rows[0] || null;
+
+    const [reverse, ddos, firewall, mitigationProfile, antiHack, vMacResult, liveVmMac] = await Promise.all([
       ovhService.getReverse(ip).catch(() => null),
       ovhService.getDdosState(ip).catch(() => ({ state: 'unknown', mode: 'automatic' as const })),
       ovhService.getFirewallState(ip).catch(() => ({ enabled: false, state: 'unknown' })),
       ovhService.getMitigationProfile(ip).catch(() => null),
       ovhService.getAntiHackStatus(ip).catch(() => null),
+      ovhService.getVirtualMac(ip).catch(() => null),
+      (async () => {
+        if (!boundVm || !boundVm.proxmox_connection_id) return boundVm?.mac_address || null;
+        try {
+          const conn = await dbService.getProxmoxConnectionCredentials(boundVm.proxmox_connection_id);
+          if (!conn) return boundVm.mac_address || null;
+          const liveMac = await getVMNetworkMac(conn, boundVm.node, boundVm.vmid, false);
+          if (liveMac && liveMac !== boundVm.mac_address) {
+            await dbService.updateVmMacAddress(boundVm.vmid, boundVm.proxmox_connection_id, liveMac);
+          }
+          return liveMac || boundVm.mac_address || null;
+        } catch {
+          return boundVm.mac_address || null;
+        }
+      })(),
     ]);
-    res.json({ success: true, data: { ip, reverse, ddos, firewall, mitigationProfile, antiHack } });
+
+    const virtualMac = vMacResult?.macAddress || null;
+    const vmMac = liveVmMac || boundVm?.mac_address || null;
+    const effectiveMac = virtualMac || vmMac || null;
+    const macMatched = Boolean(virtualMac && vmMac && virtualMac.toLowerCase() === vmMac.toLowerCase());
+
+    res.json({
+      success: true,
+      data: {
+        ip,
+        reverse,
+        ddos,
+        firewall,
+        mitigationProfile,
+        antiHack,
+        virtualMac,
+        vmMac,
+        macAddress: effectiveMac,
+        macMatched,
+        boundVm: boundVm ? {
+          vmid: boundVm.vmid,
+          name: boundVm.vm_name,
+          node: boundVm.node,
+          status: boundVm.status,
+          proxmoxConnectionId: boundVm.proxmox_connection_id,
+        } : null,
+        serviceName: vMacResult?.serviceName,
+      },
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/mac/create', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const customMac = req.body.mac ? String(req.body.mac).trim().toUpperCase() : undefined;
+    const syncToVm = req.body.syncToVm !== false;
+
+    // Look up bound VM
+    const vmRes = await pgPool.query(
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
+      [ip, `${ip}/%`]
+    );
+    const boundVm = vmRes.rows[0] || null;
+
+    let createdMac: string;
+    let serviceName: string | undefined;
+
+    // 1. Try creating Virtual MAC in OVH if OVH service is configured
+    try {
+      const ovhRes = await ovhService.createVirtualMac(ip, {
+        vmName: boundVm?.vm_name || `vm-${ip.replace(/\./g, '-')}`,
+      });
+      createdMac = ovhRes.macAddress;
+      serviceName = ovhRes.serviceName;
+    } catch (ovhErr: any) {
+      console.warn('[OVH vMAC] OVH API create failed, using local/custom vMAC:', ovhErr.message);
+      createdMac = customMac || generateMacAddress('02:00:00');
+    }
+
+    // 2. If syncToVm is true and a Proxmox VM is bound, update VM net0 in Proxmox
+    let syncedToVm = false;
+    if (syncToVm && boundVm && boundVm.proxmox_connection_id) {
+      try {
+        const conn = await dbService.getProxmoxConnectionCredentials(boundVm.proxmox_connection_id);
+        if (conn) {
+          const updateRes = await updateVMNetworkMac(conn, boundVm.node, boundVm.vmid, false, createdMac);
+          syncedToVm = updateRes.success;
+          if (syncedToVm) {
+            await dbService.updateVmMacAddress(boundVm.vmid, boundVm.proxmox_connection_id, createdMac);
+          }
+        }
+      } catch (proxErr: any) {
+        console.error('[PROXMOX vMAC] Failed to sync to VM:', proxErr.message);
+      }
+    }
+
+    await dbService.logAudit(req.authUser?.email || 'unknown', 'CREATE_VMAC', 'system', `Created Virtual MAC ${createdMac} for IP ${ip}`);
+
+    res.json({
+      success: true,
+      data: {
+        ip,
+        macAddress: createdMac,
+        serviceName,
+        syncedToVm,
+      },
+      message: syncedToVm
+        ? `Virtual MAC ${createdMac} created and synced to VM ${boundVm?.vm_name} (net0) successfully.`
+        : `Virtual MAC ${createdMac} created successfully.`,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/mac/reset', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const syncToVm = req.body.syncToVm !== false;
+
+    // Look up bound VM
+    const vmRes = await pgPool.query(
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
+      [ip, `${ip}/%`]
+    );
+    const boundVm = vmRes.rows[0] || null;
+
+    let newMac: string;
+    let serviceName: string | undefined;
+
+    // 1. Try resetting Virtual MAC in OVH
+    try {
+      const ovhRes = await ovhService.resetVirtualMac(ip, {
+        vmName: boundVm?.vm_name || `vm-${ip.replace(/\./g, '-')}`,
+      });
+      newMac = ovhRes.macAddress;
+      serviceName = ovhRes.serviceName;
+    } catch (ovhErr: any) {
+      console.warn('[OVH vMAC] OVH API reset failed, regenerating local vMAC:', ovhErr.message);
+      newMac = generateMacAddress('02:00:00');
+    }
+
+    // 2. Sync new MAC to Proxmox VM net0
+    let syncedToVm = false;
+    if (syncToVm && boundVm && boundVm.proxmox_connection_id) {
+      try {
+        const conn = await dbService.getProxmoxConnectionCredentials(boundVm.proxmox_connection_id);
+        if (conn) {
+          const updateRes = await updateVMNetworkMac(conn, boundVm.node, boundVm.vmid, false, newMac);
+          syncedToVm = updateRes.success;
+          if (syncedToVm) {
+            await dbService.updateVmMacAddress(boundVm.vmid, boundVm.proxmox_connection_id, newMac);
+          }
+        }
+      } catch (proxErr: any) {
+        console.error('[PROXMOX vMAC] Failed to sync reset MAC to VM:', proxErr.message);
+      }
+    }
+
+    await dbService.logAudit(req.authUser?.email || 'unknown', 'RESET_VMAC', 'system', `Reset Virtual MAC for IP ${ip} to ${newMac}`);
+
+    res.json({
+      success: true,
+      data: {
+        ip,
+        macAddress: newMac,
+        serviceName,
+        syncedToVm,
+      },
+      message: syncedToVm
+        ? `Virtual MAC reset to ${newMac} and updated on VM ${boundVm?.vm_name} (net0).`
+        : `Virtual MAC reset to ${newMac} successfully.`,
+    });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }

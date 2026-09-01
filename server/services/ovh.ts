@@ -442,6 +442,126 @@ class OvhService {
     const block = this.getBlock(ip);
     await this.request('DELETE', `/ip/${encodeURIComponent(block)}/game/${encodeURIComponent(ip)}/rule/${ruleId}`);
   }
+
+  // --- Virtual MAC (vMAC) Operations ---
+
+  // Look up Virtual MAC associated with an IP address on OVH Dedicated Servers
+  async getVirtualMac(ip: string): Promise<{ macAddress: string; type?: string; serviceName?: string; virtualMachineName?: string } | null> {
+    try {
+      const block = this.getBlock(ip);
+      let serviceName: string | undefined;
+
+      try {
+        const ipInfo = await this.request('GET', `/ip/${encodeURIComponent(block)}`);
+        if (ipInfo?.routedTo?.serviceName) {
+          serviceName = ipInfo.routedTo.serviceName;
+        }
+      } catch { /* proceed */ }
+
+      if (serviceName) {
+        const macResult = await this.getVirtualMacForServer(serviceName, ip);
+        if (macResult) return macResult;
+      }
+
+      let servers: string[] = [];
+      try {
+        servers = (await this.request('GET', '/dedicated/server')) || [];
+      } catch {
+        servers = [];
+      }
+
+      for (const s of servers) {
+        const macResult = await this.getVirtualMacForServer(s, ip);
+        if (macResult) return macResult;
+      }
+
+      return null;
+    } catch (err) {
+      console.warn(`[OVH] Failed to get virtual MAC for ${ip}:`, err);
+      return null;
+    }
+  }
+
+  private async getVirtualMacForServer(serviceName: string, ip: string): Promise<{ macAddress: string; type?: string; serviceName?: string; virtualMachineName?: string } | null> {
+    try {
+      const macs: string[] = (await this.request('GET', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac`)) || [];
+      for (const mac of macs) {
+        try {
+          const addrs: string[] = (await this.request('GET', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac/${encodeURIComponent(mac)}/virtualAddress`)) || [];
+          if (addrs.includes(ip)) {
+            const details = await this.request('GET', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac/${encodeURIComponent(mac)}`).catch(() => null);
+            return {
+              macAddress: mac,
+              type: details?.type || 'ovh',
+              serviceName,
+              virtualMachineName: details?.virtualMachineName,
+            };
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+    return null;
+  }
+
+  // Create Virtual MAC on OVH
+  async createVirtualMac(ip: string, options?: { serviceName?: string; vmName?: string; type?: 'ovh' | 'virtualmachine' }): Promise<{ macAddress: string; type: string; serviceName?: string }> {
+    let serviceName = options?.serviceName;
+    if (!serviceName) {
+      const block = this.getBlock(ip);
+      try {
+        const ipInfo = await this.request('GET', `/ip/${encodeURIComponent(block)}`);
+        serviceName = ipInfo?.routedTo?.serviceName;
+      } catch { /* fallback */ }
+    }
+
+    if (!serviceName) {
+      const servers: string[] = (await this.request('GET', '/dedicated/server')) || [];
+      serviceName = servers[0];
+    }
+
+    if (!serviceName) {
+      throw new Error('No OVH dedicated server found for this IP. Please ensure an OVH dedicated server is connected.');
+    }
+
+    const res = await this.request('POST', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac`, {
+      ipAddress: ip,
+      type: options?.type || 'ovh',
+      virtualMachineName: options?.vmName || `vm-${ip.replace(/\./g, '-')}`,
+    });
+
+    return {
+      macAddress: res.macAddress || res,
+      type: res.type || options?.type || 'ovh',
+      serviceName,
+    };
+  }
+
+  // Delete Virtual MAC or unbind IP from Virtual MAC
+  async deleteVirtualMac(ip: string, mac: string, serviceName?: string): Promise<boolean> {
+    if (!serviceName) {
+      const vMac = await this.getVirtualMac(ip);
+      serviceName = vMac?.serviceName;
+    }
+    if (!serviceName) return false;
+
+    try {
+      await this.request('DELETE', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac/${encodeURIComponent(mac)}/virtualAddress/${encodeURIComponent(ip)}`);
+    } catch {
+      try {
+        await this.request('DELETE', `/dedicated/server/${encodeURIComponent(serviceName)}/virtualMac/${encodeURIComponent(mac)}`);
+      } catch { /* ignore */ }
+    }
+    return true;
+  }
+
+  // Reset Virtual MAC on OVH
+  async resetVirtualMac(ip: string, options?: { serviceName?: string; vmName?: string }): Promise<{ macAddress: string; type: string; serviceName?: string }> {
+    const existing = await this.getVirtualMac(ip);
+    if (existing) {
+      await this.deleteVirtualMac(ip, existing.macAddress, existing.serviceName);
+    }
+    return await this.createVirtualMac(ip, options);
+  }
 }
 
 export const ovhService = new OvhService();

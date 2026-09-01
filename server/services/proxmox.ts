@@ -1,5 +1,6 @@
 import os from 'os';
 import https from 'https';
+import crypto from 'crypto';
 import { dbService } from '../db/database.js';
 import { proxmoxFetch } from './proxmoxHttp.js';
 
@@ -783,5 +784,95 @@ export async function updateVMNetworkRateLimit(
   } catch (err) {
     console.error('[PROXMOX] Failed to update VM rate limit', err);
     return false;
+  }
+}
+
+/**
+ * Generate a standard unicast MAC address.
+ * Defaults to the 02:00:00 prefix for full OVH Virtual MAC compatibility.
+ */
+export function generateMacAddress(prefix = '02:00:00'): string {
+  const bytes = crypto.randomBytes(3);
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(':');
+  return `${prefix}:${hex}`.toUpperCase();
+}
+
+/**
+ * Fetch a VM's live MAC address from its net0 interface in Proxmox.
+ */
+export async function getVMNetworkMac(
+  connection: any,
+  node: string,
+  vmid: number,
+  isLxc = false
+): Promise<string | null> {
+  const type = isLxc ? 'lxc' : 'qemu';
+  const cleanHost = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const url = `https://${cleanHost}:${connection.port || 8006}/api2/json/nodes/${encodeURIComponent(node)}/${type}/${vmid}/config`;
+  const headers = { 'Authorization': `PVEAPIToken=${connection.token_id}=${connection.token_secret || connection.secret}` };
+  const sslFingerprint = connection.ssl_fingerprint || connection.tls_fingerprint;
+
+  try {
+    const res = await proxmoxFetch(url, { headers, sslFingerprint, timeoutMs: 8000 });
+    if (!res.ok) return null;
+    const json = await res.json() as any;
+    const net0 = String(json.data?.net0 || '');
+    const match = net0.match(/([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/i);
+    return match ? match[1].toUpperCase() : null;
+  } catch (err) {
+    console.error(`[PROXMOX] Failed to get VM ${vmid} MAC:`, err);
+    return null;
+  }
+}
+
+/**
+ * Update or reset a VM's network MAC address in Proxmox net0.
+ */
+export async function updateVMNetworkMac(
+  connection: any,
+  node: string,
+  vmid: number,
+  isLxc = false,
+  newMac?: string
+): Promise<{ success: boolean; mac: string }> {
+  const targetMac = (newMac || generateMacAddress()).toUpperCase();
+  const type = isLxc ? 'lxc' : 'qemu';
+  const cleanHost = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const url = `https://${cleanHost}:${connection.port || 8006}/api2/json/nodes/${encodeURIComponent(node)}/${type}/${vmid}/config`;
+  const headers = { 'Authorization': `PVEAPIToken=${connection.token_id}=${connection.token_secret || connection.secret}` };
+  const sslFingerprint = connection.ssl_fingerprint || connection.tls_fingerprint;
+
+  try {
+    const res = await proxmoxFetch(url, { headers, sslFingerprint, timeoutMs: 8000 });
+    if (!res.ok) return { success: false, mac: targetMac };
+    const json = await res.json() as any;
+    const config = json.data || {};
+    const net0 = String(config.net0 || '');
+
+    let newNet0: string;
+    if (net0) {
+      if (/([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/i.test(net0)) {
+        newNet0 = net0.replace(/([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})/i, targetMac);
+      } else {
+        newNet0 = `${net0},hwaddr=${targetMac}`;
+      }
+    } else {
+      newNet0 = `virtio=${targetMac},bridge=vmbr0,firewall=1`;
+    }
+
+    const formData = new URLSearchParams();
+    formData.append('net0', newNet0);
+
+    const putRes = await proxmoxFetch(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
+      sslFingerprint
+    });
+
+    return { success: putRes.ok, mac: targetMac };
+  } catch (err) {
+    console.error(`[PROXMOX] Failed to update VM ${vmid} MAC:`, err);
+    return { success: false, mac: targetMac };
   }
 }

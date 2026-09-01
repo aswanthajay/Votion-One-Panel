@@ -66,6 +66,7 @@ export interface ApiVM {
   maxdisk: number;
   uptime: number;
   ipAddress?: string;
+  macAddress?: string | null;
   cpuUsagePct?: number;
   ramUsageBytes?: number;
   diskUsageBytes?: number;
@@ -2429,6 +2430,24 @@ class ApiClient {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ ip, mode })
+    });
+    return await res.json();
+  }
+
+  async createAdminOvhMac(ip: string, mac?: string, syncToVm = true): Promise<{ success: boolean; data?: { ip: string; macAddress: string; serviceName?: string; syncedToVm: boolean }; message?: string; error?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/mac/create`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, mac, syncToVm })
+    });
+    return await res.json();
+  }
+
+  async resetAdminOvhMac(ip: string, mac?: string, syncToVm = true): Promise<{ success: boolean; data?: { ip: string; macAddress: string; serviceName?: string; syncedToVm: boolean }; message?: string; error?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/mac/reset`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, mac, syncToVm })
     });
     return await res.json();
   }
