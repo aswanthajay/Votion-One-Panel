@@ -875,14 +875,18 @@ export class DatabaseService {
       `SELECT usage.item_key, usage.item_type, usage.vmid, usage.usage_count, usage.last_used_at,
               CASE WHEN usage.item_type = 'vm' THEN vm.vm_name ELSE NULL END AS vm_name,
               CASE WHEN usage.item_type = 'vm' THEN vm.status ELSE NULL END AS vm_status,
-                CASE WHEN usage.item_type = 'vm' THEN pc.name ELSE NULL END AS proxmox_connection_name
+              CASE WHEN usage.item_type = 'vm' THEN vm.proxmox_connection_id ELSE NULL END AS proxmox_connection_id,
+              CASE WHEN usage.item_type = 'vm' THEN pc.name ELSE NULL END AS proxmox_connection_name
          FROM user_navigation_usage AS usage
-         LEFT JOIN vms AS vm ON vm.vmid = usage.vmid AND vm.owner_email = usage.account_email
+         LEFT JOIN vms AS vm ON (
+           (usage.item_key LIKE 'vm:%:%' AND vm.proxmox_connection_id = SPLIT_PART(usage.item_key, ':', 2) AND vm.vmid = usage.vmid AND vm.owner_email = usage.account_email)
+           OR (usage.item_key NOT LIKE 'vm:%:%' AND vm.vmid = usage.vmid AND vm.owner_email = usage.account_email)
+         )
          LEFT JOIN proxmox_connections AS pc ON pc.id = vm.proxmox_connection_id
-       WHERE usage.account_email = $1
-         AND (usage.item_type = 'destination' OR vm.vmid IS NOT NULL)
-       ORDER BY usage.usage_count DESC, usage.last_used_at DESC
-       LIMIT $2`,
+        WHERE usage.account_email = $1
+          AND (usage.item_type = 'destination' OR vm.vmid IS NOT NULL)
+        ORDER BY usage.usage_count DESC, usage.last_used_at DESC
+        LIMIT $2`,
       [email, resultLimit],
     );
     return res.rows.map(row => ({
@@ -891,7 +895,8 @@ export class DatabaseService {
       vmid: row.vmid === null ? null : Number(row.vmid),
       name: row.vm_name ? String(row.vm_name) : null,
       status: row.vm_status ? String(row.vm_status) : null,
-        proxmoxConnectionName: row.proxmox_connection_name ? String(row.proxmox_connection_name) : null,
+      proxmoxConnectionId: row.proxmox_connection_id ? String(row.proxmox_connection_id) : null,
+      proxmoxConnectionName: row.proxmox_connection_name ? String(row.proxmox_connection_name) : null,
       usageCount: Number(row.usage_count),
       lastUsedAt: row.last_used_at,
     }));

@@ -12,9 +12,11 @@ interface ClientPanelContentProps {
   filter?: string;
   workspaceConnectionId?: string;
   selectedVmid?: number;
+  selectedConnectionId?: string;
 }
 
-export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId, selectedVmid }) => {
+export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId, selectedVmid, selectedConnectionId }) => {
+  const effectiveConnectionId = selectedConnectionId || workspaceConnectionId;
   const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
   const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
   const [vmMetadata, setVmMetadata] = useState<ApiVmMetadata | null>(null);
@@ -96,16 +98,23 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       setLoadError(null);
       
       setSelectedVm(previous => {
-        // Priority 1: URL Selection
-        if (selectedVmid) {
-          const urlVm = vms.find(vm => String(vm.vmid) === String(selectedVmid));
-          if (urlVm) return urlVm;
-        }
-        
-        // Priority 2: Keep previously selected if still exists
+        // Priority 1: Keep previously selected VM if it still exists in the fleet (match by vmKey or vmid+proxmoxConnectionId)
         if (previous) {
-          const stillExists = vms.find(vm => String(vm.vmKey) === String(previous.vmKey));
+          const stillExists = vms.find(vm => 
+            (vm.vmKey && previous.vmKey && vm.vmKey === previous.vmKey) ||
+            (String(vm.vmid) === String(previous.vmid) && vm.proxmoxConnectionId === previous.proxmoxConnectionId)
+          );
           if (stillExists) return stillExists;
+        }
+
+        // Priority 2: URL Selection (matching BOTH vmid and connectionId if available)
+        if (selectedVmid) {
+          const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
+          const urlVm = vms.find(vm => 
+            String(vm.vmid) === String(selectedVmid) &&
+            (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
+          ) || vms.find(vm => String(vm.vmid) === String(selectedVmid));
+          if (urlVm) return urlVm;
         }
         
         // Priority 3: Fallback
@@ -124,13 +133,23 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   // Immediate synchronous VM selection from local in-memory fleet on URL change
   useEffect(() => {
     if (selectedVmid && clientVMs.length > 0) {
-      const match = clientVMs.find(vm => String(vm.vmid) === String(selectedVmid));
+      const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
+      const match = clientVMs.find(vm => 
+        String(vm.vmid) === String(selectedVmid) &&
+        (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
+      ) || clientVMs.find(vm => String(vm.vmid) === String(selectedVmid));
+
       if (match) {
-        setSelectedVm(match);
+        setSelectedVm(prev => {
+          if (prev && (prev.vmKey === match.vmKey || (String(prev.vmid) === String(match.vmid) && prev.proxmoxConnectionId === match.proxmoxConnectionId))) {
+            return prev;
+          }
+          return match;
+        });
         setViewMode('details');
       }
     }
-  }, [selectedVmid, clientVMs]);
+  }, [selectedVmid, selectedConnectionId, effectiveConnectionId, clientVMs]);
 
   useEffect(() => {
     if (clientVMs.length === 0) {
@@ -163,7 +182,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       setIsMetadataLoading(true);
       setMetadataError(null);
       try {
-        const metadata = await apiClient.getVMMetadata(selectedVm.vmid);
+        const metadata = await apiClient.getVMMetadata(selectedVm.vmid, selectedVm.proxmoxConnectionId);
         if (!cancelled) setVmMetadata(metadata);
       } catch (err) {
         if (!cancelled) {
@@ -181,7 +200,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       cancelled = true;
       clearInterval(interval);
     };
-  }, [selectedVm?.vmid]);
+  }, [selectedVm?.vmid, selectedVm?.proxmoxConnectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,7 +210,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     }
 
     setIsReimageLoading(true);
-    apiClient.getVmReimageRequests(selectedVm.vmid)
+    apiClient.getVmReimageRequests(selectedVm.vmid, selectedVm.proxmoxConnectionId)
       .then(requests => {
         if (!cancelled) setReimageRequests(requests);
       })
@@ -206,14 +225,14 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       });
 
     return () => { cancelled = true; };
-  }, [selectedVm?.vmid]);
+  }, [selectedVm?.vmid, selectedVm?.proxmoxConnectionId]);
 
   useEffect(() => {
     setSelectedReinstallOs(selectedVm?.type === 'lxc' ? 'Alpine Linux 3.19 (LXC)' : 'Ubuntu 24.04 LTS');
     setIsReimageAcknowledged(false);
     setReimageReason('');
     setShowReimageConfirm(false);
-  }, [selectedVm?.vmid, selectedVm?.type]);
+  }, [selectedVm?.vmid, selectedVm?.proxmoxConnectionId, selectedVm?.type]);
 
   // PROMPT 5.3: Sync filter prop from Sidebar to VM Selection and Active Tab
   useEffect(() => {
@@ -260,7 +279,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
 
     setIsPowerLoading(action);
     try {
-      const res = await apiClient.executeClientPowerAction(selectedVm.vmid, action);
+      const res = await apiClient.executeClientPowerAction(selectedVm.vmid, action, selectedVm.proxmoxConnectionId);
       setIsPowerLoading(null);
       if (res.success) {
         showToast(res.message || `Server ${action === 'start' ? 'started' : action === 'shutdown' ? 'shutting down' : action === 'reboot' ? 'rebooting' : 'updated'} successfully.`);
@@ -285,7 +304,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     if (!selectedVm || isReimageSubmitting) return;
     setIsReimageSubmitting(true);
     try {
-      const res = await apiClient.createVmReimageRequest(selectedVm.vmid, selectedReinstallOs, reimageReason);
+      const res = await apiClient.createVmReimageRequest(selectedVm.vmid, selectedReinstallOs, reimageReason, selectedVm.proxmoxConnectionId);
       setReimageRequests(prev => [res.data, ...prev.filter(request => request.id !== res.data.id)]);
       setShowReimageConfirm(false);
       setIsReimageAcknowledged(false);
@@ -301,7 +320,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   const cancelReimageRequest = async (request: ApiReimageRequest) => {
     if (!selectedVm || request.status !== 'pending') return;
     try {
-      const res = await apiClient.cancelVmReimageRequest(selectedVm.vmid, request.id);
+      const res = await apiClient.cancelVmReimageRequest(selectedVm.vmid, request.id, selectedVm.proxmoxConnectionId);
       setReimageRequests(prev => prev.map(item => item.id === request.id ? res.data : item));
       showToast(res.message);
     } catch (err) {
@@ -435,7 +454,17 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             </thead>
             <tbody>
               {displayVMs.map(vm => (
-                <tr key={vm.vmKey} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined); }}>
+                <tr key={vm.vmKey} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => {
+                  setSelectedVm(vm);
+                  setViewMode('details');
+                  const params = new URLSearchParams(window.location.search);
+                  params.set('vmid', String(vm.vmid));
+                  if (vm.proxmoxConnectionId) {
+                    params.set('connectionId', vm.proxmoxConnectionId);
+                  }
+                  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+                  void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.proxmoxConnectionId || ''}:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined);
+                }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
                   {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">{getVmPrefix(vm.proxmoxConnectionName)}-{vm.vmid}</span></td>}
                   {visibleColumns.name && <td className="py-3 px-6 text-[13px] text-[#1a1a1a]">{vm.name}</td>}
@@ -800,7 +829,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                     type="button"
                     onClick={async () => {
                       try {
-                        const res = await apiClient.injectCloudInitSsh(selectedVm.vmid);
+                        const res = await apiClient.injectCloudInitSsh(selectedVm.vmid, selectedVm.proxmoxConnectionId);
                         alert(res.message || 'SSH public keys deployed successfully. Please restart your server to apply changes.');
                       } catch (err: any) {
                         alert(`Error: ${err.message}`);
@@ -833,7 +862,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                         onClick={async () => {
                           if (!cloudInitPassword) return alert('Enter a password');
                           try {
-                            const res = await apiClient.resetVmPassword(selectedVm.vmid, cloudInitPassword);
+                            const res = await apiClient.resetVmPassword(selectedVm.vmid, cloudInitPassword, selectedVm.proxmoxConnectionId);
                             setCloudInitPassword('');
                             alert(res.message + (res.agentResult ? `\n\nAgent status: ${res.agentResult}` : ''));
                           } catch (err: any) {
@@ -905,7 +934,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             {activeTab === 'metrics' && (
               <div className="flex flex-col w-full -mt-2">
                 <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
-                  <VmMetricsChart vmid={selectedVm.vmid} />
+                  <VmMetricsChart vmid={selectedVm.vmid} proxmoxConnectionId={selectedVm.proxmoxConnectionId} />
                 </Suspense>
               </div>
             )}
@@ -914,7 +943,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             {activeTab === 'firewall' && (
               <div className="flex flex-col w-full -mt-2">
                 <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
-                  <VmFirewallPanel vmid={selectedVm.vmid} />
+                  <VmFirewallPanel vmid={selectedVm.vmid} proxmoxConnectionId={selectedVm.proxmoxConnectionId} />
                 </Suspense>
               </div>
             )}
@@ -923,7 +952,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             {activeTab === 'backups' && (
               <div className="flex flex-col w-full mt-2">
                 <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-xl bg-[#f3f4f4]" aria-busy="true" />}>
-                  <VmBackupPanel vmid={selectedVm.vmid} />
+                  <VmBackupPanel vmid={selectedVm.vmid} proxmoxConnectionId={selectedVm.proxmoxConnectionId} />
                 </Suspense>
               </div>
             )}

@@ -13,9 +13,10 @@ interface Snapshot {
 
 interface VmBackupPanelProps {
   vmid: number;
+  proxmoxConnectionId?: string | null;
 }
 
-export default function VmBackupPanel({ vmid }: VmBackupPanelProps) {
+export default function VmBackupPanel({ vmid, proxmoxConnectionId }: VmBackupPanelProps) {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -32,7 +33,7 @@ export default function VmBackupPanel({ vmid }: VmBackupPanelProps) {
   const loadSnapshots = async () => {
     setLoading(true);
     try {
-      const data = await apiClient.getVmSnapshots(vmid);
+      const data = await apiClient.getVmSnapshots(vmid, proxmoxConnectionId);
       setSnapshots(Array.isArray(data) ? data : []);
     } catch {
       showToast('Failed to load snapshots');
@@ -43,14 +44,14 @@ export default function VmBackupPanel({ vmid }: VmBackupPanelProps) {
 
   useEffect(() => {
     loadSnapshots();
-  }, [vmid]);
+  }, [vmid, proxmoxConnectionId]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = newName.trim() || `snap-${new Date().toISOString().slice(0, 16)}`;
     setCreating(true);
     try {
-      const res = await apiClient.createVmSnapshot(vmid, name, newDescription.trim());
+      const res = await apiClient.createVmSnapshot(vmid, name, newDescription.trim(), proxmoxConnectionId);
       if (res.success) {
         showToast(`Snapshot "${name}" created`);
         setShowCreate(false);
@@ -69,7 +70,7 @@ export default function VmBackupPanel({ vmid }: VmBackupPanelProps) {
 
   const handleDelete = async (snap: Snapshot) => {
     try {
-      const res = await apiClient.deleteVmSnapshot(vmid, snap.name);
+      const res = await apiClient.deleteVmSnapshot(vmid, snap.name, proxmoxConnectionId);
       if (res.success) {
         showToast(`Snapshot "${snap.name}" deleted`);
         await loadSnapshots();

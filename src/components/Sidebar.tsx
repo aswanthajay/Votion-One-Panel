@@ -308,7 +308,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const personalizedClientEssentials = navigationUsage
     .filter(item => item.type === 'vm' || (item.key !== 'overview' && item.key !== 'instances' && item.key !== 'instances-qemu' && destinationTitles[item.key]))
     .map(item => item.type === 'vm'
-      ? { title: item.name ? `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid} · ${item.name}` : `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid}`, key: `vm:${item.vmid}` }
+      ? {
+          title: item.name ? `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid} · ${item.name}` : `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid}`,
+          key: item.proxmoxConnectionId ? `vm:${item.proxmoxConnectionId}:${item.vmid}` : `vm:${item.vmid}`,
+        }
       : { title: destinationTitles[item.key], key: item.key })
     .filter((item, index, items) => items.findIndex(candidate => candidate.key === item.key) === index);
   const personalizedKeys = new Set(personalizedClientEssentials.map(item => item.key));

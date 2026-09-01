@@ -4,6 +4,7 @@ import { API_ORIGIN, apiClient } from '../../services/apiClient';
 
 interface VmMetricsChartProps {
   vmid: number;
+  proxmoxConnectionId?: string | null;
 }
 
 interface LiveTelemetry {
@@ -40,7 +41,7 @@ function TrendTooltip({ active, label, payload }: CustomTooltipProps) {
   );
 }
 
-export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
+export default function VmMetricsChart({ vmid, proxmoxConnectionId }: VmMetricsChartProps) {
   const [dbHistory, setDbHistory] = useState<any[]>([]);
   const [aggregations, setAggregations] = useState<any>(null);
   const [currentLive, setCurrentLive] = useState<LiveTelemetry | null>(null);
@@ -75,7 +76,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
 
   const fetchAggregations = async () => {
     try {
-      const json = await apiClient.getVMMetrics(vmid);
+      const json = await apiClient.getVMMetrics(vmid, proxmoxConnectionId);
       const history = Array.isArray(json.history) ? json.history : Array.isArray(json.data) ? json.data : [];
       setAggregations(json.aggregations || null);
       setDbHistory(history);
@@ -89,7 +90,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
 
   const fetchLiveTelemetry = async () => {
     try {
-      const json = await apiClient.getVMTelemetry(vmid);
+      const json = await apiClient.getVMTelemetry(vmid, proxmoxConnectionId);
 
       if (json.success && json.telemetry) {
         const current = json.telemetry as LiveTelemetry;
@@ -186,7 +187,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
     const liveInterval = setInterval(fetchLiveTelemetry, 1000);
     const aggInterval = setInterval(fetchAggregations, 15000); // Refresh history DB every 15s
     return () => { clearInterval(liveInterval); clearInterval(aggInterval); };
-  }, [vmid]);
+  }, [vmid, proxmoxConnectionId]);
 
   if (isLoading && !currentLive) {
     return (

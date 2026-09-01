@@ -52,9 +52,12 @@ async function getConns(): Promise<ProxmoxConn[]> {
   return (await dbService.getProxmoxConnectionCredentials()) || [];
 }
 
-/** Find the VM's node and type from the live cluster (first match by vmid). */
-async function locateVM(vmid: number): Promise<{ conn: ProxmoxConn; node: string; type: string } | null> {
-  const conns = await getConns();
+/** Find the VM's node and type from the live cluster (first match by vmid, filtered by connectionId if provided). */
+async function locateVM(vmid: number, proxmoxConnectionId?: string): Promise<{ conn: ProxmoxConn; node: string; type: string } | null> {
+  const allConns = await getConns();
+  const conns = proxmoxConnectionId
+    ? allConns.filter(c => c.id === proxmoxConnectionId)
+    : allConns;
   for (const conn of conns) {
     const host = cleanHost(conn);
     const port = conn.port || 8006;
@@ -76,10 +79,10 @@ async function locateVM(vmid: number): Promise<{ conn: ProxmoxConn; node: string
 }
 
 /** Get the Proxmox live status for a VM, merged with the DB assignment row. */
-async function getLiveVMSnapshot(vmid: number) {
-  const db = await dbService.getVMByVMID(vmid);
+async function getLiveVMSnapshot(vmid: number, proxmoxConnectionId?: string) {
+  const db = await dbService.getVMByVMID(vmid, proxmoxConnectionId);
   let live: any = null;
-  const loc = await locateVM(vmid);
+  const loc = await locateVM(vmid, proxmoxConnectionId || db?.proxmoxConnectionId);
   if (loc) {
     try {
       const host = cleanHost(loc.conn);
@@ -186,7 +189,8 @@ adminVmFleetRouter.get('/vms/:vmid/live', requireAuth, requireAdmin, async (req:
   try {
     const vmid = parseInt(String(req.params.vmid), 10);
     if (!vmid) return res.status(400).json({ success: false, error: 'Invalid VMID' });
-    const snapshot = await getLiveVMSnapshot(vmid);
+    const connectionId = (req.query.connectionId || req.query.proxmoxConnectionId) as string | undefined;
+    const snapshot = await getLiveVMSnapshot(vmid, connectionId);
     if (!snapshot.db) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
     res.json({ success: true, data: { ...snapshot.db, live: snapshot.live } });
   } catch (err: any) {
@@ -200,15 +204,17 @@ adminVmFleetRouter.get('/vms/:vmid/live', requireAuth, requireAdmin, async (req:
 adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const userEmail = req.authUser!.email;
   const vmid = parseInt(String(req.params.vmid), 10);
-  const { action } = req.body || {};
+  const { action, proxmoxConnectionId } = req.body || {};
+  const connectionId = (proxmoxConnectionId || req.query.connectionId || req.query.proxmoxConnectionId) as string | undefined;
   const allowed = ['start', 'stop', 'reboot', 'shutdown'];
   if (!allowed.includes(action)) {
     return res.status(400).json({ success: false, error: `action must be one of ${allowed.join(', ')}` });
   }
   try {
-    const db = await dbService.getVMByVMID(vmid);
+    const db = await dbService.getVMByVMID(vmid, connectionId);
     if (!db) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
 
+    const effectiveConnId = connectionId || db.proxmoxConnectionId;
     let pveResult: { ok: boolean; message: string } = { ok: false, message: 'No Proxmox connection available' };
 
     if (db.isSuspended && action !== 'start') {
@@ -216,7 +222,7 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
     }
 
     // Try to execute on the real Proxmox cluster
-    const loc = await locateVM(vmid);
+    const loc = await locateVM(vmid, effectiveConnId);
     if (loc) {
       try {
         const host = cleanHost(loc.conn);
@@ -235,9 +241,9 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
     }
 
     // Always keep the local DB status in sync (single source of truth for the panel)
-    await dbService.executeVMAction(vmid, action === 'shutdown' ? 'stop' : action, userEmail);
+    await dbService.executeVMAction(vmid, action === 'shutdown' ? 'stop' : action, userEmail, effectiveConnId);
 
-    const updated = await dbService.getVMByVMID(vmid);
+    const updated = await dbService.getVMByVMID(vmid, effectiveConnId);
     res.json({
       success: true,
       pve: pveResult,

@@ -973,7 +973,8 @@ apiRouter.post('/admin/proxmox/test', async (req, res) => {
 // ==========================================
 apiRouter.get('/vms/:vmid/snapshots', async (req, res) => {
   const targetVmid = parseInt(req.params.vmid, 10);
-  const vm = await dbService.getVMByVMID(targetVmid);
+  const connId = (req.query.connectionId || req.query.proxmoxConnectionId || req.headers['x-proxmox-connection-id']) as string | undefined;
+  const vm = await dbService.getVMByVMID(targetVmid, connId);
   if (!vm) {
     return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
   }
@@ -985,11 +986,12 @@ apiRouter.post('/vms/:vmid/snapshots', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { name, description } = req.body;
+  const { name, description, proxmoxConnectionId } = req.body;
+  const connId = (proxmoxConnectionId || req.query.connectionId || req.query.proxmoxConnectionId || req.headers['x-proxmox-connection-id']) as string | undefined;
   if (!name) {
     return res.status(400).json({ success: false, error: 'Snapshot name is required' });
   }
-  const vm = await dbService.getVMByVMID(targetVmid);
+  const vm = await dbService.getVMByVMID(targetVmid, connId);
   if (!vm) {
     return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
   }
@@ -1003,7 +1005,8 @@ apiRouter.delete('/vms/:vmid/snapshots/:name', async (req, res) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
   const snapshotName = decodeURIComponent(req.params.name);
-  const vm = await dbService.getVMByVMID(targetVmid);
+  const connId = (req.query.connectionId || req.query.proxmoxConnectionId || req.headers['x-proxmox-connection-id']) as string | undefined;
+  const vm = await dbService.getVMByVMID(targetVmid, connId);
   if (!vm) return res.status(404).json({ success: false, error: 'VMID not found' });
   const removed = await dbService.deleteVmSnapshot(targetVmid, vm.proxmoxConnectionId || 'legacy-local', snapshotName);
   if (!removed) {

@@ -73,12 +73,16 @@ clientRouter.post('/navigation-usage', async (req: any, res) => {
     await dbService.recordNavigationUsage(email, { key: itemKey, type: 'destination' });
   } else {
     const vmid = Number(req.body?.vmid);
-    const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid) : null;
+    const connId = typeof req.body?.connectionId === 'string' && req.body.connectionId.trim()
+      ? req.body.connectionId.trim()
+      : (itemKey.startsWith('vm:') && itemKey.split(':').length === 3 ? itemKey.split(':')[1] : undefined);
+    const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid, connId, email) : null;
     const delegatedAccess = vm ? await dbService.getSubUserAccess(vmid, email) : null;
     if (!vm || (String(vm.ownerEmail || '').toLowerCase() !== email && !delegatedAccess)) {
       return res.status(403).json({ success: false, error: 'You do not have access to this service.' });
     }
-    await dbService.recordNavigationUsage(email, { key: `vm:${vmid}`, type: 'vm', vmid });
+    const finalKey = vm.proxmoxConnectionId ? `vm:${vm.proxmoxConnectionId}:${vmid}` : `vm:${vmid}`;
+    await dbService.recordNavigationUsage(email, { key: finalKey, type: 'vm', vmid });
   }
 
   res.status(204).end();
@@ -232,12 +236,20 @@ const getVmEndpoint = (connection: any, vm: { node: string; type: string; vmid: 
 };
 clientRouter.use('/vms/:vmid', async (req, res, next) => {
   const vmid = Number(req.params.vmid);
-  const vm = await dbService.getVMByVMID(vmid);
-  if (!vm) return res.status(404).json({ success: false, error: 'Server not found' });
-
   const user = (req as any).authUser;
   const userEmail = String(user?.email || '').toLowerCase();
   const isAdmin = Boolean(user && adminRoles.has(user.role));
+  const connectionId = (
+    req.query.connectionId ||
+    req.query.proxmoxConnectionId ||
+    req.headers['x-proxmox-connection-id'] ||
+    req.body?.connectionId ||
+    req.body?.proxmoxConnectionId
+  ) as string | undefined;
+
+  const vm = await dbService.getVMByVMID(vmid, connectionId, isAdmin ? undefined : userEmail);
+  if (!vm) return res.status(404).json({ success: false, error: 'Server not found' });
+
   const isOwner = String(vm.ownerEmail || '').toLowerCase() === userEmail;
   let clientVmScope: ClientVmScope | null = isAdmin || isOwner ? 'owner' : null;
 
@@ -728,7 +740,7 @@ clientRouter.post('/vms/:vmid/power', requireClientVmScope('power'), async (req,
     return res.status(400).json({ success: false, error: 'Unsupported power action. Use start, stop, shutdown, or reboot.' });
   }
 
-  const vm = await dbService.getVMByVMID(vmid);
+  const vm = (req as any).authorizedVm || (await dbService.getVMByVMID(vmid, (req as any).body?.proxmoxConnectionId));
   if (!vm) {
     return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
   }
@@ -745,7 +757,7 @@ clientRouter.post('/vms/:vmid/power', requireClientVmScope('power'), async (req,
   }
 
   try {
-    const updated = await proxmoxService.executePowerAction(vm.node, vmid, action, userEmail);
+    const updated = await proxmoxService.executePowerAction(vm.node, vmid, action, userEmail, vm.proxmoxConnectionId);
     res.json({
       success: true,
       message: `Power action ${action ? action.toUpperCase() : 'START'} executed for VMID ${vmid}`,

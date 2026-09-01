@@ -21,7 +21,8 @@ export class VmController {
 
   static async getVM(req: Request, res: Response) {
     const targetVmid = parseInt(String(req.params.vmid), 10);
-    const vm = await VmRepository.getVMByVMID(targetVmid);
+    const connectionId = (req.query.connectionId || req.headers['x-proxmox-connection-id']) as string | undefined;
+    const vm = await dbService.getVMByVMID(targetVmid, connectionId);
     if (vm) {
       return res.json({ success: true, data: vm });
     } else {

@@ -188,12 +188,15 @@ const ClientPanelRoute: React.FC<{
   workspaceConnectionId?: string;
 }> = ({ filter, onOpenModal, workspaceConnectionId }) => {
   const location = useLocation();
-  const requestedVmid = Number(new URLSearchParams(location.search).get('vmid'));
+  const searchParams = new URLSearchParams(location.search);
+  const requestedVmid = Number(searchParams.get('vmid'));
+  const requestedConnectionId = searchParams.get('connectionId') || workspaceConnectionId;
   return <ClientPanelContent
     onOpenModal={onOpenModal}
     filter={filter}
     workspaceConnectionId={workspaceConnectionId}
     selectedVmid={Number.isInteger(requestedVmid) && requestedVmid > 0 ? requestedVmid : undefined}
+    selectedConnectionId={requestedConnectionId || undefined}
   />;
 };
 
@@ -293,7 +296,20 @@ const AppShell: React.FC = () => {
 
   const handleNavigate = (view: unknown) => {
     const requestedView = typeof view === 'string' ? view : '';
-    const requestedVmid = requestedView.startsWith('vm:') ? Number(requestedView.slice(3)) : null;
+    let requestedVmid: number | null = null;
+    let requestedConnectionId: string | null = null;
+
+    if (requestedView.startsWith('vm:')) {
+      const remainder = requestedView.slice(3);
+      const colonIdx = remainder.indexOf(':');
+      if (colonIdx !== -1) {
+        requestedConnectionId = remainder.slice(0, colonIdx);
+        requestedVmid = Number(remainder.slice(colonIdx + 1));
+      } else {
+        requestedVmid = Number(remainder);
+      }
+    }
+
     const path = requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0
       ? VIEW_PATHS.instances
       : requestedView in VIEW_PATHS
@@ -302,7 +318,8 @@ const AppShell: React.FC = () => {
 
     if (activeRole === 'client') {
       if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
-        void apiClient.recordNavigationUsage({ itemKey: `vm:${requestedVmid}`, itemType: 'vm', vmid: requestedVmid }).catch(() => undefined);
+        const itemKey = requestedConnectionId ? `vm:${requestedConnectionId}:${requestedVmid}` : `vm:${requestedVmid}`;
+        void apiClient.recordNavigationUsage({ itemKey, itemType: 'vm', vmid: requestedVmid }).catch(() => undefined);
       } else if (['overview', 'instances', 'instances-qemu', 'instances-lxc', 'client-instances-vnc', 'client-instances-metrics', 'client-instances-firewall', 'client-instances-backups', 'support', 'user-settings', 'team-access'].includes(requestedView)) {
         void apiClient.recordNavigationUsage({ itemKey: requestedView, itemType: 'destination' }).catch(() => undefined);
       }
@@ -311,12 +328,20 @@ const AppShell: React.FC = () => {
     startTransition(() => {
       setIsMobileSidebarOpen(false);
       const query = new URLSearchParams({ role: activeRole });
-            if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
+      if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
         query.set('vmid', String(requestedVmid));
+        const effectiveConn = requestedConnectionId || new URLSearchParams(window.location.search).get('connectionId');
+        if (effectiveConn) {
+          query.set('connectionId', effectiveConn);
+        }
       } else if (requestedView.startsWith('client-instances')) {
         const currentVmid = new URLSearchParams(window.location.search).get('vmid');
+        const currentConn = new URLSearchParams(window.location.search).get('connectionId');
         if (currentVmid) {
           query.set('vmid', currentVmid);
+        }
+        if (currentConn) {
+          query.set('connectionId', currentConn);
         }
       }
       navigate(`${path}?${query.toString()}`);

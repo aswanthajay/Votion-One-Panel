@@ -4,9 +4,10 @@ import { apiClient } from '../services/apiClient';
 
 interface VmFirewallPanelProps {
   vmid: number;
+  proxmoxConnectionId?: string | null;
 }
 
-export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
+export default function VmFirewallPanel({ vmid, proxmoxConnectionId }: VmFirewallPanelProps) {
   const [rules, setRules] = useState<any[]>([]);
   const [isEnabled, setIsEnabled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,7 +29,7 @@ export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
   const fetchFirewall = async () => {
     setIsLoading(true);
     try {
-      const json = await apiClient.getFirewallRules(vmid);
+      const json = await apiClient.getFirewallRules(vmid, proxmoxConnectionId);
       if (json.success) {
         setRules(json.rules || []);
         setIsEnabled(json.options?.enable === 1 || json.options?.enable === true);
@@ -44,11 +45,11 @@ export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
 
   useEffect(() => {
     fetchFirewall();
-  }, [vmid]);
+  }, [vmid, proxmoxConnectionId]);
 
   const handleToggle = async () => {
     try {
-      const json = await apiClient.toggleFirewall(vmid, !isEnabled);
+      const json = await apiClient.toggleFirewall(vmid, !isEnabled, proxmoxConnectionId);
       if (json.success) {
         showToast(`Firewall ${!isEnabled ? 'enabled' : 'disabled'} for VM ${vmid}`);
         fetchFirewall();
@@ -62,7 +63,7 @@ export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
 
   const handleDelete = async (pos: number) => {
     try {
-      const json = await apiClient.deleteFirewallRule(vmid, pos);
+      const json = await apiClient.deleteFirewallRule(vmid, pos, proxmoxConnectionId);
       if (json.success) {
         showToast('Firewall rule removed');
         fetchFirewall();
@@ -106,7 +107,7 @@ export default function VmFirewallPanel({ vmid }: VmFirewallPanelProps) {
         proto,
         dport: dport.trim(),
         comment: comment.trim() || undefined,
-      });
+      }, proxmoxConnectionId);
       if (json.success) {
         showToast('Firewall rule added');
         setPreset('custom');

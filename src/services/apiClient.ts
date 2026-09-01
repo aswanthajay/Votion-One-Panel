@@ -118,6 +118,7 @@ export interface ApiNavigationUsage {
   vmid: number | null;
   name: string | null;
   status: string | null;
+  proxmoxConnectionId?: string | null;
   proxmoxConnectionName?: string | null;
   usageCount: number;
   lastUsedAt: string;
@@ -677,9 +678,11 @@ class ApiClient {
     return { message: data.message || 'Pending invitation revoked.' };
   }
 
-  async getVmReimageRequests(vmid: number): Promise<ApiReimageRequest[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests`, {
-      headers: this.getHeaders(),
+  async getVmReimageRequests(vmid: number, proxmoxConnectionId?: string | null): Promise<ApiReimageRequest[]> {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests${qs}`, {
+      headers,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -688,11 +691,13 @@ class ApiClient {
     return data.data || [];
   }
 
-  async createVmReimageRequest(vmid: number, requestedOs: string, reason?: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests`, {
+  async createVmReimageRequest(vmid: number, requestedOs: string, reason?: string, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ targetOS: requestedOs, reason }),
+      headers,
+      body: JSON.stringify({ targetOS: requestedOs, reason, proxmoxConnectionId }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -701,10 +706,12 @@ class ApiClient {
     return data as { success: true; message: string; data: ApiReimageRequest };
   }
 
-  async cancelVmReimageRequest(vmid: number, requestId: string) {
-    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests/${encodeURIComponent(requestId)}/cancel`, {
+  async cancelVmReimageRequest(vmid: number, requestId: string, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests/${encodeURIComponent(requestId)}/cancel${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -794,9 +801,11 @@ class ApiClient {
     return data as { success: true; execution: ApiReimageExecution; message: string };
   }
 
-  async getVMMetadata(vmid: number): Promise<ApiVmMetadata> {
-    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata`, {
-      headers: this.getHeaders(),
+  async getVMMetadata(vmid: number, proxmoxConnectionId?: string | null): Promise<ApiVmMetadata> {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata${qs}`, {
+      headers,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) {
@@ -805,9 +814,11 @@ class ApiClient {
     return data.data as ApiVmMetadata;
   }
 
-  async getVMMetrics(vmid: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metrics`, {
-      headers: this.getHeaders(),
+  async getVMMetrics(vmid: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metrics${qs}`, {
+      headers,
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
@@ -816,9 +827,11 @@ class ApiClient {
     return data;
   }
 
-  async getVMTelemetry(vmid: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry`, {
-      headers: this.getHeaders(),
+  async getVMTelemetry(vmid: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry${qs}`, {
+      headers,
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
@@ -827,10 +840,12 @@ class ApiClient {
     return data;
   }
 
-  async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown', proxmoxConnectionId?: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/power`, {
+  async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown', proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/power${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers,
       body: JSON.stringify({ action, proxmoxConnectionId }),
     });
     return await res.json();
@@ -1432,10 +1447,13 @@ class ApiClient {
   /**
    * Inject SSH Keys via Cloud-Init
    */
-  async injectCloudInitSsh(vmid: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/cloud-init/sync-ssh`, {
+  async injectCloudInitSsh(vmid: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/cloud-init/sync-ssh${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers,
+      body: JSON.stringify({ proxmoxConnectionId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to inject SSH keys');
@@ -1445,11 +1463,13 @@ class ApiClient {
   /**
    * Reset VM Password (Cloud-Init + QEMU Agent Live Update)
    */
-  async resetVmPassword(vmid: number, password: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/password`, {
+  async resetVmPassword(vmid: number, password: string, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/password${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ password }),
+      headers,
+      body: JSON.stringify({ password, proxmoxConnectionId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to reset password');
@@ -1846,25 +1866,31 @@ class ApiClient {
   // ==========================================
   // VM SNAPSHOTS / BACKUPS
   // ==========================================
-  async getVmSnapshots(vmid: number) {
-    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, { headers: this.getHeaders() });
+  async getVmSnapshots(vmid: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots${qs}`, { headers });
     const data = await res.json();
     return data.data || [];
   }
 
-  async createVmSnapshot(vmid: number, name: string, description: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, {
+  async createVmSnapshot(vmid: number, name: string, description: string, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ name, description }),
+      headers,
+      body: JSON.stringify({ name, description, proxmoxConnectionId }),
     });
     return await res.json();
   }
 
-  async deleteVmSnapshot(vmid: number, name: string) {
-    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}`, {
+  async deleteVmSnapshot(vmid: number, name: string, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}${qs}`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
+      headers,
     });
     return await res.json();
   }
@@ -1872,33 +1898,41 @@ class ApiClient {
   // ==========================================
   // VM FIREWALL RULES
   // ==========================================
-  async getFirewallRules(vmid: number) {
-    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, { headers: this.getHeaders() });
+  async getFirewallRules(vmid: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall${qs}`, { headers });
     return await res.json();
   }
 
-  async toggleFirewall(vmid: number, enable: boolean) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/toggle`, {
+  async toggleFirewall(vmid: number, enable: boolean, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/toggle${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ enable }),
+      headers,
+      body: JSON.stringify({ enable, proxmoxConnectionId }),
     });
     return await res.json();
   }
 
-  async addFirewallRule(vmid: number, rule: { action: string; type: string; proto?: string; dport?: string; enable?: boolean; comment?: string }) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, {
+  async addFirewallRule(vmid: number, rule: { action: string; type: string; proto?: string; dport?: string; enable?: boolean; comment?: string }, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall${qs}`, {
       method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(rule),
+      headers,
+      body: JSON.stringify({ ...rule, proxmoxConnectionId }),
     });
     return await res.json();
   }
 
-  async deleteFirewallRule(vmid: number, pos: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/${pos}`, {
+  async deleteFirewallRule(vmid: number, pos: number, proxmoxConnectionId?: string | null) {
+    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
+    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall/${pos}${qs}`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
+      headers,
     });
     return await res.json();
   }
