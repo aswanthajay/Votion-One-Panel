@@ -221,6 +221,9 @@ adminRouter.post('/settings/smtp', async (req, res) => {
   try {
     const config = req.body;
     await dbService.updateSystemSetting('smtp_config', config);
+    if (typeof emailService.refreshTransporter === 'function') {
+      await emailService.refreshTransporter();
+    }
     res.json({ success: true, message: 'SMTP configuration saved successfully', data: config });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Failed to update SMTP settings' });
@@ -229,13 +232,20 @@ adminRouter.post('/settings/smtp', async (req, res) => {
 
 adminRouter.post('/settings/smtp/test', async (req, res) => {
   try {
-    const { targetEmail } = req.body;
+    const targetEmail = req.body?.targetEmail || req.body?.testEmail;
     if (!targetEmail) return res.status(400).json({ success: false, error: 'Target email is required for testing' });
-    const result = await emailService.sendEmail(targetEmail, 'Votion One SMTP Test', '<p>SMTP test successful</p>');
+    if (!emailService.isReady()) {
+      return res.status(503).json({ success: false, error: 'SMTP is disabled or has not initialized. Save an enabled SMTP configuration first.' });
+    }
+    const result = await emailService.sendEmail(
+      targetEmail,
+      'Votion One SMTP Test',
+      '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Votion One SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Votion One</p></div>'
+    );
     if (result) {
       res.json({ success: true, message: `Test email dispatched to ${targetEmail}` });
     } else {
-      res.status(500).json({ success: false, error: 'Failed to send test email' });
+      res.status(502).json({ success: false, error: 'SMTP provider rejected the test message. Check host, port, credentials, and sender address in server logs.' });
     }
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'SMTP test failed' });
