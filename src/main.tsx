@@ -12,3 +12,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 );
+
+// Gracefully fade out the global preloader once React has mounted
+const preloader = document.getElementById('votion-global-preloader');
+if (preloader) {
+  setTimeout(() => {
+    preloader.style.opacity = '0';
+    preloader.style.pointerEvents = 'none';
+    setTimeout(() => preloader.remove(), 600);
+  }, 100);
+}

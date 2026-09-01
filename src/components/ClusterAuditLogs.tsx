@@ -149,7 +149,7 @@ export const ClusterAuditLogs: React.FC = () => {
 
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="page-heading mb-1">Cluster Audit Log</h1>
+          <h1 className="page-heading mb-1 font-serif font-medium tracking-[-0.03em]">Cluster Audit Log</h1>
           <p className="text-xs text-[#656b6b]">Immutable record of every administrative action on the platform</p>
         </div>
         <button

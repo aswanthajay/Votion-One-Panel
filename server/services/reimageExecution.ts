@@ -2,7 +2,10 @@ import crypto from 'crypto';
 import { dbService } from '../db/database.js';
 import { proxmoxFetch } from './proxmoxHttp.js';
 
-export const reimageExecutionEnabled = process.env.REIMAGE_EXECUTION_ENABLED === 'true';
+// OS changes are intentionally manual: administrators perform them in Proxmox
+// and record completion in the approval queue. The former automated execution
+// path remains available only for historical state inspection and is disabled.
+export const reimageExecutionEnabled = false;
 
 export class ReimageExecutionError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -63,51 +66,8 @@ export class ReimageExecutionService {
     return dbService.getReimageExecutions({ operatorEmail, state });
   }
 
-  async createExecution(requestId: string, operatorEmail: string) {
-    const request = await dbService.getApprovedReimageRequest(requestId);
-    if (!request) throw new ReimageExecutionError('APPROVED_REQUEST_NOT_FOUND', 'The request is no longer approved or does not exist.');
-    if (request.is_suspended) throw new ReimageExecutionError('VM_SUSPENDED', 'The VM is suspended and cannot enter execution preflight.');
-
-    const vmType = request.vm_type === 'lxc' ? 'lxc' : 'qemu';
-    const profile = await dbService.getEnabledReimageImageProfile(request.requested_os, vmType);
-    if (!profile) throw new ReimageExecutionError('IMAGE_PROFILE_NOT_CONFIGURED', 'No enabled operator image profile is configured for this OS and VM type.');
-
-    const requestSnapshot = {
-      requestId: request.id,
-      vmid: Number(request.vmid),
-      vmName: request.vm_name,
-      vmType,
-      ownerEmail: request.owner_email,
-      requesterEmail: request.requester_email,
-      requestedOs: request.requested_os,
-      requestStatus: request.status,
-      requesterNote: request.requester_note || null,
-      reviewerEmail: request.reviewer_email || null,
-      reviewedAt: request.reviewed_at || null,
-      approvedAt: request.reviewed_at || null,
-      approvedBefore: new Date().toISOString(),
-      node: request.node,
-      imageProfile: {
-        id: profile.id,
-        version: profile.version,
-        templateVmid: profile.template_vmid,
-        templateNode: profile.template_node,
-        storageId: profile.storage_id,
-        imageDigest: profile.image_digest || null,
-      },
-    };
-    const planHash = hashReimagePlan(requestSnapshot);
-    const execution = await dbService.createReimageExecution({
-      requestId,
-      vmid: Number(request.vmid),
-      requestSnapshot,
-      imageProfileId: profile.id,
-      imageProfileVersion: profile.version,
-      planHash,
-      operatorEmail,
-    });
-    if (!execution) throw new ReimageExecutionError('EXECUTION_CREATE_FAILED', 'Unable to create the execution record.');
-    return { execution, planHash, executionEnabled: reimageExecutionEnabled };
+  async createExecution(_requestId: string, _operatorEmail: string) {
+    throw new ReimageExecutionError('MANUAL_WORKFLOW_ONLY', 'OS reimage is manual in this deployment. Perform the approved change in Proxmox, then mark the request completed in the administrator queue.');
   }
 
   async preflight(executionId: string, operatorEmail: string) {

@@ -292,10 +292,12 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
 adminVmFleetRouter.post('/vms/:vmid/update', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const userEmail = req.authUser!.email;
   const vmid = parseInt(String(req.params.vmid), 10);
-  const { name, os, ipAddress, cpus, memoryGb, diskGb, expiryDays } = req.body || {};
-  try {
-    const vm = await dbService.getVMByVMID(vmid);
-    if (!vm) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
+  const { proxmoxConnectionId, name, os, ipAddress, cpus, memoryGb, diskGb, expiryDays } = req.body || {};
+    try {
+      const vm = await dbService.getVMByVMID(vmid, proxmoxConnectionId);
+      if (!vm) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
+      
+      const connId = proxmoxConnectionId || vm.proxmoxConnectionId || 'legacy-local';
 
     const sets: string[] = [];
     const vals: any[] = [];
@@ -306,18 +308,23 @@ adminVmFleetRouter.post('/vms/:vmid/update', requireAuth, requireAdmin, async (r
     if (memoryGb !== undefined && Number(memoryGb) > 0) { sets.push('ram_mb = $' + (vals.length + 1)); vals.push(Number(memoryGb) * 1024); sets.push('memory = $' + (vals.length + 1)); vals.push(Number(memoryGb) * 1073741824); }
     if (diskGb !== undefined && Number(diskGb) > 0) { sets.push('disk_gb = $' + (vals.length + 1)); vals.push(Number(diskGb)); sets.push('disk = $' + (vals.length + 1)); vals.push(Number(diskGb) * 1073741824); }
     if (expiryDays !== undefined && Number(expiryDays) > 0) {
-      const vm = await dbService.getVMByVMID(vmid);
       const base = vm && vm.expiryDate && new Date(vm.expiryDate) > new Date() ? new Date(vm.expiryDate) : new Date();
       sets.push('expiry_date = $' + (vals.length + 1)); vals.push(new Date(base.getTime() + Number(expiryDays) * 86400000).toISOString());
     }
 
-    if (sets.length > 0) {
-      vals.push(vmid);
+        if (sets.length > 0) {
+      vals.push(String(vmid));
+      const vmidIdx = vals.length;
+      vals.push(String(connId));
+      const connIdx = vals.length;
       const { pgPool } = await import('./db/database.js');
-      await pgPool.query(`UPDATE vms SET ${sets.join(', ')} WHERE vmid = $${vals.length}`, vals);
+      await pgPool.query(
+        `UPDATE vms SET ${sets.join(', ')} WHERE vmid::text = $${vmidIdx}::text AND ($${connIdx}::text = 'legacy-local' OR proxmox_connection_id IS NULL OR proxmox_connection_id::text = $${connIdx}::text)`,
+        vals
+      );
       await dbService.logAudit(userEmail, 'UPDATE_VM', `VMID ${vmid}`, `Updated: ${Object.keys(req.body || {}).join(', ')}`);
     }
-    res.json({ success: true, message: `VMID ${vmid} updated`, data: await dbService.getVMByVMID(vmid) });
+    res.json({ success: true, message: `VMID ${vmid} updated`, data: await dbService.getVMByVMID(vmid, connId) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -352,7 +359,7 @@ adminVmFleetRouter.get('/summary', requireAuth, requireAdmin, async (_req: Authe
         if (!nodesRes.ok) continue;
         const nodePayload = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
         for (const n of nodePayload.data || []) {
-          let cpus = n.maxcpu || 0;
+          const cpus = n.maxcpu || 0;
           let memTotal = 0;
           try {
             const stRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });

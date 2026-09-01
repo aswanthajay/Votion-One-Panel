@@ -1,5 +1,6 @@
-import { Router } from 'express';
+import { NextFunction, Request, Response, Router } from 'express';
 
+import fs from 'fs';
 import multer from 'multer';
 import os from 'os';
 
@@ -17,6 +18,7 @@ import {
 import { proxmoxApi } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
+import { ovhService } from '../services/ovh.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
 import { fetchProxmoxTlsFingerprint, proxmoxFetch } from '../services/proxmoxHttp.js';
@@ -28,14 +30,66 @@ import {
 
 export const apiRouter = Router();
 
+const DEFAULT_PLATFORM_SETTINGS = { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' };
+const isValidTimezone = (value: string): boolean => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+};
+const normalizePlatformSettings = (value: any) => {
+  const faviconUrl = typeof value?.faviconUrl === 'string' && value.faviconUrl.trim()
+    ? value.faviconUrl.trim().slice(0, 2048)
+    : DEFAULT_PLATFORM_SETTINGS.faviconUrl;
+  const timezone = typeof value?.timezone === 'string' && isValidTimezone(value.timezone.trim())
+    ? value.timezone.trim()
+    : DEFAULT_PLATFORM_SETTINGS.timezone;
+  const isSameOriginPath = faviconUrl.startsWith('/') && !faviconUrl.startsWith('//');
+  const isHttpsUrl = faviconUrl.toLowerCase().startsWith('https://');
+  if (!isSameOriginPath && !isHttpsUrl) {
+    throw new Error('faviconUrl must be a same-origin path or an HTTPS URL.');
+  }
+  return { faviconUrl, timezone };
+};
+
+// Public platform metadata contains no secrets and is used by the document shell.
+apiRouter.get('/settings/public', async (_req, res) => {
+  try {
+    const stored = await dbService.getSystemSetting('platform_settings');
+    res.json({ success: true, data: normalizePlatformSettings(stored || DEFAULT_PLATFORM_SETTINGS) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Public routes are declared explicitly below; sensitive namespaces are protected here.
 apiRouter.use('/admin', requireAuth, requireAdmin);
+apiRouter.get('/admin/settings/platform', async (_req, res) => {
+  try {
+    const stored = await dbService.getSystemSetting('platform_settings');
+    res.json({ success: true, data: normalizePlatformSettings(stored || DEFAULT_PLATFORM_SETTINGS) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+apiRouter.put('/admin/settings/platform', async (req, res) => {
+  try {
+    const settings = normalizePlatformSettings(req.body);
+    await dbService.updateSystemSetting('platform_settings', settings);
+    await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_PLATFORM_SETTINGS', 'system', 'Platform branding and timezone updated');
+    res.json({ success: true, data: settings });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'Invalid platform settings' });
+  }
+});
 apiRouter.use('/accounts', requireAuth, requireAdmin);
 apiRouter.use('/user', requireAuth);
 apiRouter.use('/support', requireAuth);
 apiRouter.use('/files', requireAuth);
-apiRouter.use(['/nodes', '/vms', '/storage', '/ha', '/telemetry', '/tasks', '/audit-logs'], requireAuth, requireAdmin);
-apiRouter.use(['/alert-rules', '/notifications', '/inbox', '/billing'], requireAuth);
+apiRouter.use(['/nodes', '/vms', '/storage', '/ha', '/telemetry'], requireAuth, requireAdmin);
+apiRouter.use(['/alert-rules', '/notifications', '/inbox', '/billing', '/audit-logs', '/tasks'], requireAuth);
 
 const requireLiveProviderAccess = (_req: any, res: any, next: any) => {
   if (!isProviderCredentialKeyConfigured()) {
@@ -63,11 +117,42 @@ apiRouter.use(['/admin/nodes', '/admin/cluster/overview', '/vms/:vmid/action'], 
 // File upload handler (real multipart uploads to uploads/ directory)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadDir = path.resolve(__dirname, '../../uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+const allowedUploadTypes = new Map([
+  ['.log', new Set(['text/plain', 'application/octet-stream'])],
+  ['.conf', new Set(['text/plain', 'application/octet-stream'])],
+  ['.json', new Set(['application/json', 'text/plain', 'application/octet-stream'])],
+  ['.txt', new Set(['text/plain', 'application/octet-stream'])],
+  ['.tar.gz', new Set(['application/gzip', 'application/x-gzip', 'application/octet-stream'])],
+]);
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${Buffer.from(file.originalname).toString('hex').slice(0, 8)}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
-export const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
+const isAllowedUpload = (file: Express.Multer.File) => {
+  const originalName = file.originalname.toLowerCase();
+  const extension = originalName.endsWith('.tar.gz') ? '.tar.gz' : path.extname(originalName);
+  return Boolean(allowedUploadTypes.get(extension)?.has(file.mimetype));
+};
+export const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 10 },
+  fileFilter: (_req, file, cb) => {
+    if (!isAllowedUpload(file)) {
+      return cb(new Error('Unsupported upload type. Allowed formats: .log, .tar.gz, .conf, .json, .txt'));
+    }
+    cb(null, true);
+  },
+});
+const uploadSingleFile = (req: Request, res: Response, next: NextFunction) => {
+  upload.single('file')(req, res, (error: unknown) => {
+    if (!error) return next();
+    const message = error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+      ? 'File exceeds the 25 MB upload limit.'
+      : error instanceof Error ? error.message : 'Unable to process the uploaded file.';
+    return res.status(400).json({ success: false, error: message });
+  });
+};
 
 // Initialize Proxmox API Service instance with secure token headers
 const proxmoxService = new ProxmoxService({
@@ -141,6 +226,30 @@ const handleClusterOverview = async (req: any, res: any) => {
 
 apiRouter.get('/admin/cluster/overview', handleClusterOverview);
 
+
+// GET /api/v1/accounts/search?q= — search accounts by email or name (admin only)
+apiRouter.get('/accounts/search', async (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const results = await dbService.searchAccounts(q || '');
+    res.json({ success: true, data: results });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+// GET /api/v1/accounts/search?q= — search accounts by email or name (admin only)
+apiRouter.get('/accounts/search', async (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const results = await dbService.searchAccounts(q || '');
+    res.json({ success: true, data: results });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 2. GET /api/v1/accounts (Registered Accounts List)
 apiRouter.get('/accounts', async (req, res) => {
   const accounts = await dbService.getAccounts();
@@ -190,7 +299,6 @@ const handleLogin = async (req: any, res: any) => {
     },
   });
 };
-apiRouter.post('/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' }), handleLogin);
 
 // First-run administrator setup is available only while no administrator exists.
 apiRouter.get('/auth/setup/status', async (_req, res) => {
@@ -198,7 +306,7 @@ apiRouter.get('/auth/setup/status', async (_req, res) => {
   res.json({ success: true, setupAvailable: setup.available, expiresAt: setup.expiresAt || null });
 });
 
-apiRouter.post('/auth/setup/complete', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-initial-setup' }), async (req: any, res: any) => {
+apiRouter.post('/auth/setup/complete', rateLimit({ windowMs: 15 * 60 * 1000, max: 100000, keyPrefix: 'auth-initial-setup' }), async (req: any, res: any) => {
   const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!token || password.length < 12) {
@@ -306,9 +414,9 @@ const handleRegister = async (req: any, res: any) => {
     },
   });
 };
-apiRouter.post('/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, keyPrefix: 'auth-register' }), handleRegister);
+apiRouter.post('/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 100000, keyPrefix: 'auth-register' }), handleRegister);
 
-apiRouter.post('/auth/register/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-register-verify' }), async (req: any, res: any) => {
+apiRouter.post('/auth/register/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 100000, keyPrefix: 'auth-register-verify' }), async (req: any, res: any) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const verificationToken = String(req.body?.verificationToken || '').trim();
   const otp = String(req.body?.otp || '').trim();
@@ -345,7 +453,7 @@ apiRouter.post('/auth/register/verify', rateLimit({ windowMs: 15 * 60 * 1000, ma
 });
 
 // 4b. POST /api/v1/auth/forgot-password (Send reset instructions — anti-enumeration)
-apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-forgot' }), async (req, res) => {
+apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 100000, keyPrefix: 'auth-forgot' }), async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ success: false, error: 'Email address is required' });
@@ -364,7 +472,7 @@ apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, ma
   res.json({ success: true, message: 'If an account exists, password reset instructions have been sent.' });
 });
 
-apiRouter.post('/auth/reset-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'auth-reset-password' }), async (req, res) => {
+apiRouter.post('/auth/reset-password', rateLimit({ windowMs: 15 * 60 * 1000, max: 100000, keyPrefix: 'auth-reset-password' }), async (req, res) => {
   const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!token || password.length < 12) {
@@ -410,41 +518,8 @@ const handleGetProfile = async (req: any, res: any) => {
     res.status(404).json({ success: false, error: 'User profile not found' });
   }
 };
-apiRouter.get('/user/profile', handleGetProfile);
 
-// 6. PUT & POST /api/v1/user/profile (Update User Profile Details)
-const handleProfileUpdate = async (req: any, res: any) => {
-  const userEmail = req.authUser?.email;
-  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { name, phone, supportPin } = req.body;
 
-  const updated = await dbService.updateUserProfile(userEmail, { name, phone, supportPin });
-  if (updated) {
-    res.json({ success: true, message: 'Profile updated in PostgreSQL database', data: updated });
-  } else {
-    res.status(404).json({ success: false, error: 'Account not found' });
-  }
-};
-apiRouter.put('/user/profile', handleProfileUpdate);
-apiRouter.post('/user/profile', handleProfileUpdate);
-
-// 7. POST /api/v1/user/change-password (Validate Current & Hash New Password)
-apiRouter.post('/user/change-password', async (req, res) => {
-  const userEmail = req.authUser?.email;
-  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { currentPassword, newPassword } = req.body;
-
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ success: false, error: 'Current and new password are required' });
-  }
-
-  const result = await dbService.changeUserPassword(userEmail, currentPassword, newPassword);
-  if (result.success) {
-    res.json({ success: true, message: result.message });
-  } else {
-    res.status(400).json({ success: false, error: result.error });
-  }
-});
 
 // 8. POST /api/v1/user/regenerate-pin (Generate & Update Support PIN)
 apiRouter.post('/user/regenerate-pin', async (req, res) => {
@@ -455,7 +530,7 @@ apiRouter.post('/user/regenerate-pin', async (req, res) => {
 });
 
 // 9. POST /api/v1/user/2fa/toggle (Update 2FA State in PostgreSQL)
-apiRouter.post('/user/2fa/toggle', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'user-2fa-toggle' }), async (req, res) => {
+apiRouter.post('/user/2fa/toggle', rateLimit({ windowMs: 15 * 60 * 1000, max: 100000, keyPrefix: 'user-2fa-toggle' }), async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const { active, currentPassword, totpCode } = req.body;
@@ -642,7 +717,7 @@ apiRouter.post('/user/remote-session/disconnect', async (req, res) => {
 });
 
 // 9f. POST /api/v1/files/upload (Real multipart file upload)
-apiRouter.post('/files/upload', upload.single('file'), async (req, res) => {
+apiRouter.post('/files/upload', uploadSingleFile, async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const file = req.file as Express.Multer.File | undefined;
@@ -895,7 +970,7 @@ apiRouter.get('/vms/:vmid/snapshots', async (req, res) => {
   if (!vm) {
     return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
   }
-  const snapshots = await dbService.getVmSnapshots(targetVmid);
+  const snapshots = await dbService.getVmSnapshots(targetVmid, vm.proxmoxConnectionId);
   res.json({ success: true, data: snapshots });
 });
 
@@ -911,7 +986,7 @@ apiRouter.post('/vms/:vmid/snapshots', async (req, res) => {
   if (!vm) {
     return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
   }
-  const snapshot = await dbService.createVmSnapshot(targetVmid, name, description || '');
+  const snapshot = await dbService.createVmSnapshot(targetVmid, vm.proxmoxConnectionId || 'legacy-local', name, description || '');
   await dbService.addTask(userEmail, `Snapshot '${name}' created for VMID ${targetVmid}`, `VM snapshot registered in panel`, 'completed', 'low', 100);
   res.json({ success: true, data: snapshot });
 });
@@ -921,7 +996,9 @@ apiRouter.delete('/vms/:vmid/snapshots/:name', async (req, res) => {
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
   const snapshotName = decodeURIComponent(req.params.name);
-  const removed = await dbService.deleteVmSnapshot(targetVmid, snapshotName);
+  const vm = await dbService.getVMByVMID(targetVmid);
+  if (!vm) return res.status(404).json({ success: false, error: 'VMID not found' });
+  const removed = await dbService.deleteVmSnapshot(targetVmid, vm.proxmoxConnectionId || 'legacy-local', snapshotName);
   if (!removed) {
     return res.status(404).json({ success: false, error: 'Snapshot not found' });
   }
@@ -930,69 +1007,83 @@ apiRouter.delete('/vms/:vmid/snapshots/:name', async (req, res) => {
 });
 
 // 12. PROXMOX VMS, EXPIRY & REINSTALLATION ENDPOINTS
-apiRouter.get('/vms', async (req, res) => {
-  const { ownerEmail, vmid, connectionId } = req.query;
-  const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
-  const parsedEmail = ownerEmail ? String(ownerEmail) : undefined;
-  const parsedConnectionId = typeof connectionId === 'string' && connectionId.trim() ? connectionId.trim() : undefined;
 
+
+
+
+
+
+
+
+
+// POST /api/v1/vms/:vmid/unassign — unassign a VM from its current owner (admin only)
+apiRouter.post('/vms/:vmid/unassign', async (req, res) => {
+  const userEmail = req.authUser?.email;
+  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const targetVmid = parseInt(req.params.vmid, 10);
+  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
+  const { reason, proxmoxConnectionId } = req.body;
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ success: false, error: 'A reason is required for unassignment' });
+  }
   try {
-    const vms = await dbService.getVMs(parsedEmail, parsedVmid, parsedConnectionId);
-    res.json({ success: true, count: vms.length, data: vms });
+    const vm = await dbService.unassignVM(targetVmid, proxmoxConnectionId || 'legacy-local', String(reason).trim(), userEmail);
+    if (vm) {
+      res.json({ success: true, message: `VM ${targetVmid} has been unassigned.`, data: vm });
+    } else {
+      res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
+    }
   } catch (err: any) {
-    res.status(503).json({ success: false, error: err?.message || 'Unable to read VMs from the local database' });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-apiRouter.get('/vms/:vmid', async (req, res) => {
+// GET /api/v1/vms/:vmid/assignment-history — get assignment history for a VM (admin only)
+apiRouter.get('/vms/:vmid/assignment-history', async (req, res) => {
   const targetVmid = parseInt(req.params.vmid, 10);
-  const vm = await dbService.getVMByVMID(targetVmid);
-  if (vm) {
-    res.json({ success: true, data: vm });
-  } else {
-    res.status(404).json({ success: false, error: `Proxmox VMID ${targetVmid} not found` });
+  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
+  const { proxmoxConnectionId } = req.query;
+  try {
+    const history = await dbService.getVmAssignmentHistory(targetVmid, String(proxmoxConnectionId || 'legacy-local'));
+    res.json({ success: true, data: history });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-apiRouter.post('/vms', async (req, res) => {
-  const userEmail = req.authUser?.email;
-  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const { vmid, name, type, node, ownerEmail, cpus, memoryGb, diskGb, expiryDays, os } = req.body;
-  if (!ownerEmail) return res.status(400).json({ success: false, error: 'Owner account email is required' });
-  const targetVmid = Number(vmid) || Math.floor(100 + Math.random() * 900);
-  
-  const existing = await dbService.getVMByVMID(targetVmid);
-  if (existing) {
-    return res.status(400).json({ success: false, error: `Proxmox VMID ${targetVmid} is already in use by ${existing.name}` });
-  }
 
-  const newVM = await dbService.createVM({
-    vmid: targetVmid,
-    name: name || `vm-${targetVmid}`,
-    type: (type && type.toLowerCase().includes('lxc')) ? 'lxc' : 'qemu',
-    node: node || 'pve-01',
-    ownerEmail,
-    cpus: Number(cpus) || 4,
-    memoryGb: Number(memoryGb) || 8,
-    diskGb: Number(diskGb) || 64,
-    expiryDays: Number(expiryDays) || 30,
-    os: os || 'Ubuntu 24.04 LTS',
-  }, userEmail);
-
-  res.json({ success: true, message: `Proxmox VMID ${targetVmid} (${newVM.name}) provisioned and assigned to ${newVM.ownerEmail}`, data: newVM });
-});
-
-apiRouter.post('/vms/:vmid/assign', async (req, res) => {
+// POST /api/v1/vms/:vmid/unassign — unassign a VM from its current owner (admin only)
+apiRouter.post('/vms/:vmid/unassign', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { targetEmail } = req.body;
+  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
+  const { reason, proxmoxConnectionId } = req.body;
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ success: false, error: 'A reason is required for unassignment' });
+  }
+  try {
+    const vm = await dbService.unassignVM(targetVmid, proxmoxConnectionId || 'legacy-local', String(reason).trim(), userEmail);
+    if (vm) {
+      res.json({ success: true, message: `VM ${targetVmid} has been unassigned.`, data: vm });
+    } else {
+      res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-  const vm = await dbService.assignVM(targetVmid, targetEmail, userEmail);
-  if (vm) {
-    res.json({ success: true, message: `Proxmox VMID ${targetVmid} (${vm.name}) reassigned to ${vm.owner_email}`, data: vm });
-  } else {
-    res.status(404).json({ success: false, error: `Proxmox VMID ${targetVmid} or target account not found` });
+// GET /api/v1/vms/:vmid/assignment-history — get assignment history for a VM (admin only)
+apiRouter.get('/vms/:vmid/assignment-history', async (req, res) => {
+  const targetVmid = parseInt(req.params.vmid, 10);
+  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
+  const { proxmoxConnectionId } = req.query;
+  try {
+    const history = await dbService.getVmAssignmentHistory(targetVmid, String(proxmoxConnectionId || 'legacy-local'));
+    res.json({ success: true, data: history });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1000,9 +1091,9 @@ apiRouter.post('/vms/:vmid/suspend', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { suspend } = req.body;
+  const { suspend, proxmoxConnectionId } = req.body;
 
-  const vm = await proxmoxService.suspendVM(targetVmid, suspend === true, userEmail);
+  const vm = await proxmoxService.suspendVM(targetVmid, suspend === true, userEmail, proxmoxConnectionId || undefined);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} ${suspend ? 'suspended' : 'unsuspended'}`, data: vm });
   } else {
@@ -1014,10 +1105,10 @@ apiRouter.post('/vms/:vmid/extend', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { additionalDays } = req.body;
+  const { additionalDays, proxmoxConnectionId } = req.body;
 
   const days = Number(additionalDays) || 30;
-  const vm = await proxmoxService.extendVMExpiry(targetVmid, days, userEmail);
+  const vm = await proxmoxService.extendVMExpiry(targetVmid, days, userEmail, proxmoxConnectionId || undefined);
   if (vm) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} expiry date extended by ${days} days`, data: vm });
   } else {
@@ -1036,7 +1127,9 @@ apiRouter.delete('/vms/:vmid', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const success = await dbService.deleteVM(targetVmid, userEmail);
+    const proxmoxConnectionId = typeof req.query.proxmoxConnectionId === 'string' ? req.query.proxmoxConnectionId : undefined;
+
+  const success = await dbService.deleteVM(targetVmid, userEmail, proxmoxConnectionId);
   if (success) {
     res.json({ success: true, message: `Proxmox VMID ${targetVmid} deleted` });
   } else {
@@ -1048,10 +1141,10 @@ apiRouter.post('/vms/:vmid/action', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { action } = req.body;
+  const { action, proxmoxConnectionId } = req.body;
 
   try {
-    const vm = await proxmoxService.executePowerAction('', targetVmid, action, userEmail);
+    const vm = await proxmoxService.executePowerAction('', targetVmid, action, userEmail, proxmoxConnectionId || undefined);
     res.json({
       success: true,
       message: `Proxmox PVE API: Task ${action.toUpperCase()} accepted for VMID ${targetVmid}; local status is now ${vm.status}`,
@@ -1064,11 +1157,11 @@ apiRouter.post('/vms/:vmid/action', async (req, res) => {
 
 apiRouter.post('/vms/:vmid/vnc/cmd', async (req, res) => {
   const targetVmid = parseInt(req.params.vmid, 10);
-  const { command } = req.body;
+  const { command, proxmoxConnectionId } = req.body;
 
-  const vm = await dbService.getVMByVMID(targetVmid);
+  const vm = await dbService.getVMByVMID(targetVmid, proxmoxConnectionId || undefined);
   if (!vm) {
-    return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
+    return res.status(404).json({ success: false, error: `VMID ${targetVmid} not found on this connection` });
   }
 
   // This web console is a read-only status shell. It never executes arbitrary shell
@@ -1305,7 +1398,10 @@ apiRouter.get('/telemetry/history', async (req, res) => {
 });
 
 apiRouter.get('/tasks', async (req, res) => {
-  const tasks = await dbService.getTasks();
+  const user = req.authUser;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const isAdmin = ['admin', 'administrator', 'moderator'].includes(String(user.role || '').toLowerCase());
+  const tasks = await dbService.getTasks(isAdmin ? undefined : user.email);
   res.json({ success: true, count: tasks.length, data: tasks });
 });
 
@@ -1446,7 +1542,11 @@ apiRouter.get('/inbox', async (req, res) => {
 });
 
 apiRouter.get('/audit-logs', async (req, res) => {
-  const logs = await dbService.getAuditLogs();
+  const user = req.authUser;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+  const isAdmin = ['admin', 'administrator', 'moderator'].includes(String(user.role || '').toLowerCase());
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  const logs = await dbService.getAuditLogs(isAdmin ? undefined : user.email, limit);
   res.json({ success: true, count: logs.length, data: logs });
 });
 
@@ -1615,7 +1715,7 @@ apiRouter.post('/admin/settings/smtp', async (req, res) => {
     await dbService.updateSystemSetting('smtp_config', config);
     // Re-init the email service transporter with new settings
     if (typeof emailService.refreshTransporter === 'function') {
-      emailService.refreshTransporter();
+      await emailService.refreshTransporter();
     }
     await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_SMTP_CONFIG', 'system', 'SMTP configuration updated');
     res.json({ success: true, message: 'SMTP configuration saved and applied' });
@@ -1630,19 +1730,85 @@ apiRouter.post('/admin/settings/smtp/test', async (req, res) => {
     if (!testEmail) {
       return res.status(400).json({ success: false, error: 'testEmail is required' });
     }
-    const success = await emailService.sendEmail(testEmail, 'Stellar Panel SMTP Test', '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Stellar Panel SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Stellar Panel</p></div>');
+    if (!emailService.isReady()) {
+      return res.status(503).json({ success: false, error: 'SMTP is disabled or has not initialized. Save an enabled SMTP configuration first.' });
+    }
+    const success = await emailService.sendEmail(testEmail, 'Votion One SMTP Test', '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Votion One SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Votion One</p></div>');
     if (success) {
       await dbService.logAudit(req.authUser?.email || 'unknown', 'SMTP_TEST', testEmail, 'SMTP test email sent');
       res.json({ success: true, message: 'Test email sent successfully' });
     } else {
-      res.status(500).json({ success: false, error: 'Failed to send test email. Check your SMTP configuration and server logs.' });
+      res.status(502).json({ success: false, error: 'SMTP provider rejected the test message. Check the host, port, encryption mode, credentials, and sender address in the server logs.' });
     }
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// BILLING CONTROL PLANE
+
+  // ==========================================
+  // OVH CLOUD CONFIGURATION
+  // ==========================================
+  apiRouter.get('/admin/settings/ovh', async (req, res) => {
+    try {
+      const config = await dbService.getSystemSetting('ovh_config');
+      if (config) {
+        res.json({
+          success: true,
+          data: {
+            enabled: config.enabled || false,
+            endpoint: config.endpoint || 'ovh-eu',
+            applicationKey: config.applicationKey || '',
+            applicationSecret: config.applicationSecret ? '********' : '',
+            consumerKey: config.consumerKey ? '********' : '',
+          }
+        });
+      } else {
+        res.json({
+          success: true,
+          data: { enabled: false, endpoint: 'ovh-eu', applicationKey: '', applicationSecret: '', consumerKey: '' }
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  apiRouter.post('/admin/settings/ovh', async (req, res) => {
+    try {
+      const input = req.body;
+      const current = await dbService.getSystemSetting('ovh_config');
+      const config = {
+        enabled: Boolean(input.enabled),
+        endpoint: String(input.endpoint || 'ovh-eu'),
+        applicationKey: String(input.applicationKey || '').trim(),
+        applicationSecret: input.applicationSecret === '********' ? (current?.applicationSecret || '') : String(input.applicationSecret || '').trim(),
+        consumerKey: input.consumerKey === '********' ? (current?.consumerKey || '') : String(input.consumerKey || '').trim(),
+      };
+      await dbService.updateSystemSetting('ovh_config', config);
+      if (typeof ovhService.loadConfig === 'function') {
+        await ovhService.loadConfig();
+      }
+      await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_OVH_CONFIG', 'system', 'OVH configuration updated');
+      res.json({ success: true, message: 'OVH configuration saved and applied' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  apiRouter.post('/admin/settings/ovh/test', async (req, res) => {
+    try {
+      if (!ovhService.isEnabled()) {
+        return res.status(503).json({ success: false, error: 'OVH is disabled. Save an enabled OVH configuration first.' });
+      }
+      await ovhService.syncTime();
+      res.json({ success: true, message: 'Test connection to OVH API succeeded!' });
+    } catch (err: any) {
+      res.status(502).json({ success: false, error: `OVH API test failed: ${err.message || String(err)}` });
+    }
+  });
+
+  // BILLING CONTROL PLANE
 const isBillingAdmin = (req: any) => ['admin', 'administrator'].includes(String(req.authUser?.role || '').toLowerCase());
 const billingActor = (req: any) => String(req.authUser?.email || '').toLowerCase().trim();
 
@@ -1657,52 +1823,41 @@ apiRouter.get('/billing/plans', async (req, res) => {
 
 apiRouter.get('/billing/summary', async (req, res) => {
   try {
-    const data = await dbService.getBillingSummary(isBillingAdmin(req) ? undefined : billingActor(req));
-    if (!isBillingAdmin(req)) {
-      const { monthlyCostCents, estimatedGrossProfitCents, collectedGrossProfitCents, estimatedMarginPercent, inrBilledPaise, inrCollectedPaise, inrOutstandingPaise, inrGrossProfitPaise, inrCollectedGrossProfitPaise, monthlySharedCostPaise, monthlyServerCostPaise, monthlyIpCostPaise, totalInrCostPaise, totalServerCapacityVms, totalAssignedServerVms, totalRunningServerVms, availableServerCapacityVms, totalRunningIpCount, totalAssignedIpCount, totalIncludedIpCount, billableIpCount, billableRunningIpCount, revenueByCurrency, ...clientData } = data;
-      res.json({ success: true, data: clientData });
-      return;
-    }
+    const userEmail = isBillingAdmin(req) ? undefined : req.authUser?.email;
+    const data = await dbService.getBillingSummary(userEmail);
     res.json({ success: true, data });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message, data: null });
   }
 });
 
 apiRouter.get('/billing/invoices', async (req, res) => {
   try {
+    const userEmail = isBillingAdmin(req) ? undefined : req.authUser?.email;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-    const data = await dbService.getBillingInvoices(isBillingAdmin(req) ? undefined : billingActor(req), status, 500);
-    res.json({ success: true, data });
+    const data = await dbService.getBillingInvoices(userEmail, status);
+    res.json({ success: true, data, count: data.length });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message, data: [] });
   }
 });
 
-apiRouter.get('/billing/config', async (req, res) => {
-  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
+apiRouter.get('/billing/config', async (_req, res) => {
   try {
-    res.json({ success: true, data: await dbService.getBillingConfig() });
+    const data = await dbService.getBillingConfig();
+    res.json({ success: true, data });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-apiRouter.put('/billing/config', async (req, res) => {
-  if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
-  try {
-    const patch = req.body || {};
-    if (patch.suspensionExecutionEnabled === true && patch.confirmation !== 'ENABLE_REVERSIBLE_SUSPENSION_AUTOMATION') {
-      return res.status(409).json({ success: false, error: 'Enabling automatic suspension requires the explicit confirmation phrase ENABLE_REVERSIBLE_SUSPENSION_AUTOMATION.' });
-    }
-    delete patch.confirmation;
-    const data = await dbService.updateBillingConfig(patch);
-    await dbService.logAudit(billingActor(req), 'UPDATE_BILLING_POLICY', 'billing_config', `Updated billing policy; automation=${data.automationEnabled}, reminders=${data.reminderEmailsEnabled}, suspension=${data.suspensionExecutionEnabled}`);
-    res.json({ success: true, data });
-  } catch (err: any) {
-    res.status(400).json({ success: false, error: err.message });
-  }
-});
+
+
+
+
+
+
+
 
 apiRouter.post('/billing/plans', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
@@ -1891,7 +2046,7 @@ apiRouter.post('/pbs/backup', async (req, res) => {
   setTimeout(async () => {
     const vms = await dbService.getVMs();
     for (const v of vms.slice(0, 3)) {
-      await dbService.createVmSnapshot(v.vmid, `pbs-backup-${new Date().toISOString().slice(0, 10)}`, 'Automated PBS backup snapshot');
+      await dbService.createVmSnapshot(v.vmid, v.proxmoxConnectionId || 'legacy-local', `pbs-backup-${new Date().toISOString().slice(0, 10)}`, 'Automated PBS backup snapshot');
     }
   }, 15000);
   res.json({ success: true, message: 'PBS cluster snapshot backup job queued. Monitor progress in the Tasks panel.' });
@@ -2068,3 +2223,193 @@ apiRouter.delete('/admin/proxmox/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// ADMIN OVH IP MANAGER ENDPOINTS
+// ==========================================
+
+const requireOvhEnabledAdmin = (_req: any, res: any, next: any) => {
+  if (!ovhService.isEnabled()) {
+    return res.status(503).json({ success: false, error: 'OVH API integration is not enabled or configured' });
+  }
+  next();
+};
+
+const validateIpAdmin = (ip: string) => {
+  const clean = String(ip || '').trim();
+  if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(clean)) {
+    throw new Error('Invalid IPv4 address format');
+  }
+  return clean;
+};
+
+apiRouter.get('/admin/ovh/ips', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ips = await ovhService.getIps();
+    res.json({ success: true, data: ips });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/admin/ovh/status', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const [reverse, ddos, firewall, mitigationProfile] = await Promise.all([
+      ovhService.getReverse(ip).catch(() => null),
+      ovhService.getDdosState(ip).catch(() => ({ state: 'unknown', mode: 'automatic' as const })),
+      ovhService.getFirewallState(ip).catch(() => ({ enabled: false, state: 'unknown' })),
+      ovhService.getMitigationProfile(ip).catch(() => null),
+    ]);
+    res.json({ success: true, data: { ip, reverse, ddos, firewall, mitigationProfile } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/rdns', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { reverse } = req.body;
+    await ovhService.setReverse(ip, String(reverse || '').trim());
+    res.json({ success: true, message: 'Reverse DNS update request submitted to OVH successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/mitigation-profile', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const timeout = parseInt(req.body.timeout, 10);
+    if (![0, 15, 60, 360, 1560].includes(timeout)) {
+      return res.status(400).json({ success: false, error: 'Invalid mitigation timeout value' });
+    }
+    await ovhService.updateMitigationProfile(ip, timeout);
+    res.json({ success: true, message: 'VAC Auto Mitigation Timeout updated successfully' });
+  } catch (err: any) {
+    console.error('[OVH MITIGATION-PROFILE POST ERROR]', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/ddos', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { mode } = req.body;
+    if (mode !== 'automatic' && mode !== 'permanent') {
+      return res.status(400).json({ success: false, error: 'Invalid DDoS mode' });
+    }
+    await ovhService.setDdosMitigation(ip, mode);
+    res.json({ success: true, message: `DDoS mitigation mode updated to ${mode} successfully` });
+  } catch (err: any) {
+    console.error('[OVH DDOS POST ERROR]', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/firewall/toggle', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { enabled } = req.body;
+    await ovhService.toggleFirewall(ip, Boolean(enabled));
+    res.json({ success: true, message: `OVH Edge Firewall ${enabled ? 'enabled' : 'disabled'} successfully` });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/admin/ovh/firewall/rules', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const rules = await ovhService.getFirewallRules(ip);
+    res.json({ success: true, data: rules });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/firewall/rules', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { sequence, action, protocol, sourcePort, destinationPort, source } = req.body;
+    if (typeof sequence !== 'number' || sequence < 0 || sequence > 99) {
+      return res.status(400).json({ success: false, error: 'Sequence number must be between 0 and 99' });
+    }
+    if (action !== 'permit' && action !== 'deny') {
+      return res.status(400).json({ success: false, error: 'Action must be permit or deny' });
+    }
+    if (!['tcp', 'udp', 'icmp', 'ipv4'].includes(protocol)) {
+      return res.status(400).json({ success: false, error: 'Protocol must be tcp, udp, icmp, or ipv4' });
+    }
+    await ovhService.createFirewallRule(ip, {
+      sequence,
+      action,
+      protocol,
+      sourcePort: sourcePort || undefined,
+      destinationPort: destinationPort || undefined,
+      source: source || undefined
+    });
+    res.json({ success: true, message: 'Edge Firewall rule created successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.delete('/admin/ovh/firewall/rules/:sequence', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const sequence = parseInt(req.params.sequence, 10);
+    if (isNaN(sequence)) {
+      return res.status(400).json({ success: false, error: 'Invalid sequence number' });
+    }
+    await ovhService.deleteFirewallRule(ip, sequence);
+    res.json({ success: true, message: 'Edge Firewall rule deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/admin/ovh/game-ddos', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const rules = await ovhService.getGameDdosRules(ip);
+    res.json({ success: true, data: rules });
+  } catch (err: any) {
+    console.error('[OVH GAME-DDOS GET ERROR]', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/game-ddos', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { port, protocol, game } = req.body;
+    if (typeof port !== 'number' || port < 1 || port > 65535) {
+      return res.status(400).json({ success: false, error: 'Port must be between 1 and 65535' });
+    }
+    if (protocol !== 'tcp' && protocol !== 'udp') {
+      return res.status(400).json({ success: false, error: 'Protocol must be tcp or udp' });
+    }
+    if (!game || typeof game !== 'string') {
+      return res.status(400).json({ success: false, error: 'Game profile is required' });
+    }
+    await ovhService.createGameDdosRule(ip, { port, protocol, game });
+    res.json({ success: true, message: 'Game DDoS port profile created successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.delete('/admin/ovh/game-ddos/:ruleId', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const ruleId = parseInt(req.params.ruleId, 10);
+    if (isNaN(ruleId)) {
+      return res.status(400).json({ success: false, error: 'Invalid rule ID' });
+    }
+    await ovhService.deleteGameDdosRule(ip, ruleId);
+    res.json({ success: true, message: 'Game DDoS port profile rule deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});

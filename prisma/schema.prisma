@@ -1,0 +1,818 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model accounts {
+  id                      Int                       @id @default(autoincrement())
+  email                   String                    @unique @db.VarChar(255)
+  password_hash           String
+  name                    String                    @db.VarChar(255)
+  role                    String                    @default("client") @db.VarChar(50)
+  phone                   String?                   @db.VarChar(50)
+  support_pin             String?                   @db.VarChar(100)
+  two_factor_active       Boolean                   @default(false)
+  tfa_secret              String?                   @db.VarChar(100)
+  operator_access         Boolean                   @default(false)
+  created_at              DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamp(6)
+  ssh_keys                String?
+  key_files               key_files[]
+  passkeys                passkeys[]
+  password_reset_tokens   password_reset_tokens[]
+  rdns_requests           rdns_requests[]
+  secondary_emails        secondary_emails[]
+  stellar_api_keys        stellar_api_keys[]
+  tickets                 tickets[]
+  totp_secrets            totp_secrets?
+  user_navigation_usage   user_navigation_usage[]
+  vm_backup_queue         vm_backup_queue[]
+  vm_sub_user_invitations vm_sub_user_invitations[]
+  vms                     vms[]
+}
+
+model alert_rules {
+  id                    Int      @id @default(autoincrement())
+  account_email         String   @db.VarChar(255)
+  name                  String?  @db.VarChar(255)
+  target                String   @default("cluster") @db.VarChar(20)
+  vmid                  Int?
+  node_name             String?  @db.VarChar(100)
+  metric                String   @db.VarChar(30)
+  operator              String   @default(">") @db.VarChar(5)
+  threshold             Decimal  @db.Decimal
+  severity              String   @default("warning") @db.VarChar(20)
+  cooldown_minutes      Int      @default(10)
+  enabled               Boolean  @default(true)
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?  @default("legacy-local") @db.VarChar(50)
+
+  @@index([target, node_name, enabled], map: "idx_alert_rules_target_node")
+}
+
+model app_catalog {
+  id            String          @id @db.VarChar(100)
+  name          String          @db.VarChar(150)
+  description   String?
+  category      String          @db.VarChar(100)
+  icon          String?         @db.VarChar(100)
+  template_name String          @db.VarChar(150)
+  enabled       Boolean         @default(true)
+  created_at    DateTime        @default(now()) @db.Timestamp(6)
+  updated_at    DateTime        @default(now()) @db.Timestamp(6)
+  app_instances app_instances[]
+
+  @@index([enabled, category, name], map: "idx_app_catalog_enabled_category")
+}
+
+model app_instances {
+  id                    Int         @id @default(autoincrement())
+  vmid                  Int
+  app_id                String      @db.VarChar(100)
+  status                String      @default("provisioning") @db.VarChar(30)
+  created_at            DateTime    @default(now()) @db.Timestamp(6)
+  updated_at            DateTime    @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?     @default("legacy-local") @db.VarChar(50)
+  app_catalog           app_catalog @relation(fields: [app_id], references: [id], onUpdate: NoAction)
+  vms                   vms?        @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "app_instances_vm_identity_fk")
+
+  @@unique([vmid, app_id])
+  @@index([vmid, created_at(sort: Desc)], map: "idx_app_instances_vmid_created")
+}
+
+model audit_logs {
+  id         String   @id @db.VarChar(100)
+  timestamp  DateTime @default(now()) @db.Timestamp(6)
+  user_email String   @db.VarChar(255)
+  action     String   @db.VarChar(100)
+  target     String   @db.VarChar(255)
+  details    String?
+  status     String   @db.VarChar(50)
+
+  @@index([timestamp(sort: Desc)], map: "idx_audit_logs_timestamp")
+  @@index([user_email, timestamp(sort: Desc)], map: "idx_audit_logs_user_timestamp")
+}
+
+model billing_cost_bases {
+  id                 String   @id @db.VarChar(100)
+  name               String   @db.VarChar(150)
+  monthly_cost_cents BigInt   @default(0)
+  allocation_method  String   @default("fixed") @db.VarChar(30)
+  currency           String   @default("INR") @db.VarChar(3)
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @db.Timestamp(6)
+}
+
+model billing_events {
+  id                    String            @id @db.VarChar(100)
+  invoice_id            String?           @db.VarChar(100)
+  vmid                  Int?
+  event_key             String            @db.VarChar(100)
+  period_key            String            @db.VarChar(100)
+  payload               Json              @default("{}")
+  created_at            DateTime          @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?           @default("legacy-local") @db.VarChar(50)
+  billing_invoices      billing_invoices? @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
+  vms                   vms?              @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "billing_events_vm_identity_fk")
+
+  @@unique([invoice_id, event_key, period_key])
+  @@index([invoice_id, created_at(sort: Desc)], map: "idx_billing_events_invoice_created")
+}
+
+model billing_invoices {
+  id                         String                       @id @db.VarChar(100)
+  account_email              String                       @db.VarChar(255)
+  vmid                       Int
+  plan_id                    String?                      @db.VarChar(100)
+  period_start               DateTime                     @db.Date
+  period_end                 DateTime                     @db.Date
+  issued_at                  DateTime                     @default(now()) @db.Timestamp(6)
+  due_at                     DateTime                     @db.Timestamp(6)
+  subtotal_cents             BigInt                       @default(0)
+  tax_cents                  BigInt                       @default(0)
+  total_cents                BigInt                       @default(0)
+  paid_cents                 BigInt                       @default(0)
+  currency                   String                       @default("USD") @db.VarChar(3)
+  status                     String                       @default("open") @db.VarChar(30)
+  paid_at                    DateTime?                    @db.Timestamp(6)
+  last_reminder_at           DateTime?                    @db.Timestamp(6)
+  suspension_eligible_at     DateTime?                    @db.Timestamp(6)
+  notes                      String?
+  created_at                 DateTime                     @default(now()) @db.Timestamp(6)
+  proxmox_connection_id      String?                      @default("legacy-local") @db.VarChar(50)
+  billing_events             billing_events[]
+  pricing_plans              pricing_plans?               @relation(fields: [plan_id], references: [id], onUpdate: NoAction)
+  vms                        vms?                         @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "billing_invoices_vm_identity_fk")
+  billing_payments           billing_payments[]
+  billing_suspension_actions billing_suspension_actions[]
+
+  @@unique([proxmox_connection_id, vmid, period_start, period_end], map: "billing_invoices_vm_period_unique")
+  @@index([status, suspension_eligible_at], map: "idx_billing_invoices_overdue")
+  @@index([account_email, due_at, status], map: "idx_invoice_account_due")
+}
+
+model billing_payments {
+  id                 String           @id @db.VarChar(100)
+  invoice_id         String           @db.VarChar(100)
+  account_email      String           @db.VarChar(255)
+  amount_cents       BigInt
+  currency           String           @default("USD") @db.VarChar(3)
+  method             String           @default("manual") @db.VarChar(50)
+  external_reference String?          @db.VarChar(255)
+  received_at        DateTime         @default(now()) @db.Timestamp(6)
+  recorded_by        String           @db.VarChar(255)
+  notes              String?
+  billing_invoices   billing_invoices @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
+}
+
+model billing_server_costs {
+  id                    String               @id @db.VarChar(100)
+  name                  String               @db.VarChar(150)
+  node_name             String?              @db.VarChar(100)
+  proxmox_connection_id String?              @unique(map: "idx_billing_server_costs_connection_unique", where: raw("(proxmox_connection_id IS NOT NULL)")) @db.VarChar(50)
+  monthly_cost_paise    BigInt               @default(0)
+  ip_cost_paise         BigInt               @default(0)
+  planned_vm_capacity   Int                  @default(0)
+  included_ip_count     Int                  @default(0)
+  is_active             Boolean              @default(true)
+  created_at            DateTime             @default(now()) @db.Timestamp(6)
+  updated_at            DateTime             @default(now()) @db.Timestamp(6)
+  proxmox_connections   proxmox_connections? @relation(fields: [proxmox_connection_id], references: [id], onUpdate: NoAction)
+}
+
+model billing_suspension_actions {
+  id                    String            @id @db.VarChar(100)
+  invoice_id            String?           @db.VarChar(100)
+  vmid                  Int
+  status                String            @default("pending") @db.VarChar(30)
+  reason                String
+  requested_at          DateTime          @default(now()) @db.Timestamp(6)
+  executed_at           DateTime?         @db.Timestamp(6)
+  reversed_at           DateTime?         @db.Timestamp(6)
+  actor_email           String?           @db.VarChar(255)
+  error_message         String?
+  proxmox_connection_id String?           @default("legacy-local") @db.VarChar(50)
+  billing_invoices      billing_invoices? @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
+  vms                   vms?              @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "billing_suspension_actions_vm_identity_fk")
+
+  @@unique([proxmox_connection_id, vmid, invoice_id, status], map: "billing_suspension_actions_vm_invoice_status_unique")
+  @@index([status, requested_at(sort: Desc)], map: "idx_billing_suspension_status")
+}
+
+model firewall_rules {
+  id                    Int      @id @default(autoincrement())
+  vmid                  Int
+  rule_type             String   @default("in") @db.VarChar(10)
+  action                String   @default("ACCEPT") @db.VarChar(20)
+  proto                 String?  @db.VarChar(10)
+  dport                 String?  @db.VarChar(50)
+  source                String?  @db.VarChar(50)
+  enabled               Boolean  @default(true)
+  comment               String?  @db.VarChar(255)
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String   @default("legacy-local") @db.VarChar(50)
+  vms                   vms      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "firewall_rules_vm_identity_fk")
+
+  @@index([proxmox_connection_id, vmid], map: "idx_firewall_rules_identity")
+}
+
+model key_files {
+  id           Int       @id @default(autoincrement())
+  account_id   Int
+  kid          String    @unique @db.VarChar(64)
+  secret_hash  String    @db.VarChar(64)
+  file_name    String    @default("stellar-key.stk") @db.VarChar(120)
+  revoked      Boolean   @default(false)
+  last_used_at DateTime? @db.Timestamp(6)
+  created_at   DateTime  @default(now()) @db.Timestamp(6)
+  accounts     accounts  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([account_id, created_at(sort: Desc)], map: "idx_key_files_account_created")
+}
+
+model mail_templates {
+  id           Int      @id @default(autoincrement())
+  template_key String   @unique @db.VarChar(100)
+  subject      String   @db.VarChar(255)
+  body         String
+  enabled      Boolean  @default(true)
+  updated_at   DateTime @default(now()) @db.Timestamp(6)
+}
+
+model nodes {
+  id             String   @id @db.VarChar(50)
+  node_name      String   @db.VarChar(100)
+  ip_address     String   @db.VarChar(50)
+  api_token      String?  @db.VarChar(255)
+  cluster_status String   @default("online") @db.VarChar(50)
+  cpu_usage      Decimal? @db.Decimal
+  ram_usage      BigInt?
+  ram_total      BigInt?
+  zfs_health     String?  @db.VarChar(100)
+  last_updated   DateTime @default(now()) @db.Timestamp(6)
+}
+
+model notifications {
+  id            Int      @id @default(autoincrement())
+  account_email String   @db.VarChar(255)
+  rule_id       Int?
+  title         String   @db.VarChar(255)
+  message       String
+  severity      String   @default("warning") @db.VarChar(20)
+  is_read       Boolean  @default(false)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([account_email, created_at(sort: Desc)], map: "idx_notifications_account_created")
+  @@index([account_email, is_read], map: "idx_notifications_unread", where: raw("(is_read = false)"))
+}
+
+model passkeys {
+  id            Int      @id @default(autoincrement())
+  account_email String   @db.VarChar(255)
+  credential_id String   @unique @db.VarChar(255)
+  key_name      String   @default("Hardware Passkey") @db.VarChar(100)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  accounts      accounts @relation(fields: [account_email], references: [email], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model password_reset_tokens {
+  id         BigInt    @id @default(autoincrement())
+  account_id Int
+  token_hash String    @unique @db.VarChar(64)
+  expires_at DateTime  @db.Timestamp(6)
+  used_at    DateTime? @db.Timestamp(6)
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+  accounts   accounts  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([account_id, created_at(sort: Desc)], map: "password_reset_tokens_account_idx")
+  @@index([expires_at], map: "password_reset_tokens_expiry_idx", where: raw("(used_at IS NULL)"))
+}
+
+model pricing_plans {
+  id                  String                @id @db.VarChar(100)
+  name                String                @db.VarChar(150)
+  currency            String                @default("USD") @db.VarChar(3)
+  monthly_price_cents BigInt                @default(0)
+  vcpu_limit          Int                   @default(1)
+  ram_gb              Decimal               @default(1) @db.Decimal
+  disk_gb             Decimal               @default(10) @db.Decimal
+  bandwidth_gb        Decimal?              @db.Decimal
+  is_active           Boolean               @default(true)
+  sort_order          Int                   @default(0)
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @default(now()) @db.Timestamp(6)
+  billing_invoices    billing_invoices[]
+  vm_billing_profiles vm_billing_profiles[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model provider_operations {
+  id                    String    @id @db.VarChar(100)
+  vmid                  Int
+  action                String    @db.VarChar(50)
+  state                 String    @default("queued") @db.VarChar(20)
+  idempotency_key       String    @db.VarChar(150)
+  provider_task_id      String?   @db.VarChar(255)
+  requested_by          String    @db.VarChar(255)
+  request_payload       Json      @default("{}")
+  result_payload        Json?
+  error_code            String?   @db.VarChar(100)
+  error_message         String?
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  started_at            DateTime? @db.Timestamp(6)
+  completed_at          DateTime? @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?   @default("legacy-local") @db.VarChar(50)
+  vms                   vms?      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "provider_operations_vm_identity_fk")
+
+  @@unique([proxmox_connection_id, vmid, action, idempotency_key], map: "provider_operations_vm_action_idempotency_unique")
+  @@index([provider_task_id], map: "idx_provider_operations_provider_task", where: raw("(provider_task_id IS NOT NULL)"))
+  @@index([state, updated_at(sort: Desc)], map: "idx_provider_operations_state_updated")
+  @@index([vmid, created_at(sort: Desc)], map: "idx_provider_operations_vmid_created")
+}
+
+model proxmox_connections {
+  id                   String                @id @db.VarChar(50)
+  name                 String                @db.VarChar(100)
+  host_ip              String                @db.VarChar(50)
+  port                 Int
+  username             String                @default("root@pam") @db.VarChar(100)
+  password             String?               @db.VarChar(255)
+  token_id             String                @db.VarChar(100)
+  token_secret         String                @db.VarChar(255)
+  ssl_fingerprint      String?               @db.VarChar(255)
+  status               String                @default("connected") @db.VarChar(50)
+  last_tested          DateTime              @default(now()) @db.Timestamp(6)
+  created_at           DateTime              @default(now()) @db.Timestamp(6)
+  updated_at           DateTime              @default(now()) @db.Timestamp(6)
+  billing_server_costs billing_server_costs?
+  vms                  vms[]
+}
+
+model rdns_requests {
+  id                    Int      @id @default(autoincrement())
+  vmid                  Int
+  ip_address            String   @db.VarChar(50)
+  ptr_record            String   @db.VarChar(255)
+  requested_by          String   @db.VarChar(255)
+  status                String   @default("pending") @db.VarChar(30)
+  error_message         String?
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  updated_at            DateTime @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?  @default("legacy-local") @db.VarChar(50)
+  accounts              accounts @relation(fields: [requested_by], references: [email], onUpdate: NoAction)
+  vms                   vms?     @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "rdns_requests_vm_identity_fk")
+
+  @@index([status, created_at], map: "idx_rdns_requests_status_created")
+  @@index([vmid, created_at(sort: Desc)], map: "idx_rdns_requests_vmid_created")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model registration_verification_tokens {
+  email         String   @id @db.VarChar(255)
+  token_id      String   @unique @db.VarChar(64)
+  name          String   @db.VarChar(255)
+  password_hash String
+  otp_hash      String   @db.VarChar(64)
+  attempt_count Int      @default(0) @db.SmallInt
+  expires_at    DateTime @db.Timestamptz(6)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  last_sent_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([expires_at], map: "registration_verification_tokens_expiry_idx")
+}
+
+model scheduled_tasks {
+  id            String    @id @db.VarChar(100)
+  owner_email   String    @db.VarChar(255)
+  name          String    @db.VarChar(255)
+  task_type     String    @db.VarChar(50)
+  target_ids    Json      @default("[]")
+  schedule_days Json      @default("[\"Sun\", \"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\"]")
+  schedule_time String    @default("00:00") @db.VarChar(5)
+  timezone      String    @default("Asia/Kolkata") @db.VarChar(100)
+  enabled       Boolean   @default(true)
+  last_run      DateTime? @db.Timestamp(6)
+  last_status   String?   @db.VarChar(50)
+  next_run      DateTime? @db.Timestamp(6)
+  created_at    DateTime  @default(now()) @db.Timestamp(6)
+  updated_at    DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([enabled, next_run], map: "idx_scheduled_tasks_enabled_next_run")
+  @@index([owner_email, next_run], map: "idx_scheduled_tasks_owner_next_run")
+}
+
+model schema_migrations {
+  version    String   @id @db.VarChar(255)
+  applied_at DateTime @default(now()) @db.Timestamp(6)
+}
+
+model secondary_emails {
+  id              Int      @id @default(autoincrement())
+  account_email   String   @db.VarChar(255)
+  secondary_email String   @db.VarChar(255)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  accounts        accounts @relation(fields: [account_email], references: [email], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([account_email, secondary_email])
+}
+
+model stellar_api_keys {
+  id           Int       @id @default(autoincrement())
+  user_email   String    @db.VarChar(255)
+  name         String    @db.VarChar(120)
+  key_hash     String    @unique @db.VarChar(64)
+  key_prefix   String    @db.VarChar(32)
+  scope        String    @default("read") @db.VarChar(100)
+  created_at   DateTime  @default(now()) @db.Timestamp(6)
+  last_used_at DateTime? @db.Timestamp(6)
+  revoked_at   DateTime? @db.Timestamp(6)
+  accounts     accounts  @relation(fields: [user_email], references: [email], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([key_hash], map: "idx_stellar_api_keys_active_hash", where: raw("(revoked_at IS NULL)"))
+  @@index([user_email, created_at(sort: Desc)], map: "idx_stellar_api_keys_user_created")
+}
+
+model support_sessions {
+  id            String   @id @db.VarChar(100)
+  account_email String   @db.VarChar(255)
+  status        String   @default("active") @db.VarChar(50)
+  support_pin   String?  @db.VarChar(100)
+  expires_at    DateTime @default(dbgenerated("(now() + '00:30:00'::interval)")) @db.Timestamp(6)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+}
+
+model system_settings {
+  setting_key   String   @id @db.VarChar(100)
+  setting_value Json
+  updated_at    DateTime @default(now()) @db.Timestamp(6)
+}
+
+model tasks {
+  id           String   @id @db.VarChar(100)
+  user_email   String   @db.VarChar(255)
+  title        String   @db.VarChar(255)
+  description  String?
+  status       String   @default("pending") @db.VarChar(50)
+  priority     String   @default("medium") @db.VarChar(50)
+  progress_pct Decimal  @default(0) @db.Decimal
+  started_at   DateTime @default(now()) @db.Timestamp(6)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+}
+
+model ticket_replies {
+  id           String   @id @db.VarChar(100)
+  ticket_id    String?  @db.VarChar(50)
+  sender_email String   @db.VarChar(255)
+  sender_role  String   @default("client") @db.VarChar(50)
+  message      String
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  tickets      tickets? @relation(fields: [ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([ticket_id, created_at], map: "idx_ticket_replies_ticket_id")
+}
+
+model tickets {
+  id                    String           @id @db.VarChar(50)
+  ticket_number         String           @unique @db.VarChar(50)
+  user_id               Int?
+  vmid                  Int?
+  subject               String           @db.VarChar(255)
+  category              String           @default("General") @db.VarChar(100)
+  priority              String           @default("medium") @db.VarChar(50)
+  status                String           @default("open") @db.VarChar(50)
+  user_email            String           @db.VarChar(255)
+  assigned_to           String?          @db.VarChar(255)
+  last_client_read_at   DateTime?        @db.Timestamp(6)
+  last_admin_read_at    DateTime?        @db.Timestamp(6)
+  created_at            DateTime         @default(now()) @db.Timestamp(6)
+  updated_at            DateTime         @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?          @default("legacy-local") @db.VarChar(50)
+  ticket_replies        ticket_replies[]
+  accounts              accounts?        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vms                   vms?             @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "tickets_vm_identity_fk")
+
+  @@index([assigned_to, updated_at(sort: Desc)], map: "idx_tickets_assigned_to")
+  @@index([status, priority, updated_at(sort: Desc)], map: "idx_tickets_queue")
+  @@index([user_id, updated_at(sort: Desc)], map: "idx_tickets_user_id")
+}
+
+model totp_secrets {
+  account_email String   @id @db.VarChar(255)
+  secret        String   @db.VarChar(100)
+  issuer        String   @default("VOTION") @db.VarChar(100)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  accounts      accounts @relation(fields: [account_email], references: [email], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model uploaded_files {
+  id            String   @id @db.VarChar(100)
+  account_email String   @db.VarChar(255)
+  file_name     String   @db.VarChar(255)
+  original_name String   @db.VarChar(255)
+  size_bytes    BigInt?
+  mime_type     String?  @db.VarChar(100)
+  storage_path  String   @db.VarChar(500)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model user_navigation_usage {
+  account_email         String   @db.VarChar(255)
+  item_key              String   @db.VarChar(120)
+  item_type             String   @db.VarChar(20)
+  vmid                  Int?
+  usage_count           Int      @default(0)
+  last_used_at          DateTime @default(now()) @db.Timestamptz(6)
+  proxmox_connection_id String?  @default("legacy-local") @db.VarChar(50)
+  accounts              accounts @relation(fields: [account_email], references: [email], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([account_email, item_key])
+  @@index([account_email, usage_count(sort: Desc), last_used_at(sort: Desc)], map: "user_navigation_usage_rank_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model vm_assignment_history {
+  id                    Int       @id @default(autoincrement())
+  vmid                  Int
+  proxmox_connection_id String    @default("legacy-local") @db.VarChar(50)
+  action                String    @db.VarChar(20)
+  from_email            String?
+  to_email              String?
+  reason                String?
+  expiry_date           DateTime? @db.Timestamptz(6)
+  grace_period_days     Int?
+  performed_by          String
+  performed_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([proxmox_connection_id, vmid, performed_at(sort: Desc)], map: "idx_vm_assignment_history_vm")
+}
+
+model vm_backup_queue {
+  id                    Int      @id @default(autoincrement())
+  vmid                  Int
+  provider_task_id      String?  @db.VarChar(255)
+  requested_by          String   @db.VarChar(255)
+  status                String   @default("running") @db.VarChar(30)
+  error_message         String?
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  updated_at            DateTime @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String?  @default("legacy-local") @db.VarChar(50)
+  accounts              accounts @relation(fields: [requested_by], references: [email], onUpdate: NoAction)
+  vms                   vms?     @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_backup_queue_vm_identity_fk")
+
+  @@index([status, created_at(sort: Desc)], map: "idx_vm_backup_queue_status_created")
+  @@index([vmid, created_at(sort: Desc)], map: "idx_vm_backup_queue_vmid_created")
+}
+
+model vm_billing_profiles {
+  vmid                       Int
+  plan_id                    String?        @db.VarChar(100)
+  custom_monthly_price_cents BigInt?
+  billing_status             String         @default("active") @db.VarChar(30)
+  billing_cycle_day          Int            @default(1)
+  grace_period_days          Int?
+  next_due_at                DateTime?      @db.Timestamp(6)
+  ip_count                   Int            @default(1)
+  updated_at                 DateTime       @default(now()) @db.Timestamp(6)
+  bandwidth_quota_gb         Decimal?       @db.Decimal
+  proxmox_connection_id      String         @default("legacy-local") @db.VarChar(50)
+  pricing_plans              pricing_plans? @relation(fields: [plan_id], references: [id], onUpdate: NoAction)
+  vms                        vms            @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_billing_profiles_vm_identity_fk")
+
+  @@id([proxmox_connection_id, vmid])
+}
+
+model vm_identity_conflicts {
+  vmid                           Int
+  existing_proxmox_connection_id String   @db.VarChar(50)
+  incoming_proxmox_connection_id String   @db.VarChar(50)
+  existing_vm_name               String?  @db.VarChar(255)
+  incoming_vm_name               String?  @db.VarChar(255)
+  raw_node_name                  String?  @db.VarChar(100)
+  detected_at                    DateTime @default(now()) @db.Timestamp(6)
+
+  @@id([vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id])
+  @@index([detected_at(sort: Desc)], map: "idx_vm_identity_conflicts_detected")
+}
+
+model vm_metrics {
+  id                    Int      @id @default(autoincrement())
+  vmid                  Int
+  timestamp             DateTime @default(now()) @db.Timestamp(6)
+  cpu_pct               Decimal? @db.Decimal
+  ram_bytes             BigInt?
+  net_in_bytes          BigInt?
+  net_out_bytes         BigInt?
+  diskread_bytes        BigInt?
+  diskwrite_bytes       BigInt?
+  proxmox_connection_id String?  @default("legacy-local") @db.VarChar(50)
+  vms                   vms?     @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_metrics_vm_identity_fk")
+
+  @@unique([proxmox_connection_id, vmid, timestamp], map: "vm_metrics_vm_timestamp_unique")
+  @@index([proxmox_connection_id, vmid, timestamp(sort: Desc)], map: "idx_vm_metrics_identity_timestamp")
+}
+
+model vm_reimage_audit_events {
+  id                    String                 @id @db.VarChar(100)
+  request_id            String?                @db.VarChar(100)
+  execution_id          String?                @db.VarChar(100)
+  actor_email           String                 @db.VarChar(255)
+  actor_capability      String                 @db.VarChar(100)
+  action                String                 @db.VarChar(100)
+  from_state            String?                @db.VarChar(40)
+  to_state              String?                @db.VarChar(40)
+  correlation_id        String                 @db.VarChar(100)
+  plan_hash             String?                @db.VarChar(128)
+  safe_details          Json                   @default("{}")
+  created_at            DateTime               @default(now()) @db.Timestamp(6)
+  vm_reimage_executions vm_reimage_executions? @relation(fields: [execution_id], references: [id], onUpdate: NoAction)
+  vm_reimage_requests   vm_reimage_requests?   @relation(fields: [request_id], references: [id], onUpdate: NoAction)
+
+  @@index([execution_id, created_at(sort: Desc)], map: "idx_vm_reimage_audit_execution_created")
+}
+
+model vm_reimage_executions {
+  id                        String                     @id @db.VarChar(100)
+  request_id                String                     @unique @db.VarChar(100)
+  vmid                      Int
+  request_snapshot          Json
+  image_profile_id          String?                    @db.VarChar(100)
+  image_profile_version     String?                    @db.VarChar(100)
+  state                     String                     @default("created") @db.VarChar(40)
+  plan_hash                 String?                    @db.VarChar(128)
+  operator_email            String?                    @db.VarChar(255)
+  operator_confirmed_at     DateTime?                  @db.Timestamp(6)
+  preflight_snapshot        Json?
+  backup_reference          String?                    @db.VarChar(500)
+  lease_owner               String?                    @db.VarChar(255)
+  lease_expires_at          DateTime?                  @db.Timestamp(6)
+  attempt_count             Int                        @default(0)
+  current_step              String?                    @db.VarChar(100)
+  step_upids                Json                       @default("[]")
+  validation_result         Json?
+  error_code                String?                    @db.VarChar(100)
+  error_message             String?
+  created_at                DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at                DateTime                   @default(now()) @db.Timestamp(6)
+  queued_at                 DateTime?                  @db.Timestamp(6)
+  completed_at              DateTime?                  @db.Timestamp(6)
+  blocked_at                DateTime?                  @db.Timestamp(6)
+  proxmox_connection_id     String?                    @default("legacy-local") @db.VarChar(50)
+  vm_reimage_audit_events   vm_reimage_audit_events[]
+  vm_reimage_image_profiles vm_reimage_image_profiles? @relation(fields: [image_profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  vm_reimage_requests       vm_reimage_requests        @relation(fields: [request_id], references: [id], onUpdate: NoAction)
+  vms                       vms?                       @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onUpdate: NoAction, map: "vm_reimage_executions_vm_identity_fk")
+
+  @@index([state, updated_at(sort: Desc)], map: "idx_vm_reimage_executions_state_updated")
+  @@index([vmid, state], map: "idx_vm_reimage_executions_vmid_state")
+}
+
+model vm_reimage_image_profiles {
+  id                    String                  @id @db.VarChar(100)
+  os_label              String                  @db.VarChar(100)
+  vm_type               String                  @db.VarChar(20)
+  template_vmid         Int?
+  template_node         String?                 @db.VarChar(100)
+  storage_id            String?                 @db.VarChar(100)
+  version               String                  @db.VarChar(100)
+  image_digest          String?                 @db.VarChar(255)
+  enabled               Boolean                 @default(false)
+  created_at            DateTime                @default(now()) @db.Timestamp(6)
+  retired_at            DateTime?               @db.Timestamp(6)
+  vm_reimage_executions vm_reimage_executions[]
+
+  @@unique([os_label, vm_type, version])
+}
+
+model vm_reimage_requests {
+  id                      String                    @id @db.VarChar(100)
+  vmid                    Int
+  requester_email         String                    @db.VarChar(255)
+  requested_os            String                    @db.VarChar(100)
+  status                  String                    @default("pending") @db.VarChar(20)
+  requester_note          String?
+  reviewer_email          String?                   @db.VarChar(255)
+  reviewer_note           String?
+  created_at              DateTime                  @default(now()) @db.Timestamp(6)
+  reviewed_at             DateTime?                 @db.Timestamp(6)
+  cancelled_at            DateTime?                 @db.Timestamp(6)
+  completed_at            DateTime?                 @db.Timestamp(6)
+  completed_by            String?                   @db.VarChar(255)
+  completion_note         String?
+  proxmox_connection_id   String?                   @default("legacy-local") @db.VarChar(50)
+  vm_reimage_audit_events vm_reimage_audit_events[]
+  vm_reimage_executions   vm_reimage_executions?
+  vms                     vms?                      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_reimage_requests_vm_identity_fk")
+
+  @@index([status, completed_at(sort: Desc)], map: "idx_vm_reimage_requests_status_completed")
+  @@index([status, created_at(sort: Desc)], map: "idx_vm_reimage_requests_status_created")
+  @@index([vmid, created_at(sort: Desc)], map: "idx_vm_reimage_requests_vmid_created")
+}
+
+model vm_snapshots {
+  id                    Int      @id @default(autoincrement())
+  vmid                  Int
+  snapshot_name         String   @db.VarChar(100)
+  description           String?
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  proxmox_connection_id String   @default("legacy-local") @db.VarChar(50)
+  vms                   vms      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_snapshots_vm_identity_fk")
+
+  @@index([proxmox_connection_id, vmid], map: "idx_vm_snapshots_identity")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model vm_sub_user_invitations {
+  id                    String    @id @db.VarChar(64)
+  vmid                  Int
+  invitee_email         String    @db.VarChar(255)
+  scope                 String    @db.VarChar(16)
+  invited_by            String    @db.VarChar(255)
+  expires_at            DateTime  @db.Timestamptz(6)
+  created_at            DateTime  @default(now()) @db.Timestamptz(6)
+  sent_at               DateTime? @db.Timestamptz(6)
+  accepted_at           DateTime? @db.Timestamptz(6)
+  revoked_at            DateTime? @db.Timestamptz(6)
+  proxmox_connection_id String?   @default("legacy-local") @db.VarChar(50)
+  accounts              accounts  @relation(fields: [invited_by], references: [email], onDelete: Cascade, onUpdate: NoAction)
+  vms                   vms?      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_sub_user_invitations_vm_identity_fk")
+
+  @@unique([vmid, invitee_email], map: "vm_sub_user_invitations_pending_unique", where: raw("((accepted_at IS NULL) AND (revoked_at IS NULL))"))
+  @@unique([proxmox_connection_id, vmid, invitee_email], map: "vm_sub_user_invitations_vm_invitee_unique")
+  @@index([invitee_email, accepted_at, revoked_at, expires_at(sort: Desc)], map: "idx_vm_sub_user_invitations_invitee_state")
+  @@index([invited_by, accepted_at, revoked_at, expires_at(sort: Desc)], map: "idx_vm_sub_user_invitations_owner_state")
+}
+
+model vm_sub_users {
+  id                    Int       @id @default(autoincrement())
+  vmid                  Int
+  user_email            String    @db.VarChar(255)
+  scope                 String    @default("read") @db.VarChar(100)
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @db.Timestamp(6)
+  invited_by            String?   @db.VarChar(255)
+  accepted_at           DateTime? @db.Timestamptz(6)
+  proxmox_connection_id String?   @default("legacy-local") @db.VarChar(50)
+  vms                   vms?      @relation(fields: [proxmox_connection_id, vmid], references: [proxmox_connection_id, vmid], onDelete: Cascade, onUpdate: NoAction, map: "vm_sub_users_vm_identity_fk")
+
+  @@unique([proxmox_connection_id, vmid, user_email], map: "vm_sub_users_vm_user_unique")
+  @@index([user_email, vmid], map: "idx_vm_sub_users_member_email")
+  @@index([vmid, created_at], map: "idx_vm_sub_users_vmid_created")
+}
+
+model vms {
+  vmid                       Int
+  user_id                    Int?
+  node_id                    String?                      @db.VarChar(50)
+  proxmox_connection_id      String                       @default("legacy-local") @db.VarChar(50)
+  vm_name                    String                       @db.VarChar(255)
+  os_type                    String                       @default("Ubuntu 24.04 LTS") @db.VarChar(100)
+  cpu_cores                  Int                          @default(4)
+  ram_mb                     Int                          @default(4096)
+  disk_gb                    Int                          @default(64)
+  status                     String                       @default("running") @db.VarChar(50)
+  owner_email                String                       @db.VarChar(255)
+  node                       String                       @default("pve-01") @db.VarChar(100)
+  expiry_date                DateTime?                    @default(dbgenerated("(now() + '30 days'::interval)")) @db.Timestamp(6)
+  is_suspended               Boolean                      @default(false)
+  type                       String                       @default("qemu") @db.VarChar(50)
+  cpus                       Int?                         @default(4)
+  memory                     BigInt?                      @default(4294967296)
+  maxmem                     BigInt?                      @default(8589934592)
+  disk                       BigInt?                      @default(34359738368)
+  maxdisk                    BigInt?                      @default(68719476736)
+  uptime                     BigInt?                      @default(0)
+  ip_address                 String?                      @db.VarChar(50)
+  created_at                 DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime                     @default(now()) @db.Timestamp(6)
+  app_instances              app_instances[]
+  billing_events             billing_events[]
+  billing_invoices           billing_invoices[]
+  billing_suspension_actions billing_suspension_actions[]
+  firewall_rules             firewall_rules[]
+  provider_operations        provider_operations[]
+  rdns_requests              rdns_requests[]
+  tickets                    tickets[]
+  vm_backup_queue            vm_backup_queue[]
+  vm_billing_profiles        vm_billing_profiles?
+  vm_metrics                 vm_metrics[]
+  vm_reimage_executions      vm_reimage_executions[]
+  vm_reimage_requests        vm_reimage_requests[]
+  vm_snapshots               vm_snapshots[]
+  vm_sub_user_invitations    vm_sub_user_invitations[]
+  vm_sub_users               vm_sub_users[]
+  proxmox_connections        proxmox_connections          @relation(fields: [proxmox_connection_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounts                   accounts?                    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@id([proxmox_connection_id, vmid])
+  @@index([proxmox_connection_id, vmid], map: "idx_vms_connection_vmid")
+  @@index([expiry_date], map: "idx_vms_expiry_active", where: raw("((expiry_date IS NOT NULL) AND (is_suspended = false))"))
+  @@index([owner_email, proxmox_connection_id], map: "idx_vms_owner_connection")
+}

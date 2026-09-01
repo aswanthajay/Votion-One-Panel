@@ -6,15 +6,16 @@ import { dbService, pgPool } from '../db/database.js';
 import { proxmoxApi } from './proxmox.js';
 
 // ---------- Palette & helpers ----------
-const INK = '#1a1a1a';
-const INK_SOFT = '#656b6b';
-const ACCENT = '#2563eb';
-const ACCENT_SOFT = '#dbeafe';
+const PAGE_BG = '#09090b';
+const INK = '#f8fafc';
+const INK_SOFT = '#a1a1aa';
+const ACCENT = '#3b82f6';
+const ACCENT_SOFT = '#1e3a8a';
 const GREEN = '#10b981';
 const AMBER = '#f59e0b';
 const RED = '#ef4444';
-const GRAY_LINE = '#dedfdf';
-const GRAY_BG = '#fbfaf9';
+const GRAY_LINE = '#27272a';
+const GRAY_BG = '#18181b';
 
 function fmtBytes(n: number): string {
   if (!n || n <= 0) return '0 B';
@@ -73,14 +74,17 @@ function drawSparkline(doc: PdfDocument, points: { t: number; v: number }[], x: 
 }
 
 function sectionHeader(doc: PdfDocument, num: string, title: string, subtitle?: string) {
-  doc.moveDown(1);
+  doc.moveDown(1.5);
   const y0 = doc.y;
-  doc.rect(doc.page.margins.left - 8, y0 - 4, 8, 22).fill(ACCENT);
-  doc.fillColor(ACCENT).fontSize(13).font('Helvetica-Bold').text(`${num}  ${title}`, { continued: false });
-  doc.fillColor(INK);
+  
+  doc.lineWidth(1).strokeColor(GRAY_LINE);
+  doc.moveTo(doc.page.margins.left, y0 - 8).lineTo(doc.page.width - doc.page.margins.right, y0 - 8).stroke();
+  
+  doc.fillColor(INK).fontSize(14).font('Helvetica-Bold').text(`Section ${num}: ${title}`);
   if (subtitle) {
-    doc.fontSize(9).font('Helvetica').fillColor(INK_SOFT).text(subtitle, { lineGap: 3 });
+    doc.fontSize(10).font('Helvetica').fillColor(INK_SOFT).text(subtitle, { lineGap: 3 });
   }
+  doc.moveDown(0.5);
 }
 
 function infoBox(doc: PdfDocument, text: string, y0?: number) {
@@ -124,20 +128,21 @@ function row2Kpis(doc: PdfDocument, kpis: { label: string; value: string; color?
   let inRow = 0;
   for (const k of kpis) {
     if (doc.y > doc.page.height - 120) { doc.addPage(); rowY = doc.y; cx = startX; inRow = 0; }
-    doc.fillColor(GRAY_BG).roundedRect(cx, rowY, cardW, 46, 4).fill();
-    doc.strokeColor(GRAY_LINE).roundedRect(cx, rowY, cardW, 46, 4).stroke();
-    doc.fillColor(INK_SOFT).fontSize(8).font('Helvetica').text(k.label.toUpperCase(), cx + 10, rowY + 8, { width: cardW - 20 });
-    doc.fillColor(k.color || ACCENT).fontSize(15).font('Helvetica-Bold').text(k.value, cx + 10, rowY + 24, { width: cardW - 20 });
+    doc.fillColor(GRAY_BG).roundedRect(cx, rowY, cardW, 56, 4).fill();
+    doc.lineWidth(1).strokeColor(GRAY_LINE).roundedRect(cx, rowY, cardW, 56, 4).stroke();
+    
+    doc.fillColor(INK_SOFT).fontSize(9).font('Helvetica').text(k.label.toUpperCase(), cx + 12, rowY + 12, { width: cardW - 24 });
+    doc.fillColor(k.color || INK).fontSize(16).font('Helvetica-Bold').text(k.value, cx + 12, rowY + 30, { width: cardW - 24 });
     cx += cardW + 16;
     inRow++;
     if (cx > doc.page.width - doc.page.margins.right) {
-      rowY += 56;
+      rowY += 68;
       cx = startX;
       inRow = 0;
     }
   }
   doc.restore();
-  doc.y = rowY + (inRow > 0 ? 56 : 0);
+  doc.y = rowY + (inRow > 0 ? 68 : 0);
 }
 
 function progressDoc(doc: PdfDocument) {
@@ -155,6 +160,7 @@ function nextSection(doc: PdfDocument, usedThreshold: number = 420) {
 export async function generateMetricsReportPdf(opts: {
   rangeHours: number;
   title?: string;
+  vmid?: number;
 }) {
   const hours = Math.max(1, Math.min(opts.rangeHours, 720)); // cap at 30 days (720h)
   const doc = new PDFDocument({
@@ -162,6 +168,15 @@ export async function generateMetricsReportPdf(opts: {
     margins: { top: 72, bottom: 72, left: 56, right: 56 },
     bufferPages: true,
   });
+  
+  doc.on('pageAdded', () => {
+    const oldFill = (doc as any)._fillColor;
+    doc.rect(0, 0, doc.page.width, doc.page.height).fill(PAGE_BG);
+    if (oldFill) doc.fillColor(oldFill);
+  });
+  
+  // Draw background for first page
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(PAGE_BG);
 
   const now = new Date();
   const since = new Date(now.getTime() - hours * 3600 * 1000);
@@ -172,6 +187,7 @@ export async function generateMetricsReportPdf(opts: {
     dbService.getProxmoxConnections(),
   ]);
   const vms = allVms.filter((vm: any) => {
+    if (opts.vmid && vm.vmid !== opts.vmid) return false;
     const ownerEmail = String(vm.ownerEmail || vm.owner_email || '').trim().toLowerCase();
     return ownerEmail.length > 0 && !ownerEmail.startsWith('unassigned@');
   });
@@ -195,17 +211,24 @@ export async function generateMetricsReportPdf(opts: {
     } catch (e) { vmTelemetry.set(vm.vmid, []); }
   }));
 
-  // ---------- COVER ----------
-  doc.fillColor(INK);
-  doc.rect(doc.page.margins.left, 52, doc.page.width - doc.page.margins.left - doc.page.margins.right, 6).fill(ACCENT);
-  doc.fillColor(INK).fontSize(30).font('Helvetica-Bold').text('Stellar Panel', { align: 'left' });
-  doc.fillColor(INK_SOFT).fontSize(12).font('Helvetica').text('Votion One Platform — Stellar Engine Management', { lineGap: 6 });
-  doc.moveDown(1);
-  doc.fillColor(GRAY_BG).roundedRect(doc.page.margins.left, doc.y, doc.page.width - doc.page.margins.left - doc.page.margins.right, 88, 6).fill();
-  doc.fillColor(INK).fontSize(18).font('Helvetica-Bold').text(opts.title || 'Infrastructure & Performance Report', doc.page.margins.left + 18, doc.y + 20);
-    doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Generated ${fmtDate(now)}  ·  Data window: ${fmtDate(since)} to ${fmtDate(now)}`, doc.page.margins.left + 18, doc.y + 52);
-  doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Coverage: ${Math.round(hours)} hours (${(hours / 24).toFixed(1)} days)  ·  Source: PostgreSQL telemetry store`, doc.page.margins.left + 18, doc.y + 70);
-  doc.moveDown(1.2);
+    // ---------- COVER ----------
+  doc.lineWidth(1).strokeColor(GRAY_LINE);
+  doc.moveTo(doc.page.margins.left, 52).lineTo(doc.page.width - doc.page.margins.right, 52).stroke();
+  doc.moveDown(2);
+  
+  doc.fillColor(INK).fontSize(34).font('Helvetica-Bold').text('Votion-One', { align: 'left' });
+  doc.fillColor(INK_SOFT).fontSize(14).font('Helvetica').text(opts.vmid ? 'Stellar Engine VM Telemetry Report' : 'Stellar Engine Telemetry & Infrastructure Report', { lineGap: 6 });
+  doc.moveDown(3);
+  const reportTitle = opts.vmid ? `VM ${opts.vmid} Performance Report` : (opts.title || 'Infrastructure & Performance Report');
+  const coverBoxY = doc.y;
+  doc.fillColor(GRAY_BG).roundedRect(doc.page.margins.left, coverBoxY, doc.page.width - doc.page.margins.left - doc.page.margins.right, 84, 4).fill();
+  doc.lineWidth(1).strokeColor(GRAY_LINE).roundedRect(doc.page.margins.left, coverBoxY, doc.page.width - doc.page.margins.left - doc.page.margins.right, 84, 4).stroke();
+  
+  doc.fillColor(INK).fontSize(16).font('Helvetica-Bold').text(reportTitle, doc.page.margins.left + 20, coverBoxY + 20);
+  doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Generated: ${fmtDate(now)}   |   Window: ${fmtDate(since)} to ${fmtDate(now)}`, doc.page.margins.left + 20, coverBoxY + 48);
+  doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(`Coverage: ${Math.round(hours)} hours (${(hours / 24).toFixed(1)} days)   |   Source: PostgreSQL`, doc.page.margins.left + 20, coverBoxY + 64);
+  
+  doc.y = coverBoxY + 120;
 
   doc.fillColor(INK).fontSize(13).font('Helvetica-Bold').text('What is inside this report');
   doc.fillColor(INK_SOFT).fontSize(10).font('Helvetica').text(
@@ -217,7 +240,9 @@ export async function generateMetricsReportPdf(opts: {
   );
   doc.addPage();
 
-  // ---------- SECTION 1: INFRASTRUCTURE ----------
+  if (!opts.vmid) {
+
+    // ---------- SECTION 1: INFRASTRUCTURE ----------
   sectionHeader(doc, '1', 'Your infrastructure at a glance', 'The environment this report covers — hardware, network identity, and software versions.');
   const conn = (conns || [])[0];
   const infra = [
@@ -253,6 +278,7 @@ export async function generateMetricsReportPdf(opts: {
   }
   nextSection(doc);
 
+  }
   // ---------- SECTION 2: METRICS GLOSSARY ----------
   sectionHeader(doc, '2', 'Understanding the metrics', 'Plain-language definitions — no prior knowledge required.');
   const glossary: [string, string, string][] = [
@@ -276,10 +302,14 @@ export async function generateMetricsReportPdf(opts: {
   );
   nextSection(doc);
 
-  // ---------- SECTION 3: CLUSTER OVERVIEW ----------
+  if (!opts.vmid) {
+
+    // ---------- SECTION 3: CLUSTER OVERVIEW ----------
   sectionHeader(doc, '3', 'Cluster-wide performance', `Aggregated across ${vms.length} assigned VMs for the selected window. Sparklines show the trend — an upward slope means growing load.`);
   // compute cluster aggregates from adminHist
-  let cpuVals: number[] = [], ramVals: number[] = [], inVals: number[] = [], outVals: number[] = [], dR = 0, dW = 0;
+  const cpuVals: number[] = [];
+  const ramVals: number[] = [];
+  let inVals: number[] = [], outVals: number[] = [], dR = 0, dW = 0;
   adminHist.forEach((r: any) => {
     cpuVals.push(Number(r.cpu_pct) || 0);
     ramVals.push(Number(r.ram_bytes) || 0);
@@ -338,6 +368,8 @@ export async function generateMetricsReportPdf(opts: {
   );
   doc.addPage();
 
+  }
+
   // ---------- SECTION 4: PER-VM ----------
   sectionHeader(doc, '4', 'Virtual machine detail', 'One block per assigned VM with its own summary, sparklines, and guidance. VMs are ordered by VMID.');
   for (const vm of vms) {
@@ -389,6 +421,7 @@ export async function generateMetricsReportPdf(opts: {
   }
   nextSection(doc);
 
+  if (!opts.vmid) {
   // ---------- SECTION 5: ALERTS & EVENTS ----------
   sectionHeader(doc, '5', 'Events and alerts detected', `Notifications recorded by the panel's alerting engine during the window. Alerts are fired when live metrics cross thresholds you configure.`);
   const alertTotal = (alerts.rows[0] || {}).total || 0;
@@ -422,6 +455,7 @@ export async function generateMetricsReportPdf(opts: {
   }
   nextSection(doc);
 
+  }
   // ---------- SECTION 6: DATA PIPELINE ----------
   sectionHeader(doc, '6', 'How the data is collected and stored', 'Why you can trust these numbers: an explanation of the telemetry pipeline, for transparency.');
   const telemetryFilter = reportVmids.length > 0 ? 'WHERE vmid = ANY($1::int[])' : 'WHERE FALSE';

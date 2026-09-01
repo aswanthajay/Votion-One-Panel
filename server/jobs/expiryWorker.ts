@@ -1,5 +1,6 @@
 import { dbService } from '../db/database.js';
-import { proxmoxApi } from '../services/proxmox.js';
+import { ProxmoxService } from '../services/proxmoxService.js';
+import { pgPool } from '../db/database.js';
 
 export class ExpiryWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -24,18 +25,20 @@ export class ExpiryWorker {
 
   public async runCheck() {
     try {
-      const allVMs = await dbService.getVMs();
+      const res = await pgPool.query(`SELECT vmid, node, proxmox_connection_id as "proxmoxConnectionId", owner_email as "ownerEmail", expiry_date as "expiryDate" FROM vms WHERE is_suspended = false AND expiry_date < NOW()`);
+      const allVMs = res.rows;
       const now = new Date();
 
       for (const vm of allVMs) {
-        if (!vm.isSuspended && vm.expiryDate) {
+        if (vm.expiryDate) {
           const expiry = new Date(vm.expiryDate);
-          if (expiry < now) {
+          if (true) {
             console.log(`[EXPIRY WORKER] VMID ${vm.vmid} expired on ${expiry.toISOString()}. Triggering automated Proxmox STOP and suspension.`);
             
             // 1. Issue Proxmox STOP command
             try {
-              await proxmoxApi.getVMsList();
+              const proxmoxSvc = new ProxmoxService({} as any);
+              await proxmoxSvc.executePowerAction(vm.node, vm.vmid, 'stop', 'system-expiry-worker@votioncloud.org', vm.proxmoxConnectionId || undefined);
             } catch (err) {
               console.error(`[EXPIRY WORKER] Proxmox PVE API stop warning for VMID ${vm.vmid}:`, err);
             }

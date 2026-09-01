@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { apiClient, ApiVM, ApiVmMetadata, ApiReimageRequest } from '../services/apiClient';
 import { VmMetadataPanel } from './VmMetadataPanel';
 
@@ -22,17 +22,53 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [vncCommand, setVncCommand] = useState('');
   const [vncOutput, setVncOutput] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'metrics' | 'console' | 'reinstall' | 'ticket' | 'firewall' | 'backups'>('metrics');
-  const [viewMode, setViewMode] = useState<'table' | 'details'>('table');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'console' | 'reinstall' | 'ticket' | 'firewall' | 'backups' | 'cloud-init'>('metrics');
+  const [viewMode, setViewMode] = useState<'table' | 'details'>(selectedVmid ? 'details' : 'table');
   const [localFilter, setLocalFilter] = useState<string>(filter || '');
+  const [cloudInitPassword, setCloudInitPassword] = useState('');
   
   // Table Interactions State
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortConfig, setSortConfig] = useState<{key: keyof ApiVM; direction: 'asc'|'desc'} | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  
+  // PROMPT 5.4: Use useRef to track if the URL selectedVmid prop changed
+
+  const lastSelectedVmidRef = useRef(selectedVmid);
+
+  useEffect(() => {
+    if (selectedVmid !== undefined && selectedVmid !== lastSelectedVmidRef.current) {
+      lastSelectedVmidRef.current = selectedVmid;
+      setViewMode('details');
+    }
+  }, [selectedVmid]);
+  
+  const getVmPrefix = (connName?: string | null) => {
+    if (!connName) return 'VM';
+    return connName.match(/[A-Z]{2}/)?.[0] || 'VM';
+  };
+
+
   const [visibleColumns, setVisibleColumns] = useState({
-    id: true, name: true, owner: true, status: true, type: true, node: true, ip: true
+    id: true,
+    name: true,
+    owner: true,
+    status: true,
+    os: true,
+    node: true,
+    type: true,
+    ip: true
   });
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const currentUserEmail = localStorage.getItem('votion_user_email') || 'client@votioncloud.org';
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
   // Power Action Loading State Spinner
   const [isPowerLoading, setIsPowerLoading] = useState<string | null>(null);
 
@@ -52,23 +88,29 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   const [isTicketSubmitting, setIsTicketSubmitting] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const currentUserEmail = localStorage.getItem('votion_user_email') || 'client@votioncloud.org';
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
-
   // PROMPT 5.1: Fetch ONLY assigned servers for logged-in client via GET /api/client/vms
   const loadClientVMs = async () => {
     try {
       const vms = await apiClient.getClientVMs(workspaceConnectionId);
       setClientVMs(vms);
       setLoadError(null);
-      setSelectedVm(previous => vms.find(vm => vm.vmid === selectedVmid) || vms.find(vm => vm.vmid === previous?.vmid) || vms[0] || null);
+      
+      setSelectedVm(previous => {
+        // Priority 1: URL Selection
+        if (selectedVmid) {
+          const urlVm = vms.find(vm => String(vm.vmid) === String(selectedVmid));
+          if (urlVm) return urlVm;
+        }
+        
+        // Priority 2: Keep previously selected if still exists
+        if (previous) {
+          const stillExists = vms.find(vm => String(vm.vmKey) === String(previous.vmKey));
+          if (stillExists) return stillExists;
+        }
+        
+        // Priority 3: Fallback
+        return vms[0] || null;
+      });
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
 
@@ -79,12 +121,35 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     }
   };
 
+  // Immediate synchronous VM selection from local in-memory fleet on URL change
   useEffect(() => {
-    setIsLoading(true);
+    if (selectedVmid && clientVMs.length > 0) {
+      const match = clientVMs.find(vm => String(vm.vmid) === String(selectedVmid));
+      if (match) {
+        setSelectedVm(match);
+        setViewMode('details');
+      }
+    }
+  }, [selectedVmid, clientVMs]);
+
+  useEffect(() => {
+    if (clientVMs.length === 0) {
+      setIsLoading(true);
+    }
     loadClientVMs();
-    const interval = setInterval(loadClientVMs, 5000);
-    return () => clearInterval(interval);
-  }, [workspaceConnectionId, selectedVmid]);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      loadClientVMs();
+    }, 5000);
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') loadClientVMs();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [workspaceConnectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,7 +223,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     else if (filter === 'ticket') { setActiveTab('ticket'); setViewMode('details'); }
     else if (filter === 'reinstall') { setActiveTab('reinstall'); setViewMode('details'); }
     else if (filter === 'backups') { setActiveTab('backups'); setViewMode('details'); }
-    else { setViewMode('table'); }
+    else if (!selectedVmid) { setViewMode('table'); }
+    else { setViewMode('details'); }
     
     if (filter === 'qemu' || filter === 'lxc') {
       setLocalFilter(filter);
@@ -167,7 +233,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     }
   }, [filter]);
 
-  let displayVMs = (localFilter === 'qemu' || localFilter === 'lxc') 
+  let displayVMs = (localFilter === 'qemu' || false) 
     ? clientVMs.filter(v => v.type === localFilter) 
     : localFilter === 'suspended'
     ? clientVMs.filter(v => v.isSuspended)
@@ -197,10 +263,10 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       const res = await apiClient.executeClientPowerAction(selectedVm.vmid, action);
       setIsPowerLoading(null);
       if (res.success) {
-        showToast(res.message || `Executed ${action.toUpperCase()} on VMID ${selectedVm.vmid}`);
+        showToast(res.message || `Server ${action === 'start' ? 'started' : action === 'shutdown' ? 'shutting down' : action === 'reboot' ? 'rebooting' : 'updated'} successfully.`);
         loadClientVMs();
       } else {
-        showToast(res.error || `Failed to execute ${action}`);
+        showToast(res.error || `Unable to ${action} server. Please try again.`);
       }
     } catch (err: any) {
       setIsPowerLoading(null);
@@ -251,7 +317,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
     setIsTicketSubmitting(true);
     try {
       const res = await apiClient.createSupportTicket(ticketSubject.trim(), ticketCategory, ticketPriority, selectedVm.vmid);
-      showToast(res.message || `Support ticket opened for VMID ${selectedVm.vmid}`);
+      showToast(res.message || 'Your support ticket has been submitted.');
       setTicketSubject('');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Unable to open the support ticket.');
@@ -316,7 +382,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
         <div className="flex border-b border-[#dedfdf] mt-6">
           <div onClick={() => setLocalFilter('')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${!localFilter || localFilter==='' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>All instances</div>
           <div onClick={() => setLocalFilter('qemu')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='qemu' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>KVM (QEMU)</div>
-          <div onClick={() => setLocalFilter('lxc')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='lxc' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>LXC Containers</div>
+          
           <div onClick={() => setLocalFilter('suspended')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='suspended' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Suspended</div>
         </div>
 
@@ -369,9 +435,9 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             </thead>
             <tbody>
               {displayVMs.map(vm => (
-                <tr key={vm.vmid} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined); }}>
+                <tr key={vm.vmKey} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => { setSelectedVm(vm); setViewMode('details'); void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined); }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
-                  {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">VM-{vm.vmid}</span></td>}
+                  {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">{getVmPrefix(vm.proxmoxConnectionName)}-{vm.vmid}</span></td>}
                   {visibleColumns.name && <td className="py-3 px-6 text-[13px] text-[#1a1a1a]">{vm.name}</td>}
                   {visibleColumns.owner && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.ownerEmail}</td>}
                   {visibleColumns.status && (
@@ -382,7 +448,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                       </span>
                     </td>
                   )}
-                  {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'qemu' ? 'QEMU' : 'LXC'}</td>}
+                  {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'lxc' ? 'Container' : 'Cloud Compute'}</td>}
                   {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01'}</td>}
                   {visibleColumns.ip && <td className="py-3 px-4 text-[13px] text-[#1a1a1a] text-right">{vm.ipAddress || 'Pending'}</td>}
                 </tr>
@@ -405,9 +471,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                         <span>{loadError}</span>
                         <button type="button" onClick={() => void loadClientVMs()} className="rounded border border-[#1a1a1a] px-3 py-1.5 text-[11px] font-semibold text-[#1a1a1a] hover:bg-[#f4f5f5]">Retry</button>
                       </span>
-                    ) : localFilter === 'lxc'
-                      ? 'No assigned LXC containers found'
-                      : searchQuery.trim()
+                    ) : searchQuery.trim()
                         ? 'No instances match the current search'
                         : 'No assigned instances found'}
                   </td>
@@ -456,7 +520,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             <div>
               <div className="font-bold text-sm">Server Suspended — Contact Support / Renew Allocation</div>
               <div className="text-[#b91c1c] mt-0.5">
-                Instance {selectedVm.vmid} expired on <span className="font-mono font-bold">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Expired'}</span>. All power actions and VNC console features are locked.
+                Instance {getVmPrefix(selectedVm.proxmoxConnectionName)}-{selectedVm.vmid} expired on <span className="font-mono font-bold">{selectedVm.expiryDate ? new Date(selectedVm.expiryDate).toLocaleDateString() : 'Expired'}</span>. All power actions and VNC console features are locked.
               </div>
             </div>
           </div>
@@ -478,7 +542,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                   <div className="vm-identity-kicker">
                     <span>Instance</span>
                     <span className="vm-identity-separator" aria-hidden="true">/</span>
-                    <span className="vm-identity-id">{selectedVm.type === 'qemu' ? 'VM' : 'CT'}-{selectedVm.vmid}</span>
+                    <span className="vm-identity-id">{getVmPrefix(selectedVm.proxmoxConnectionName)}-{selectedVm.vmid}</span>
                   </div>
                   <div className="vm-identity-name-row">
                     <h3 className="vm-identity-name">{selectedVm.name}</h3>
@@ -530,30 +594,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               </div>
 
               {/* LIVE RESOURCE USAGE BARS (Selected VM) */}
-              <div className="vm-usage-grid">
-                 {/* CPU */}
-                 <div>
-                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
-                     <span className="text-[#888]">CPU ({selectedVm.cpus} Cores)</span>
-                     <span className="text-[#1a1a1a] font-mono">{selectedVm.status === 'running' ? `${selectedVm.cpuUsagePct ?? 0}%` : 'Off'}</span>
-                   </div>
-                   <div className="h-[2px] w-full bg-[#f0f0f0]">
-                     <div className={`h-full transition-all duration-500 ${(selectedVm.cpuUsagePct ?? 0) > 85 ? 'bg-[#ef4444]' : 'bg-[#1a1a1a]'}`} style={{ width: selectedVm.status === 'running' ? `${Math.min(selectedVm.cpuUsagePct ?? 0, 100)}%` : '0%' }}></div>
-                   </div>
-                 </div>
-                 {/* RAM */}
-                 <div>
-                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
-                     <span className="text-[#888]">RAM ({Math.round(selectedVm.memory / 1073741824)} GB)</span>
-                     <span className="text-[#1a1a1a] font-mono">
-                       {selectedVm.status === 'running' ? `${((selectedVm.ramUsageBytes ?? 0) / 1073741824).toFixed(1)} GB` : 'Off'}
-                     </span>
-                   </div>
-                   <div className="h-[2px] w-full bg-[#f0f0f0]">
-                     <div className={`h-full transition-all duration-500 ${(((selectedVm.ramUsageBytes ?? 0) / (selectedVm.memory || 1)) * 100) > 85 ? 'bg-[#ef4444]' : 'bg-[#1a1a1a]'}`} style={{ width: selectedVm.status === 'running' ? `${Math.min(((selectedVm.ramUsageBytes ?? 0) / (selectedVm.memory || 1)) * 100, 100)}%` : '0%' }}></div>
-                   </div>
-                 </div>
-              </div>
+              {/* Note: Moved to VmMetricsChart.tsx so it updates live via telemetry instead of relying on the static DB snapshot */}
 
               <VmMetadataPanel metadata={vmMetadata} isLoading={isMetadataLoading} error={metadataError} />
 
@@ -587,13 +628,22 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                 OS Re-Imaging Request
               </button>
               <button 
+                onClick={() => setActiveTab('cloud-init')} 
+                type="button"
+                role="tab"
+                aria-selected={activeTab === 'cloud-init'}
+                className={`vm-management-tab ${activeTab === 'cloud-init' ? 'is-active' : ''}`}
+              >
+                Cloud-Init Configuration
+              </button>
+              <button 
                 onClick={() => setActiveTab('ticket')} 
                 type="button"
                 role="tab"
                 aria-selected={activeTab === 'ticket'}
                 className={`vm-management-tab ${activeTab === 'ticket' ? 'is-active' : ''}`}
               >
-                Open Ticket for VMID {selectedVm.vmid}
+                Contact Support for {selectedVm.name || `${getVmPrefix(selectedVm.proxmoxConnectionName)}-${selectedVm.vmid}`}
               </button>
               <button 
                 onClick={() => setActiveTab('firewall')} 
@@ -627,7 +677,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                   {!selectedVm.isSuspended && (
                     <div className="w-full h-full bg-black overflow-hidden relative">
                       <Suspense fallback={<div className="h-full w-full animate-pulse bg-[#111111]" aria-busy="true" />}>
-                        <VncTerminal vmid={selectedVm.vmid} node={selectedVm.node && !/^(info|cluster)$/i.test(selectedVm.node) ? selectedVm.node : 'info'} type={selectedVm.type} />
+                        <VncTerminal vmid={selectedVm.vmid} proxmoxConnectionId={selectedVm.proxmoxConnectionId} node={selectedVm.node && !/^(info|cluster)$/i.test(selectedVm.node) ? selectedVm.node : 'info'} type={selectedVm.type} />
                       </Suspense>
                     </div>
                   )}
@@ -729,11 +779,82 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
               </div>
             )}
 
+            {/* TAB 2.5: CLOUD-INIT CONFIGURATION */}
+            {activeTab === 'cloud-init' && (
+              <div className="flex flex-col gap-5 max-w-[620px]">
+                <div>
+                  <h4 className="text-lg font-semibold text-[#1a1a1a]">Cloud-Init Configuration</h4>
+                  <p className="mt-1 text-xs leading-5 text-[#656b6b]">
+                    Inject network configurations and your public SSH keys directly into the virtual machine's hardware profile. 
+                    You must configure your SSH keys in your Account Security Settings first.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-[#dedfdf] bg-[#fbfaf9] p-4 flex flex-col gap-4">
+                  <p className="text-[13px] text-[#1a1a1a]">
+                    <strong>Note:</strong> Configuration parameters are written to the server's initialization drive. 
+                    A server restart from the control panel is required to apply the changes.
+                  </p>
+                  
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await apiClient.injectCloudInitSsh(selectedVm.vmid);
+                        alert(res.message || 'SSH public keys deployed successfully. Please restart your server to apply changes.');
+                      } catch (err: any) {
+                        alert(`Error: ${err.message}`);
+                      }
+                    }}
+                    className="btn-primary w-fit text-sm cursor-pointer"
+                  >
+                    Inject Public SSH Keys
+                  </button>
+
+                  <div className="mt-4 pt-4 border-t border-[#dedfdf] flex flex-col gap-3">
+                    <h5 className="font-semibold text-sm">Reset OS Password</h5>
+                    <p className="text-xs text-[#656b6b]">
+                      Update your operating system password. When guest integration services are running, the password will update immediately without requiring a restart.
+                    </p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <input 
+                        type="password" 
+                        placeholder="New Password" 
+                        value={cloudInitPassword}
+                        onChange={(e) => setCloudInitPassword(e.target.value)}
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        spellCheck={false}
+                        className="p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a] text-sm w-64"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!cloudInitPassword) return alert('Enter a password');
+                          try {
+                            const res = await apiClient.resetVmPassword(selectedVm.vmid, cloudInitPassword);
+                            setCloudInitPassword('');
+                            alert(res.message + (res.agentResult ? `\n\nAgent status: ${res.agentResult}` : ''));
+                          } catch (err: any) {
+                            alert(`Error: ${err.message}`);
+                          }
+                        }}
+                        className="btn-secondary text-sm cursor-pointer whitespace-nowrap"
+                      >
+                        Reset Password
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* TAB 3: LINKED SUPPORT TICKET FORM */}
             {activeTab === 'ticket' && (
               <form onSubmit={handleTicketSubmit} className="flex flex-col gap-4 max-w-[480px]">
                 <p className="text-xs text-[#656b6b]">
-                  Submit a direct support ticket linked specifically to Instance {selectedVm.vmid}.
+                  Open a priority support request linked directly to {selectedVm.name || 'this server'}.
                 </p>
                 <div>
                   <label className="block text-xs font-semibold mb-1">Ticket Subject</label>
@@ -741,7 +862,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                     type="text" 
                     value={ticketSubject}
                     onChange={(e) => setTicketSubject(e.target.value)}
-                    placeholder={`e.g. Issue with VMID ${selectedVm.vmid} network firewall`}
+                    placeholder="e.g. Inbound traffic blocked on port 443"
                     className="w-full p-2.5 border border-[#dedfdf] rounded text-xs outline-none focus:border-[#1a1a1a]"
                     required
                   />
@@ -756,7 +877,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                     >
                       <option value="Quota Upgrade">Quota Upgrade</option>
                       <option value="Network Firewall">Network Firewall</option>
-                      <option value="Storage & ZFS">Storage & ZFS</option>
+                      <option value="Storage & Disks">Storage & Volumes</option>
                       <option value="General">General Inquiries</option>
                     </select>
                   </div>
@@ -775,7 +896,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                   </div>
                 </div>
                 <button type="submit" disabled={isTicketSubmitting} className="btn-primary py-2 px-4 text-xs cursor-pointer disabled:opacity-50">
-                  {isTicketSubmitting ? 'Submitting Ticket…' : `Submit Ticket for VMID ${selectedVm.vmid}`}
+                  {isTicketSubmitting ? 'Submitting request…' : 'Submit support request'}
                 </button>
               </form>
             )}
@@ -833,7 +954,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#b42318]">Final confirmation</p>
             <h4 id="reimage-confirm-title" className="mt-2 text-lg font-semibold text-[#1a1a1a]">Submit OS reimage request?</h4>
             <p className="mt-3 text-sm leading-6 text-[#656b6b]">
-              You are requesting <span className="font-semibold text-[#1a1a1a]">{selectedReinstallOs}</span> for VM-{selectedVm.vmid}. The request will be recorded and sent to an administrator for review.
+              You are requesting <span className="font-semibold text-[#1a1a1a]">{selectedReinstallOs}</span> for {getVmPrefix(selectedVm.proxmoxConnectionName)}-{selectedVm.vmid}. The request will be recorded and sent to an administrator for review.
             </p>
             <div className="mt-4 rounded-lg border border-[#f0c36d] bg-[#fffaf0] p-3 text-xs leading-5 text-[#7a4b00]">
               This approval step does not change your server or erase data. If approved, a separate operator action is still required before any reimage execution.

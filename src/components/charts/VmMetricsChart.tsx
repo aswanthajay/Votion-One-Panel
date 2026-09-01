@@ -9,6 +9,7 @@ interface VmMetricsChartProps {
 interface LiveTelemetry {
   timestamp: string;
   cpu: number;
+  cpus: number;
   mem: number;
   maxmem: number;
   netin: number;
@@ -47,7 +48,23 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'empty' | 'unavailable'>('loading');
 
-  const lastMetricsRef = useRef<{ netin: number; netout: number; diskread: number; diskwrite: number; timestamp: number } | null>(null);
+  const [liveData, setLiveData] = useState<any[]>([]);
+  const [chartMode, setChartMode] = useState<'live' | '24h'>('live');
+
+
+    const lastChangeRef = useRef({
+    netin: { val: -1, time: 0 },
+    netout: { val: -1, time: 0 },
+    diskread: { val: -1, time: 0 },
+    diskwrite: { val: -1, time: 0 }
+  });
+  
+  const currentSpeedsRef = useRef({
+    netInMbps: 0,
+    netOutMbps: 0,
+    diskReadMBps: 0,
+    diskWriteMBps: 0
+  });
 
   const [speeds, setSpeeds] = useState<{ netInMbps: number; netOutMbps: number; diskReadMBps: number; diskWriteMBps: number }>({
     netInMbps: 0,
@@ -78,53 +95,95 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
         const current = json.telemetry as LiveTelemetry;
         const now = new Date(current.timestamp).getTime();
 
-        if (lastMetricsRef.current) {
-          const last = lastMetricsRef.current;
-          const timeDiffSeconds = (now - last.timestamp) / 1000;
+                        const lc = lastChangeRef.current;
+        const cs = currentSpeedsRef.current;
 
-          if (timeDiffSeconds > 0) {
-            setSpeeds({
-              netInMbps: Math.max(0, ((current.netin - last.netin) * 8) / 1000000 / timeDiffSeconds),
-              netOutMbps: Math.max(0, ((current.netout - last.netout) * 8) / 1000000 / timeDiffSeconds),
-              diskReadMBps: Math.max(0, (current.diskread - last.diskread) / 1048576 / timeDiffSeconds),
-              diskWriteMBps: Math.max(0, (current.diskwrite - last.diskwrite) / 1048576 / timeDiffSeconds)
-            });
+        const nowMs = Date.now();
+        const calcSpeed = (currentVal: number, key: 'netin' | 'netout' | 'diskread' | 'diskwrite', multiplier: number) => {
+          // Initialize baseline or handle counter wrap/reboot
+          if (lc[key].val === -1 || lc[key].time === 0 || currentVal < lc[key].val) {
+            lc[key] = { val: currentVal, time: nowMs };
+            return 0;
           }
-        }
-
-        lastMetricsRef.current = {
-          netin: current.netin,
-          netout: current.netout,
-          diskread: current.diskread,
-          diskwrite: current.diskwrite,
-          timestamp: now
+          // Zero delta means no traffic in this interval
+          if (currentVal === lc[key].val) {
+            lc[key].time = nowMs;
+            return 0;
+          }
+          // Calculate rate when positive delta exists
+          const timeDiffSec = (nowMs - lc[key].time) / 1000;
+          if (timeDiffSec < 0.25) {
+            return cs[key === 'netin' ? 'netInMbps' : key === 'netout' ? 'netOutMbps' : key === 'diskread' ? 'diskReadMBps' : 'diskWriteMBps'];
+          }
+          if (timeDiffSec > 30) {
+            lc[key] = { val: currentVal, time: nowMs };
+            return 0;
+          }
+          const delta = currentVal - lc[key].val;
+          const speed = (delta * multiplier) / timeDiffSec;
+          lc[key] = { val: currentVal, time: nowMs };
+          return Math.max(0, speed);
         };
 
+        const newNetIn = calcSpeed(current.netin, 'netin', 8 / 1000000);
+        if (newNetIn !== null) cs.netInMbps = newNetIn;
+
+        const newNetOut = calcSpeed(current.netout, 'netout', 8 / 1000000);
+        if (newNetOut !== null) cs.netOutMbps = newNetOut;
+
+        const newDiskRead = calcSpeed(current.diskread, 'diskread', 1 / 1048576);
+        if (newDiskRead !== null) cs.diskReadMBps = newDiskRead;
+
+        const newDiskWrite = calcSpeed(current.diskwrite, 'diskwrite', 1 / 1048576);
+        if (newDiskWrite !== null) cs.diskWriteMBps = newDiskWrite;
+
+        const newSpeeds = { ...cs };
+        setSpeeds(newSpeeds);
+
+        setLiveData(prev => {
+          const newPoint = {
+            time: new Date(current.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            'CPU (%)': Number((current.cpu * 100).toFixed(1)),
+            'Net In (Mbps)': Number(newSpeeds.netInMbps.toFixed(2)),
+            'Net Out (Mbps)': Number(newSpeeds.netOutMbps.toFixed(2)),
+            'Disk R (MB/s)': Number(newSpeeds.diskReadMBps.toFixed(2)),
+            'Disk W (MB/s)': Number(newSpeeds.diskWriteMBps.toFixed(2)),
+          };
+          const next = [...prev, newPoint];
+          if (next.length > 60) return next.slice(next.length - 60);
+          return next;
+        });
+
         setCurrentLive(current);
-        setLoadError(null);
+        setIsLoading(false);
+      } else {
+        throw new Error('Telemetry not available');
       }
     } catch (err: any) {
-      console.error('Failed to fetch live telemetry:', err);
-      setLoadError(err?.message || 'Live telemetry is currently unavailable.');
-    } finally {
-      setIsLoading(false);
+      setLoadError(err.message || 'Error fetching telemetry');
     }
   };
 
   useEffect(() => {
-    setDbHistory([]);
-    setAggregations(null);
-        setCurrentLive(null);
-    setLoadError(null);
-    setHistoryState('loading');
-    lastMetricsRef.current = null;
-
     setIsLoading(true);
-
+    setLoadError(null);
+    setCurrentLive(null);
+    setLiveData([]);
+    setDbHistory([]);
+    setHistoryState('loading');
+    setAggregations(null);
+        lastChangeRef.current = {
+      netin: { val: -1, time: 0 },
+      netout: { val: -1, time: 0 },
+      diskread: { val: -1, time: 0 },
+      diskwrite: { val: -1, time: 0 }
+    };
+    currentSpeedsRef.current = { netInMbps: 0, netOutMbps: 0, diskReadMBps: 0, diskWriteMBps: 0 };
+    
     fetchAggregations();
     fetchLiveTelemetry();
 
-    const liveInterval = setInterval(fetchLiveTelemetry, 2000);
+    const liveInterval = setInterval(fetchLiveTelemetry, 1000);
     const aggInterval = setInterval(fetchAggregations, 15000); // Refresh history DB every 15s
     return () => { clearInterval(liveInterval); clearInterval(aggInterval); };
   }, [vmid]);
@@ -192,13 +251,62 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   const memDelta = agg.mem?.deltaPct;
   const netInDelta = agg.netIn?.deltaPct;
 
+  const activeChartData = chartMode === 'live' ? liveData : chartData;
+  const isChartReady = chartMode === 'live' ? liveData.length > 0 : historyState === 'ready';
+  const timeLabel = chartMode === 'live' ? 'LIVE (60s)' : '24H';
+
+
   return (
     <div className="mt-6 flex flex-col gap-6">
       {/* TAILWIND JIT TRIGGER - Forces Vite/Tailwind to compile Tremor colors without a server restart */}
-      <div className="hidden bg-zinc-500 text-zinc-500 fill-zinc-500 stroke-zinc-500 bg-stone-500 text-stone-500 fill-stone-500 stroke-stone-500 bg-neutral-500 text-neutral-500 fill-neutral-500 stroke-neutral-500 bg-red-500 text-red-500 fill-red-500 stroke-red-500 bg-yellow-500 text-yellow-500 fill-yellow-500 stroke-yellow-500 bg-emerald-500 text-emerald-500 fill-emerald-500 stroke-emerald-500 bg-blue-500 text-blue-500 fill-blue-500 stroke-blue-500 text-zinc-100 text-zinc-200 text-zinc-300 text-stone-100 text-stone-200 text-stone-300 fill-zinc-100 fill-zinc-200 fill-zinc-300 fill-stone-100 fill-stone-200 fill-stone-300"></div>
+      <div className="hidden bg-zinc-500 text-zinc-500 fill-zinc-500 stroke-zinc-500 bg-stone-500 text-stone-500 fill-stone-500 stroke-stone-500 bg-neutral-500 text-neutral-500 fill-neutral-500 stroke-neutral-500 bg-red-500 text-red-500 fill-red-500 stroke-red-500 bg-yellow-500 text-yellow-500 fill-yellow-500 stroke-yellow-500 bg-emerald-500 text-emerald-500 fill-emerald-500 stroke-emerald-500 bg-blue-500 text-blue-500 fill-blue-500 stroke-blue-500 bg-slate-500 text-slate-500 fill-slate-500 stroke-slate-500 text-zinc-100 text-zinc-200 text-zinc-300 text-stone-100 text-stone-200 text-stone-300 fill-zinc-100 fill-zinc-200 fill-zinc-300 fill-stone-100 fill-stone-200 fill-stone-300 fill-slate-100 fill-slate-200 fill-slate-300 text-slate-100 text-slate-200 text-slate-300"></div>
 
+      {/* LIVE RESOURCE USAGE BARS */}
+      <div className="vm-usage-grid border border-[#2b2b2b] p-4 rounded bg-[#111111] grid grid-cols-2 gap-8 text-[#fff] shadow-inner -mt-4 mb-2">
+        {/* CPU */}
+        <div>
+          <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
+            <span className="text-[#888]">CPU ({currentLive.cpus} Cores)</span>
+            <span className="text-[#e2e2e2] font-mono">{cpuPct.toFixed(1)}%</span>
+          </div>
+          <div className="h-[2px] w-full bg-[#333]">
+            <div className={`h-full transition-all duration-500 ${cpuPct > 85 ? 'bg-[#ef4444]' : 'bg-[#fff]'}`} style={{ width: `${Math.min(cpuPct, 100)}%` }}></div>
+          </div>
+        </div>
+        {/* RAM */}
+        <div>
+          <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest mb-1.5">
+            <span className="text-[#888]">RAM ({memTotalGb.toFixed(1)} GB)</span>
+            <span className="text-[#e2e2e2] font-mono">
+              {memUsedGb.toFixed(1)} GB
+            </span>
+          </div>
+          <div className="h-[2px] w-full bg-[#333]">
+            <div className={`h-full transition-all duration-500 ${memPct > 85 ? 'bg-[#ef4444]' : 'bg-[#fff]'}`} style={{ width: `${Math.min(memPct, 100)}%` }}></div>
+          </div>
+        </div>
+      </div>
+
+      
       <div className="flex items-end justify-between gap-2 border-b border-[#1a1a1a] pb-2">
-        <h3 className="text-[#1a1a1a] font-bold text-sm tracking-wide uppercase">Guest VM Telemetry</h3>
+        <div className="flex items-center gap-4">
+          <h3 className="text-[#1a1a1a] font-bold text-sm tracking-wide uppercase">Guest VM Telemetry</h3>
+          <div className="flex items-center rounded overflow-hidden border border-[#dedfdf] text-[10px] font-bold uppercase tracking-widest bg-[#f8f9fa]">
+            <button 
+              onClick={() => setChartMode('live')} 
+              className={`px-3 py-1 transition-colors ${chartMode === 'live' ? 'bg-[#1a1a1a] text-white' : 'text-[#656b6b] hover:text-[#1a1a1a]'}`}
+            >
+              Live
+            </button>
+            <button 
+              onClick={() => setChartMode('24h')} 
+              className={`px-3 py-1 transition-colors ${chartMode === '24h' ? 'bg-[#1a1a1a] text-white' : 'text-[#656b6b] hover:text-[#1a1a1a]'}`}
+            >
+              24H History
+            </button>
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-1">
             <button
@@ -223,8 +331,8 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
             >JSON</button>
             <button
               onClick={() => {
-                // PDF report covers the whole fleet; this VM gets its own detail section (Section 4).
-                window.open(new URL(`${API_ORIGIN}/api/v1/telemetry/report?hours=24`, window.location.origin).toString(), '_blank');
+                // PDF report covers just this VM now since we supply the vmid.
+                window.open(new URL(`${API_ORIGIN}/api/v1/telemetry/report?hours=24&vmid=${vmid}`, window.location.origin).toString(), '_blank');
               }}
               className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest border border-[#10b981] bg-[#10b981] text-white rounded hover:bg-[#059669] transition-colors cursor-pointer whitespace-nowrap"
               title="Generate a detailed PDF report — this VM is featured in its own section"
@@ -318,7 +426,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
               ]}
               category="value"
               index="name"
-              colors={['zinc', 'stone']}
+              colors={['blue', 'slate']}
               valueFormatter={(val) => Number(val).toFixed(1) + ' GB'}
               showTooltip={false}
               className="h-32"
@@ -347,15 +455,16 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
             <div className="telemetry-chart-card">
               <div className="telemetry-chart-heading">
                 <h4>Network traffic</h4>
-                <span>24H · Mbps</span>
+                <span>{timeLabel} · Mbps</span>
               </div>
               <div className="telemetry-chart-legend" aria-label="Network traffic legend">
                 <span><i className="telemetry-legend-dot telemetry-legend-net-in" />Net in</span>
                 <span><i className="telemetry-legend-dot telemetry-legend-net-out" />Net out</span>
               </div>
-                            {historyState === 'ready' ? <AreaChart
+                            {isChartReady ? <AreaChart
                 className="telemetry-trend-area-chart"
-                data={chartData}
+                data={activeChartData}
+                showXAxis={chartMode === '24h'}
                 index="time"
                 categories={['Net In (Mbps)', 'Net Out (Mbps)']}
                 colors={['emerald', 'blue']}
@@ -372,15 +481,16 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
             <div className="telemetry-chart-card">
               <div className="telemetry-chart-heading">
                 <h4>Disk I/O rates</h4>
-                <span>24H · MB/s</span>
+                <span>{timeLabel} · MB/s</span>
               </div>
               <div className="telemetry-chart-legend" aria-label="Disk I/O legend">
                 <span><i className="telemetry-legend-dot telemetry-legend-disk-read" />Disk read</span>
                 <span><i className="telemetry-legend-dot telemetry-legend-disk-write" />Disk write</span>
               </div>
-                            {historyState === 'ready' ? <AreaChart
+                            {isChartReady ? <AreaChart
                 className="telemetry-trend-area-chart"
-                data={chartData}
+                data={activeChartData}
+                showXAxis={chartMode === '24h'}
                 index="time"
                 categories={['Disk R (MB/s)', 'Disk W (MB/s)']}
                 colors={['yellow', 'zinc']}
@@ -431,10 +541,11 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
       </Grid>
 
             <div className="telemetry-cpu-history flex flex-col mb-4">
-        <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">CPU Compute History (24h)</h4>
-        {historyState === 'ready' ? <AreaChart
+        <h4 className="text-[11px] font-bold uppercase tracking-widest text-[#1a1a1a] mb-2">CPU Compute {timeLabel === '24H' ? 'History (24h)' : 'Live'}</h4>
+        {isChartReady ? <AreaChart
           className="h-48 mt-4"
-          data={chartData}
+          data={activeChartData}
+          showXAxis={chartMode === '24h'}
           index="time"
           categories={['CPU (%)']}
           colors={['zinc']}
@@ -449,7 +560,7 @@ export default function VmMetricsChart({ vmid }: VmMetricsChartProps) {
   );
 }
 
-function HistoricalTelemetryState({ state, className = '' }: { state: 'loading' | 'empty' | 'unavailable'; className?: string }) {
+function HistoricalTelemetryState({ state, className = '' }: { state: 'loading' | 'empty' | 'unavailable' | 'ready'; className?: string }) {
   const message = state === 'loading'
     ? 'Loading recorded telemetry…'
     : state === 'empty'

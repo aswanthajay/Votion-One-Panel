@@ -1,29 +1,34 @@
-import { dbService } from '../db/database.js';
 import { proxmoxFetch } from './proxmoxHttp.js';
+import { dbService } from '../db/database.js';
 
 const SYNC_INTERVAL_MS = 15_000;
-const DEFAULT_OWNER_EMAIL = 'unassigned@votioncloud.org';
 
-type ProxmoxConnection = {
+export type ProxmoxConnection = {
   id: string;
+  name: string;
   host_ip: string;
   port: number;
+  username?: string;
+  password?: string;
   token_id: string;
-  token_secret: string | null;
+  token_secret: string;
   ssl_fingerprint?: string | null;
+  status: string;
 };
 
 export type ProxmoxVmResource = {
   vmid: number;
+  name: string;
   node: string;
-  name?: string;
-  type?: 'qemu' | 'lxc' | string;
-  status?: string;
-  maxcpu?: number;
-  maxmem?: number;
-  maxdisk?: number;
+  status: string;
+  type: 'qemu' | 'lxc';
+  cpus: number;
   cpu?: number;
+  maxcpu?: number;
+  maxmem: number;
   mem?: number;
+  maxdisk: number;
+  disk?: number;
   netin?: number;
   netout?: number;
   diskread?: number;
@@ -57,22 +62,30 @@ export class ProxmoxSyncWorker {
   async syncNow(): Promise<void> {
     if (this.inFlight) return this.inFlight;
 
-    this.inFlight = this.performSync().finally(() => {
-      this.inFlight = null;
-    });
+    this.inFlight = this.performSync()
+      .catch((err) => {
+        console.warn('[PROXMOX SYNC] Sync error:', err?.message || err);
+      })
+      .finally(() => {
+        this.inFlight = null;
+      });
     return this.inFlight;
   }
 
   private async performSync(): Promise<void> {
-    const connections = (await dbService.getProxmoxConnectionCredentials()) as ProxmoxConnection[];
-    if (connections.length === 0) return;
+    try {
+      const connections = (await dbService.getProxmoxConnectionCredentials()) as ProxmoxConnection[];
+      if (!connections || connections.length === 0) return;
 
-    for (const connection of connections) {
-      try {
-        await this.syncConnection(connection);
-      } catch (error: any) {
-        console.error(`[PROXMOX SYNC] Connection ${connection.id} failed:`, error?.message || error);
+      for (const connection of connections) {
+        try {
+          await this.syncConnection(connection);
+        } catch (error: any) {
+          console.error(`[PROXMOX SYNC] Connection ${connection.id} failed:`, error?.message || error);
+        }
       }
+    } catch (error: any) {
+      console.warn('[PROXMOX SYNC] Database connection blip during sync:', error?.message || error);
     }
   }
 
@@ -103,25 +116,17 @@ export class ProxmoxSyncWorker {
         cpus: Number(resource.maxcpu || 1),
         maxmem: Number(resource.maxmem || 0),
         maxdisk: Number(resource.maxdisk || 0),
-        type: resource.type === 'lxc' ? 'lxc' : 'qemu',
+        type: resource.type === 'lxc' ? ('lxc' as const) : ('qemu' as const),
         proxmoxConnectionId: connection.id,
       }));
 
-    if (resources.length === 0) return;
+    if (resources.length === 0) {
+      return;
+    }
 
-    const syncResult = await dbService.upsertProxmoxVMs(resources, DEFAULT_OWNER_EMAIL);
-    const synchronizedVmids = new Set(syncResult.synchronizedVmids);
-    await dbService.insertVmMetricsBatch(resources.filter(resource => synchronizedVmids.has(resource.vmid)).map(resource => ({
-      vmid: resource.vmid,
-      cpuPct: Number(resource.cpu || 0) * 100,
-      ramBytes: Number(resource.mem || 0),
-      netInBytes: Number(resource.netin || 0),
-      netOutBytes: Number(resource.netout || 0),
-      diskReadBytes: Number(resource.diskread || 0),
-      diskWriteBytes: Number(resource.diskwrite || 0),
-    })));
-
-    console.log(`[PROXMOX SYNC] ${connection.id}: synchronized ${resources.length} VM(s)`);
+    await dbService.upsertProxmoxVMs(resources, 'admin@votioncloud.org');
+    await dbService.deleteStaleProxmoxVMs(connection.id, resources.map(r => r.vmid));
+    console.log(`[PROXMOX SYNC] ${connection.name || connection.id}: synchronized ${resources.length} VM(s)`);
   }
 }
 

@@ -8,8 +8,8 @@
 :root {
   /* Exact Reference Font Families */
   --ink-font-global-family-base: "Inter var", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  --ink-font-global-family-prominent: "SangBleu Versailles", "Newsreader", "Playfair Display", Georgia, serif;
-  --ink-font-global-family-monospace: "Roboto Mono", ui-monospace, Menlo, Monaco, "JetBrains Mono", monospace;
+  --ink-font-global-family-prominent: "Newsreader", "SangBleu Versailles", "Playfair Display", Georgia, serif;
+  --ink-font-global-family-monospace: "JetBrains Mono", "Roboto Mono", ui-monospace, Menlo, Monaco, monospace;
   --ink-font-global-family-cursive: "Dancing Script", dancingscript, cursive;
   --ink-font-global-feature-base: "ss01", "cv05", "cv10", "calt";
 
@@ -395,9 +395,11 @@ body {
 
 .ink-block-title {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--color-dark-ink);
   margin: 0;
+  font-family: var(--ink-font-global-family-prominent);
+  letter-spacing: -0.015em;
 }
 
 .ink-table-wrapper {
@@ -1374,6 +1376,15 @@ body {
 }
 
 /* Public authentication surfaces follow the same theme tokens as the app shell. */
+.auth-grid {
+  background-image: linear-gradient(to right, rgba(17, 17, 17, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(17, 17, 17, 0.08) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+}
+
+[data-theme="dark"] .auth-grid {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
 
 [data-theme="dark"] .auth-page {
   background-color: #000000 !important;
@@ -2772,11 +2783,11 @@ body {
 }
 
 .telemetry-memory-legend-used {
-  background: #71717a;
+  background: #2563eb;
 }
 
 .telemetry-memory-legend-free {
-  background: #a8a29e;
+  background: #94a3b8;
 }
 
 /* Tremor renders the donut total as SVG text, so keep it readable in Dark mode. */
@@ -3645,3 +3656,161 @@ body {
     line-height: 1.7;
   }
 }
+
+
+
+/* ==========================================================================
+   OVH ROUTER MANAGER STYLES (LIGHT/DARK REGION COMPATIBILITY)
+   ========================================================================== */
+
+.ovh-container-card {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+}
+[data-theme="dark"] .ovh-container-card {
+  background-color: #0a0a0a !important;
+  border-color: #2b2b2b !important;
+  color: #ededed !important;
+}
+
+.ovh-header-row {
+  background-color: #fbfaf9;
+  border-bottom: 1px solid var(--color-subtle-gray);
+}
+[data-theme="dark"] .ovh-header-row {
+  background-color: #121212 !important;
+  border-bottom-color: #2b2b2b !important;
+}
+
+.ovh-tabs-bar {
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--color-subtle-gray);
+}
+[data-theme="dark"] .ovh-tabs-bar {
+  background-color: #0a0a0a !important;
+  border-bottom-color: #2b2b2b !important;
+}
+
+.ovh-field-input {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+}
+[data-theme="dark"] .ovh-field-input {
+  background-color: #050505 !important;
+  border-color: #2b2b2b !important;
+  color: #ededed !important;
+}
+.ovh-field-input:focus {
+  border-color: var(--color-dark-ink);
+}
+[data-theme="dark"] .ovh-field-input:focus {
+  border-color: var(--color-accent-blue) !important;
+}
+
+.ovh-field-select {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+}
+[data-theme="dark"] .ovh-field-select {
+  background-color: #050505 !important;
+  border-color: #2b2b2b !important;
+  color: #ededed !important;
+}
+
+.ovh-table-wrap {
+  border: 1px solid var(--color-subtle-gray);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #ffffff;
+}
+[data-theme="dark"] .ovh-table-wrap {
+  border-color: #2b2b2b !important;
+  background-color: #0a0a0a !important;
+}
+
+.ovh-custom-table thead {
+  background-color: #fbfbfb;
+  border-bottom: 1px solid var(--color-subtle-gray);
+}
+[data-theme="dark"] .ovh-custom-table thead {
+  background-color: #121212 !important;
+  border-bottom-color: #2b2b2b !important;
+}
+
+.ovh-custom-table tbody tr {
+  border-bottom: 1px solid var(--color-subtle-gray);
+}
+[data-theme="dark"] .ovh-custom-table tbody tr {
+  border-bottom-color: #161616 !important;
+}
+.ovh-custom-table tbody tr:hover {
+  background-color: #fbfbfb;
+}
+[data-theme="dark"] .ovh-custom-table tbody tr:hover {
+  background-color: #121212 !important;
+}
+
+.ovh-card-inner-btn {
+  background-color: #ffffff;
+  border: 1px solid var(--color-subtle-gray);
+  color: var(--color-dark-ink);
+}
+.ovh-card-inner-btn:hover {
+  background-color: #f9f9f9;
+}
+[data-theme="dark"] .ovh-card-inner-btn {
+  background-color: #0c0c0c !important;
+  border-color: #2b2b2b !important;
+  color: #ededed !important;
+}
+[data-theme="dark"] .ovh-card-inner-btn:hover {
+  background-color: #161616 !important;
+}
+
+.ovh-block-group {
+  border: 1px solid var(--color-subtle-gray);
+  background-color: #fbfbfb;
+}
+[data-theme="dark"] .ovh-block-group {
+  border-color: #2b2b2b !important;
+  background-color: #0c0c0c !important;
+}
+
+.ovh-block-group-header {
+  background-color: #f3f4f4;
+  border-bottom: 1px solid var(--color-subtle-gray);
+  color: var(--color-text-subtle);
+}
+[data-theme="dark"] .ovh-block-group-header {
+  background-color: #161616 !important;
+  border-color: #2b2b2b !important;
+  color: #a1a1aa !important;
+}
+
+.ovh-block-group-btn {
+  background-color: transparent;
+  color: var(--color-dark-ink);
+}
+.ovh-block-group-btn:hover {
+  background-color: #f4f5f5;
+}
+[data-theme="dark"] .ovh-block-group-btn {
+  color: #ededed !important;
+}
+[data-theme="dark"] .ovh-block-group-btn:hover {
+  background-color: #1c1c1c !important;
+}
+
+.ovh-block-group-btn.is-active {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  font-weight: 700;
+}
+[data-theme="dark"] .ovh-block-group-btn.is-active {
+  background-color: #1e293b !important;
+  color: #38bdf8 !important;
+}
+

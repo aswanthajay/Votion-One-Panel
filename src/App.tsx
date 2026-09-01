@@ -10,7 +10,11 @@ import {
 import { AppSwitcher } from './components/AppSwitcher';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { ClientApiKeys } from './components/ClientApiKeys';
+import { ClientSshKeys } from './components/ClientSshKeys';
+import { ClientReimageRequests } from './components/ClientReimageRequests';
 import { ToastProvider } from './components/ToastContext';
+import { AdminVMFleet } from './components/AdminVMFleet';
 import { RouteNotFound } from './components/RouteNotFound';
 import { readWorkspaceScope, saveWorkspaceScope, type WorkspaceScope } from './workspaceScope';
 import { apiClient, type ApiAccount } from './services/apiClient';
@@ -26,6 +30,7 @@ const InteractiveModals = lazy(() => import('./components/InteractiveModals').th
 const UserManagement = lazy(() => import('./components/UserManagement').then(module => ({ default: module.UserManagement })));
 const ProxmoxConnections = lazy(() => import('./components/ProxmoxConnections').then(module => ({ default: module.ProxmoxConnections })));
 const SystemSettings = lazy(() => import('./components/SystemSettings').then(module => ({ default: module.SystemSettings })));
+const OvhManager = lazy(() => import('./components/OvhManager').then(module => ({ default: module.OvhManager })));
 const AlertRulesModal = lazy(() => import('./components/AlertRulesModal').then(module => ({ default: module.AlertRulesModal })));
 const ClusterAuditLogs = lazy(() => import('./components/ClusterAuditLogs').then(module => ({ default: module.ClusterAuditLogs })));
 const ReimageRequestsPanel = lazy(() => import('./components/ReimageRequestsPanel').then(module => ({ default: module.ReimageRequestsPanel })));
@@ -46,6 +51,8 @@ export type ViewMode =
   | 'client-instances-lxc'
   | 'client-instances-vnc'
   | 'client-instances-metrics'
+    | 'client-api-keys'
+    | 'client-ssh-keys'
   | 'client-instances-firewall'
   | 'client-instances-backups'
   | 'node-matrix'
@@ -62,10 +69,11 @@ export type ViewMode =
   | 'team-access'
   | 'system-settings'
   | 'proxmox-connections'
-  | 'user-management';
+  | 'user-management'
+  | 'ovh-manager';
 
 type UserRole = 'admin' | 'client';
-type AuthMode = 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin';
+type AuthMode = 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin' | '2fa';
 
 type ClientFilter = 'qemu' | 'lxc' | 'vnc' | 'metrics' | 'firewall' | 'backups';
 
@@ -80,6 +88,8 @@ const VIEW_PATHS: Record<ViewMode, string> = {
   'client-instances-lxc': '/client-instances/lxc',
   'client-instances-vnc': '/client-instances/vnc',
   'client-instances-metrics': '/client-instances/metrics',
+    'client-api-keys': '/client-api-keys',
+    'client-ssh-keys': '/client-ssh-keys',
   'client-instances-firewall': '/client-instances/firewall',
   'client-instances-backups': '/client-instances/backups',
   'node-matrix': '/node-matrix',
@@ -97,10 +107,12 @@ const VIEW_PATHS: Record<ViewMode, string> = {
   'system-settings': '/system-settings',
   'proxmox-connections': '/proxmox-connections',
   'user-management': '/user-management',
+  'ovh-manager': '/ovh-manager',
 };
 
 const AUTH_PATHS: Record<AuthMode, string> = {
   login: '/login',
+  '2fa': '/login/2fa',
   register: '/register',
   'forgot-password': '/forgot-password',
   'reset-password': '/reset-password',
@@ -111,6 +123,7 @@ const normalizePath = (pathname: string) => {
   const normalized = pathname.replace(/\/+$/, '');
   return normalized || '/';
 };
+
 
 const viewForPath = (pathname: string): ViewMode => {
   const normalizedPath = normalizePath(pathname);
@@ -132,22 +145,42 @@ const navigateForView = (navigate: ReturnType<typeof useNavigate>, view: unknown
   const path = typeof view === 'string' && view in VIEW_PATHS
     ? VIEW_PATHS[view as ViewMode]
     : VIEW_PATHS.dashboard;
-  startTransition(() => navigate(path));
+  startTransition(() => {
+    navigate(path);
+  });
 };
 
 const RouteLoading = () => (
-  <div className="app-content flex items-center justify-center" aria-busy="true">
-    <div className="text-sm text-[#656b6b]" role="status">Loading view…</div>
+  <div className="app-content flex items-center justify-center min-h-[50vh]" aria-busy="true">
+    <div className="flex flex-col items-center gap-4">
+      <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#dedfdf] border-t-[#1a1a1a]" />
+      <div className="text-xs font-bold uppercase tracking-widest text-[#656b6b]" role="status">Loading View</div>
+    </div>
   </div>
 );
 
 const OverlayLoading = () => (
-  <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/20" aria-busy="true">
-    <div className="rounded-lg border border-[#dedfdf] bg-white px-4 py-3 text-sm text-[#656b6b] shadow-lg" role="status">
-      Loading…
+  <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-white/40 backdrop-blur-sm" aria-busy="true">
+    <div className="flex items-center gap-3 rounded-full border border-[#dedfdf] bg-white px-5 py-2.5 shadow-sm" role="status">
+      <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#dedfdf] border-t-[#1a1a1a]" />
+      <span className="text-xs font-bold uppercase tracking-widest text-[#1a1a1a]">Processing</span>
     </div>
   </div>
 );
+
+const InstancesRoute: React.FC<{
+  activeRole: string;
+  filter?: ClientFilter;
+  onOpenModal: (modalName: string) => void;
+  workspaceConnectionId?: string;
+}> = ({ activeRole, filter, onOpenModal, workspaceConnectionId }) => {
+  const location = useLocation();
+  const vmid = new URLSearchParams(location.search).get('vmid');
+  if (activeRole === 'admin' && !vmid) {
+    return <AdminVMFleet />;
+  }
+  return <ClientPanelRoute filter={filter} onOpenModal={onOpenModal} workspaceConnectionId={workspaceConnectionId} />;
+};
 
 const ClientPanelRoute: React.FC<{
   filter?: ClientFilter;
@@ -171,8 +204,12 @@ const AuthRoute: React.FC<{ mode: AuthMode }> = ({ mode }) => {
     <Suspense fallback={<div className="min-h-screen bg-white" aria-busy="true" />}>
       <AuthPages
         initialMode={mode}
-        onNavigateToDashboard={() => startTransition(() => navigate(VIEW_PATHS.overview))}
-        onNavigateToAuth={(nextMode) => startTransition(() => navigate(AUTH_PATHS[nextMode]))}
+        onNavigateToDashboard={() => startTransition(() => {
+          navigate(VIEW_PATHS.overview);
+        })}
+        onNavigateToAuth={(nextMode) => startTransition(() => {
+          navigate(AUTH_PATHS[nextMode]);
+        })}
       />
     </Suspense>
   );
@@ -274,7 +311,14 @@ const AppShell: React.FC = () => {
     startTransition(() => {
       setIsMobileSidebarOpen(false);
       const query = new URLSearchParams({ role: activeRole });
-      if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) query.set('vmid', String(requestedVmid));
+            if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
+        query.set('vmid', String(requestedVmid));
+      } else if (requestedView.startsWith('client-instances')) {
+        const currentVmid = new URLSearchParams(window.location.search).get('vmid');
+        if (currentVmid) {
+          query.set('vmid', currentVmid);
+        }
+      }
       navigate(`${path}?${query.toString()}`);
     });
   };
@@ -333,19 +377,22 @@ const AppShell: React.FC = () => {
 
           <Suspense fallback={<RouteLoading />}>
             <Routes>
-                            <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} />} />
-              <Route path={VIEW_PATHS.dashboard} element={activeRole === 'admin' ? <DashboardContent onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <Navigate to={VIEW_PATHS.overview} replace />} />
-              <Route path={VIEW_PATHS.instances} element={activeRole === 'admin' ? <DashboardContent pageTitle="Virtual Machines" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
-              <Route path={VIEW_PATHS['instances-qemu']} element={activeRole === 'admin' ? <DashboardContent pageTitle="QEMU Virtual Machines" typeFilter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute filter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
-              <Route path={VIEW_PATHS['instances-lxc']} element={activeRole === 'admin' ? <DashboardContent pageTitle="LXC Containers" typeFilter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} /> : <ClientPanelRoute filter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
-              <Route path={VIEW_PATHS['audit-logs']} element={activeRole === 'admin' ? <ClusterAuditLogs /> : <Navigate to={VIEW_PATHS.overview} replace />} />
-              <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+                            <Route path={VIEW_PATHS.overview} element={activeRole === 'admin' ? <DashboardContent pageTitle="Overview" onOpenModal={handleOpenModal} workspaceName="All service locations" /> : <OverviewDashboard onOpenManage={() => handleNavigate('instances')} onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} workspaceName={workspaceScope.name} />} />
+              <Route path={VIEW_PATHS.dashboard} element={activeRole === 'admin' ? <DashboardContent onOpenModal={handleOpenModal} workspaceName="All service locations" /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS.instances} element={<InstancesRoute activeRole={activeRole} onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['instances-qemu']} element={<InstancesRoute activeRole={activeRole} filter="qemu" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['instances-lxc']} element={<InstancesRoute activeRole={activeRole} filter="lxc" onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
+              <Route path={VIEW_PATHS['client-api-keys']} element={<ClientApiKeys />} />
+                <Route path={VIEW_PATHS['client-ssh-keys']} element={<ClientSshKeys />} />
+                <Route path={VIEW_PATHS['audit-logs']} element={activeRole === 'admin' ? <ClusterAuditLogs /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS['reimage-requests']} element={activeRole === 'admin' ? <ReimageRequestsPanel /> : <ClientReimageRequests />} />
               <Route path={VIEW_PATHS['operator-reimage']} element={activeRole === 'admin' ? <OperatorReimagePanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['billing-operations']} element={activeRole === 'admin' ? <BillingOperationsPanel /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS.support} element={<SupportCenter userRole={activeRole} />} />
               <Route path={VIEW_PATHS['user-settings']} element={<UserSettingsContent />} />
               <Route path={VIEW_PATHS['team-access']} element={activeRole === 'client' ? <TeamAccessContent /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['system-settings']} element={activeRole === 'admin' ? <SystemSettings /> : <Navigate to={VIEW_PATHS.overview} replace />} />
+              <Route path={VIEW_PATHS['ovh-manager']} element={activeRole === 'admin' ? <OvhManager /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['user-management']} element={activeRole === 'admin' ? <UserManagement /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['proxmox-connections']} element={activeRole === 'admin' ? <ProxmoxConnections /> : <Navigate to={VIEW_PATHS.overview} replace />} />
               <Route path={VIEW_PATHS['client-instances']} element={<ClientPanelRoute onOpenModal={handleOpenModal} workspaceConnectionId={workspaceScope.connectionId || undefined} />} />
@@ -401,7 +448,9 @@ const AppRouter: React.FC = () => {
       localStorage.removeItem('votion_jwt_token');
       localStorage.removeItem('votion_user_email');
       localStorage.removeItem('votion_user_role');
-      startTransition(() => navigate(AUTH_PATHS.login, { replace: true }));
+      startTransition(() => {
+        navigate(AUTH_PATHS.login, { replace: true });
+      });
     };
 
     window.addEventListener('votion:auth-expired', handleAuthExpired);
@@ -423,8 +472,31 @@ const AppRouter: React.FC = () => {
   return <AppShell />;
 };
 
-export const App: React.FC = () => (
-  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+export const App: React.FC = () => {
+  useEffect(() => {
+    let active = true;
+    void apiClient.getPublicPlatformSettings().then((response) => {
+      if (!active || !response?.success || !response.data) return;
+      const { faviconUrl, timezone } = response.data;
+      if (typeof timezone === 'string' && timezone) {
+        document.documentElement.dataset.timezone = timezone;
+      }
+      if (typeof faviconUrl === 'string' && faviconUrl) {
+        let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+        if (!favicon) {
+          favicon = document.createElement('link');
+          favicon.rel = 'icon';
+          document.head.appendChild(favicon);
+        }
+        favicon.type = faviconUrl.endsWith('.svg') ? 'image/svg+xml' : 'image/png';
+        favicon.href = faviconUrl;
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  return (
+  <BrowserRouter>
     <Routes>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/legal/terms" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="terms" /></Suspense>} />
@@ -435,7 +507,7 @@ export const App: React.FC = () => (
       <Route path="/legal/data-processing" element={<Suspense fallback={<RouteLoading />}><LegalPages documentId="data-processing" /></Suspense>} />
       <Route path="*" element={<AppRouter />} />
     </Routes>
-  </BrowserRouter>
-);
-
+    </BrowserRouter>
+  );
+};
 export default App;

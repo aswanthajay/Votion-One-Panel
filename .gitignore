@@ -84,3 +84,10 @@ _vnc_*.mjs
 .runtime/
 runtime/
 pg_log.txt
+
+/src/generated/prisma
+
+.agents/
+.claude/
+.windsurf/
+

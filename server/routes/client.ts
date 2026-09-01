@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { ovhService } from '../services/ovh.js';
 import { dbService } from '../db/database.js';
 import { emailService } from '../services/email.js';
 import { hasTeamAccessScope, isDelegatedTeamAccessScope, type TeamAccessScope } from '../services/teamAccessPolicy.js';
@@ -13,7 +14,7 @@ import {
 } from '../services/secretBox.js';
 
 interface PveEnvelope<T> { data?: T; }
-interface PveVmStatus { status?: string; cpu?: number; mem?: number; maxmem?: number; netin?: number; netout?: number; diskread?: number; diskwrite?: number; uptime?: number; }
+interface PveVmStatus { status?: string; cpu?: number; cpus?: number; mem?: number; maxmem?: number; netin?: number; netout?: number; diskread?: number; diskwrite?: number; uptime?: number; }
 interface PveConfig { ipconfig0?: string; net0?: string; [key: string]: unknown; }
 interface PveAgentPayload { result?: Array<{ name?: string; 'ip-addresses'?: Array<{ 'ip-address-type'?: string; 'ip-address'?: string }> }>; }
 
@@ -232,7 +233,7 @@ const getVmEndpoint = (connection: any, vm: { node: string; type: string; vmid: 
 clientRouter.use('/vms/:vmid', async (req, res, next) => {
   const vmid = Number(req.params.vmid);
   const vm = await dbService.getVMByVMID(vmid);
-  if (!vm) return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
+  if (!vm) return res.status(404).json({ success: false, error: 'Server not found' });
 
   const user = (req as any).authUser;
   const userEmail = String(user?.email || '').toLowerCase();
@@ -273,6 +274,17 @@ const parseReimageOs = (value: unknown) => typeof value === 'string' ? value.tri
 
 // Approval-based OS reimage requests. These routes persist workflow state only;
 // they never call Proxmox or mutate the VM's OS/status.
+
+clientRouter.get('/reimage-requests', requireAuth, async (req, res) => {
+  const userEmail = (req as any).authUser?.email;
+  try {
+    const data = await dbService.getReimageRequests({ requesterEmail: userEmail });
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 clientRouter.get('/vms/:vmid/reimage-requests', requireClientVmScope('owner'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
@@ -297,12 +309,12 @@ clientRouter.post('/vms/:vmid/reimage-requests', requireClientVmScope('owner'), 
 
   const requesterNote = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 1000) : undefined;
   try {
-    const request = await dbService.createReimageRequest(vm.vmid, requestedOs, userEmail, requesterNote);
+    const request = await dbService.createReimageRequest(vm.vmid, requestedOs, userEmail, requesterNote, vm.proxmoxConnectionId);
     if (!request) return res.status(404).json({ success: false, error: 'VM not found' });
     res.status(201).json({
       success: true,
       data: request,
-      message: 'Request submitted for administrator approval. No Proxmox operation has started.',
+      message: 'Your reimage request has been submitted for review.',
     });
   } catch (err: any) {
     res.status(409).json({ success: false, error: err.message || 'Unable to create reimage request' });
@@ -320,25 +332,34 @@ clientRouter.post('/vms/:vmid/reimage-requests/:requestId/cancel', requireClient
   res.json({
     success: true,
     data: request,
-    message: 'Request cancelled. No Proxmox operation was started.',
+    message: 'Your reimage request has been cancelled.',
   });
 });
 
-// 1. GET /api/client/vms — Fetch ONLY servers where user_id / email matches authenticated logged-in client
+// 1. GET /api/client/vms
 clientRouter.get('/vms', async (req, res) => {
-  const userEmail = (req as any).authUser?.email;
+  const user = (req as any).authUser;
+  const userEmail = user?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
   const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
     ? req.query.connectionId.trim()
     : undefined;
   const providerAvailable = isProviderCredentialKeyConfigured();
-  const accessibleVms = await dbService.getAccessibleClientVMs(userEmail);
+  
+  let accessibleVms = [];
+  if (user.role === 'admin') {
+    accessibleVms = await dbService.getVMs();
+  } else {
+    accessibleVms = await dbService.getAccessibleClientVMs(userEmail);
+  }
+  
   const allowedVms = connectionId
     ? accessibleVms.filter((vm) => vm.proxmoxConnectionId === connectionId)
     : accessibleVms;
-  const vms = providerAvailable
-    ? await proxmoxApi.getLiveVMs(undefined, connectionId, allowedVms.map((vm) => vm.vmid))
-    : allowedVms;
+    const vms = allowedVms.map(vm => ({
+      ...vm,
+      ipAddress: vm.ipAddress || (vm as any).ip_address || '',
+    }));
   res.json({ success: true, count: vms.length, data: vms, providerAvailable });
 });
 
@@ -355,10 +376,18 @@ clientRouter.get('/billing/vm-profiles', async (req, res) => {
   }
 });
 
+const vmMetadataCache = new Map<string, { data: any; expiresAt: number }>();
+
 // 1.5. GET /api/client/vms/:vmid/metadata — Fetch sanitized Cloud-Init and Proxmox VM details
 clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async (req, res) => {
   const vm = (req as any).authorizedVm;
   if (!vm) return res.status(404).json({ success: false, error: 'VM not found' });
+
+  const cacheKey = `${vm.proxmoxConnectionId || 'default'}:${vm.vmid}`;
+  const cached = vmMetadataCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.json({ success: true, data: cached.data });
+  }
 
   try {
     const conn = await getConnectionForVm(vm);
@@ -367,17 +396,17 @@ clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async 
       method: 'GET',
       headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
       sslFingerprint: conn.ssl_fingerprint,
-      timeoutMs: 10000,
+      timeoutMs: 4000,
     });
 
     if (!configResponse.ok) {
-      return res.status(502).json({ success: false, error: 'Proxmox did not return VM configuration' });
+      return res.status(502).json({ success: false, error: 'Server configuration is currently unavailable' });
     }
 
     const configPayload = await readPveJson<PveEnvelope<PveConfig>>(configResponse);
     const config = (configPayload?.data || {}) as Record<string, unknown>;
     let guestAgentInterfaces: Array<Record<string, unknown>> = [];
-    const agentEnabled = vm.type === 'qemu' && (
+    const agentEnabled = vm.type === 'qemu' && vm.status === 'running' && (
       config.agent === true || Number(config.agent) > 0 || String(config.agent || '').startsWith('1')
     );
 
@@ -387,7 +416,7 @@ clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async 
           method: 'GET',
           headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
           sslFingerprint: conn.ssl_fingerprint,
-          timeoutMs: 8000,
+          timeoutMs: 1500,
         });
         if (agentResponse.ok) {
           const agentPayload = await readPveJson<PveEnvelope<PveAgentPayload>>(agentResponse);
@@ -400,9 +429,10 @@ clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async 
 
     const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
     const metadata = mapProxmoxVmMetadata(config, resourceType, guestAgentInterfaces as any);
+    vmMetadataCache.set(cacheKey, { data: metadata, expiresAt: Date.now() + 20000 });
     res.json({ success: true, data: metadata });
   } catch {
-    res.status(502).json({ success: false, error: 'Unable to fetch VM metadata from Proxmox' });
+    res.status(502).json({ success: false, error: 'Unable to load server details' });
   }
 });
 
@@ -417,6 +447,34 @@ clientRouter.get('/vms/:vmid/telemetry', requireClientVmScope('readonly'), async
 
   try {
     const conn = await getConnectionForVm(vm);
+
+    // [Opportunistic] Fetch Cloud-Init IP if missing in DB without blocking the request
+    if (!vm.ip_address || vm.ip_address.trim() === '') {
+      proxmoxFetch(getVmEndpoint(conn, vm, 'config'), {
+        method: 'GET',
+        headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+        sslFingerprint: conn.ssl_fingerprint,
+        timeoutMs: 8000,
+      }).then(async (confRes) => {
+        if (confRes.ok) {
+          const confJson = await readPveJson<PveEnvelope<PveConfig>>(confRes);
+          if (confJson?.data) {
+            let ip = '';
+            if (confJson.data.ipconfig0) {
+              const match = confJson.data.ipconfig0.match(/ip=([0-9\.]+)(?:\/|,|$)/);
+              if (match && match[1]) ip = match[1];
+            } else if (confJson.data.net0) {
+              const match = confJson.data.net0.match(/ip=([0-9\.]+)(?:\/|,|$)/);
+              if (match && match[1]) ip = match[1];
+            }
+            if (ip) {
+              await dbService.updateVmIpAddress(vm.vmid, conn.id, ip);
+            }
+          }
+        }
+      }).catch(() => { /* Ignore background failure */ });
+    }
+
     const pveRes = await proxmoxFetch(getVmEndpoint(conn, vm, 'status/current'), {
       method: 'GET',
       headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
@@ -435,6 +493,7 @@ clientRouter.get('/vms/:vmid/telemetry', requireClientVmScope('readonly'), async
         isSuspended: vm.isSuspended,
         telemetry: {
           cpu: json.data.cpu || 0,
+          cpus: json.data.cpus || vm.cpus || 1,
           mem: json.data.mem || 0,
           maxmem: json.data.maxmem || vm.memory || 8589934592,
           netin: json.data.netin || 0,
@@ -838,5 +897,387 @@ clientRouter.delete('/vms/:vmid/firewall/:pos', requireClientVmScope('full'), as
     res.json({ success: true });
   } catch (err: any) {
     res.status(503).json({ success: false, error: err.message || 'Unable to delete firewall rule' });
+  }
+});
+
+// --- OVH Cloud Integration Routes ---
+
+const requireOvhEnabled = (_req: any, res: any, next: any) => {
+  if (!ovhService.isEnabled()) {
+    return res.status(503).json({ success: false, error: 'OVH API integration is not enabled or configured by administrator' });
+  }
+  next();
+};
+
+const getVmIp = async (vm: any): Promise<string> => {
+  try {
+    const conn = await getConnectionForVm(vm);
+    const headers = { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` };
+    const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
+    const url = `https://${conn.host_ip}:${conn.port || 8006}/api2/json/nodes/${vm.node}/${resourceType}/${vm.vmid}/config`;
+    const response = await proxmoxFetch(url, { headers, sslFingerprint: conn.ssl_fingerprint });
+    if (response.ok) {
+      const json = await response.json() as { data?: Record<string, any> };
+      const config = json.data || {};
+      
+      const ipconfigKey = Object.keys(config).find(key => /^ipconfig\d+$/.test(key));
+      if (ipconfigKey && config[ipconfigKey]) {
+        const parts = String(config[ipconfigKey]).split(',');
+        const ipPart = parts.find(part => part.trim().toLowerCase().startsWith('ip='));
+        if (ipPart) {
+          const ipVal = ipPart.split('=')[1]?.trim().split('/')[0];
+          if (ipVal && !/^(dhcp|manual|auto|none)$/i.test(ipVal) && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ipVal)) {
+            return ipVal;
+          }
+        }
+      }
+
+      if (config.net0) {
+        const parts = String(config.net0).split(',');
+        const ipPart = parts.find(part => part.trim().toLowerCase().startsWith('ip='));
+        if (ipPart) {
+          const ipVal = ipPart.split('=')[1]?.trim().split('/')[0];
+          if (ipVal && !/^(dhcp|manual|auto|none)$/i.test(ipVal) && /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ipVal)) {
+            return ipVal;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[OVH SYNC IP] Failed to fetch config from Proxmox for VM ${vm.vmid}, falling back to DB IP:`, err);
+  }
+
+  const rawIp = String(vm.ipAddress || '').trim();
+  if (!rawIp) {
+    throw new Error('This VM does not have a public IP address configured in the database or Proxmox');
+  }
+  const firstIp = rawIp.split(/[\s,]+/)[0];
+  if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(firstIp)) {
+    throw new Error(`The VM's IP address '${firstIp}' is not a valid IPv4 address for OVH controls`);
+  }
+  return firstIp;
+};
+
+clientRouter.get('/vms/:vmid/ovh/status', requireClientVmScope('readonly'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const [reverse, ddos, firewall] = await Promise.all([
+      ovhService.getReverse(ip).catch(() => null),
+      ovhService.getDdosState(ip).catch(() => ({ state: 'unknown', mode: 'automatic' as const })),
+      ovhService.getFirewallState(ip).catch(() => ({ enabled: false, state: 'unknown' })),
+    ]);
+    res.json({ success: true, data: { ip, reverse, ddos, firewall } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/ovh/rdns', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { reverse } = req.body;
+    await ovhService.setReverse(ip, String(reverse || '').trim());
+    res.json({ success: true, message: 'Reverse DNS update request submitted to OVH successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/ovh/ddos', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { mode } = req.body;
+    if (mode !== 'automatic' && mode !== 'permanent') {
+      return res.status(400).json({ success: false, error: 'Invalid DDoS mode' });
+    }
+    await ovhService.setDdosMitigation(ip, mode);
+    res.json({ success: true, message: `DDoS mitigation mode updated to ${mode} successfully` });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/ovh/firewall/toggle', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { enabled } = req.body;
+    await ovhService.toggleFirewall(ip, Boolean(enabled));
+    res.json({ success: true, message: `OVH Edge Firewall ${enabled ? 'enabled' : 'disabled'} successfully` });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.get('/vms/:vmid/ovh/firewall/rules', requireClientVmScope('readonly'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const rules = await ovhService.getFirewallRules(ip);
+    res.json({ success: true, data: rules });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/ovh/firewall/rules', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { sequence, action, protocol, sourcePort, destinationPort, source } = req.body;
+    if (typeof sequence !== 'number' || sequence < 0 || sequence > 99) {
+      return res.status(400).json({ success: false, error: 'Sequence number must be between 0 and 99' });
+    }
+    if (action !== 'permit' && action !== 'deny') {
+      return res.status(400).json({ success: false, error: 'Action must be permit or deny' });
+    }
+    if (!['tcp', 'udp', 'icmp', 'ipv4'].includes(protocol)) {
+      return res.status(400).json({ success: false, error: 'Protocol must be tcp, udp, icmp, or ipv4' });
+    }
+    await ovhService.createFirewallRule(ip, {
+      sequence,
+      action,
+      protocol,
+      sourcePort: sourcePort || undefined,
+      destinationPort: destinationPort || undefined,
+      source: source || undefined
+    });
+    res.json({ success: true, message: 'Edge Firewall rule created successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.delete('/vms/:vmid/ovh/firewall/rules/:sequence', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const sequence = parseInt(req.params.sequence, 10);
+    if (isNaN(sequence)) {
+      return res.status(400).json({ success: false, error: 'Invalid sequence number' });
+    }
+    await ovhService.deleteFirewallRule(ip, sequence);
+    res.json({ success: true, message: 'Edge Firewall rule deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.get('/vms/:vmid/ovh/game-ddos', requireClientVmScope('readonly'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const rules = await ovhService.getGameDdosRules(ip);
+    res.json({ success: true, data: rules });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/ovh/game-ddos', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { port, protocol, game } = req.body;
+    if (typeof port !== 'number' || port < 1 || port > 65535) {
+      return res.status(400).json({ success: false, error: 'Port must be between 1 and 65535' });
+    }
+    if (protocol !== 'tcp' && protocol !== 'udp') {
+      return res.status(400).json({ success: false, error: 'Protocol must be tcp or udp' });
+    }
+    if (!game || typeof game !== 'string') {
+      return res.status(400).json({ success: false, error: 'Game profile is required' });
+    }
+    await ovhService.createGameDdosRule(ip, { port, protocol, game });
+    res.json({ success: true, message: 'Game DDoS port profile created successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.delete('/vms/:vmid/ovh/game-ddos/:ruleId', requireClientVmScope('full'), requireOvhEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify OVH network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const ruleId = parseInt(req.params.ruleId, 10);
+    if (isNaN(ruleId)) {
+      return res.status(400).json({ success: false, error: 'Invalid rule ID' });
+    }
+    await ovhService.deleteGameDdosRule(ip, ruleId);
+    res.json({ success: true, message: 'Game DDoS port profile rule deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/client/vms/:vmid/cloud-init/sync-ssh
+clientRouter.post('/vms/:vmid/cloud-init/sync-ssh', requireClientVmScope('full'), async (req, res) => {
+  try {
+    const vm = (req as any).authorizedVm;
+    if (vm.type !== 'qemu') {
+      return res.status(400).json({ success: false, error: 'Cloud-Init SSH injection is only supported for QEMU virtual machines.' });
+    }
+    
+    // Get the user's SSH keys
+    const userEmail = (req as any).authUser?.email;
+    const user = await dbService.findUserByEmail(userEmail);
+    if (!user || !user.ssh_keys || user.ssh_keys.trim() === '') {
+      return res.status(400).json({ success: false, error: 'No SSH keys found in your profile. Please add them in Account Settings -> Security.' });
+    }
+
+    const conns = await dbService.getProxmoxConnectionCredentials();
+    const c = vm.proxmoxConnectionId
+      ? conns.find((conn: any) => String(conn.id) === String(vm.proxmoxConnectionId))
+      : conns[0];
+      
+    if (!c) {
+      return res.status(500).json({ success: false, error: 'No Proxmox connection configured.' });
+    }
+
+    const cleanHost = String(c.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const url = `https://${cleanHost}:${c.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/qemu/${vm.vmid}/config`;
+    
+    // URL Encode the SSH keys as required by application/x-www-form-urlencoded
+    const formData = new URLSearchParams();
+    // Proxmox requires sshkeys to be URI encoded within the form data
+    formData.append('sshkeys', encodeURIComponent(user.ssh_keys.trim()));
+    
+    const headers = { 
+      'Authorization': `PVEAPIToken=${c.token_id}=${c.token_secret}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+
+    const putRes = await proxmoxFetch(url, {
+      method: 'POST',
+      headers,
+      body: formData.toString(),
+      sslFingerprint: c.ssl_fingerprint
+    });
+    
+    if (!putRes.ok) {
+      const errorText = await putRes.text();
+      return res.status(500).json({ success: false, error: 'Unable to deploy SSH public keys: ' + errorText });
+    }
+
+    res.json({ success: true, message: 'SSH keys deployed successfully. Please restart your server to apply changes.' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/client/vms/:vmid/password
+clientRouter.post('/vms/:vmid/password', requireClientVmScope('full'), async (req, res) => {
+  try {
+    const vm = (req as any).authorizedVm;
+    const { password } = req.body;
+    
+    if (!password) {
+      return res.status(400).json({ success: false, error: 'Password is required' });
+    }
+
+    const conns = await dbService.getProxmoxConnectionCredentials();
+    const c = vm.proxmoxConnectionId
+      ? conns.find((conn: any) => String(conn.id) === String(vm.proxmoxConnectionId))
+      : conns[0];
+      
+    if (!c) {
+      return res.status(500).json({ success: false, error: 'No Proxmox connection configured.' });
+    }
+
+    const cleanHost = String(c.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const baseUrl = `https://${cleanHost}:${c.port || 8006}/api2/json/nodes/${encodeURIComponent(vm.node)}/qemu/${vm.vmid}`;
+    const headers = { 
+      'Authorization': `PVEAPIToken=${c.token_id}=${c.token_secret}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    };
+
+    // 1. Always set cipassword
+    const ciForm = new URLSearchParams();
+    ciForm.append('cipassword', password);
+    
+    await proxmoxFetch(`${baseUrl}/config`, {
+      method: 'POST',
+      headers,
+      body: ciForm.toString(),
+      sslFingerprint: c.ssl_fingerprint
+    });
+
+    // 2. Attempt Live Password injection via QEMU Guest Agent (like Convoy does)
+    let agentResult = 'Live update not available';
+    let isLiveUpdated = false;
+    
+    try {
+      const osInfoRes = await proxmoxFetch(`${baseUrl}/agent/get-osinfo`, {
+        method: 'GET',
+        headers,
+        sslFingerprint: c.ssl_fingerprint
+      });
+      
+      if (osInfoRes.ok) {
+        const osInfo = (await osInfoRes.json()) as any;
+        const osName = String(osInfo.data?.result?.name || '').toLowerCase();
+        const username = osName.includes('windows') ? 'Administrator' : 'root';
+
+        const agentForm = new URLSearchParams();
+        agentForm.append('username', username);
+        agentForm.append('password', password);
+
+        const agentRes = await proxmoxFetch(`${baseUrl}/agent/set-user-password`, {
+          method: 'POST',
+          headers,
+          body: agentForm.toString(),
+          sslFingerprint: c.ssl_fingerprint
+        });
+
+        if (agentRes.ok) {
+          isLiveUpdated = true;
+          agentResult = `Live update successful (${username})`;
+        } else {
+          agentResult = `Agent Error: ${await agentRes.text()}`;
+        }
+      }
+    } catch (e: any) {
+      agentResult = e.message;
+    }
+
+    res.json({ 
+      success: true, 
+      message: isLiveUpdated ? 'Password updated successfully.' : 'Password updated. Please restart your server to apply changes.',
+      liveUpdated: isLiveUpdated,
+      agentResult
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });

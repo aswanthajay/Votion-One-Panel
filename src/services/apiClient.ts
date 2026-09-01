@@ -1,6 +1,6 @@
 /**
  * Production API Client for Stellar Panel
- * Connects Vite React Frontend directly to Express Backend Server (http://localhost:5000/api/v1)
+ * Connects the Vite React frontend to the Express backend through the deployment-aware API base URL.
  * with automated retries, JWT authorization header injection, and persistent database store.
  */
 
@@ -49,6 +49,8 @@ export interface ApiClusterOverview {
 }
 
 export interface ApiVM {
+  /** Stable identity: connection ID + node + VMID. VMID alone is not globally unique. */
+  vmKey?: string;
   vmid: number;
   name: string;
   type: 'qemu' | 'lxc';
@@ -116,6 +118,7 @@ export interface ApiNavigationUsage {
   vmid: number | null;
   name: string | null;
   status: string | null;
+  proxmoxConnectionName?: string | null;
   usageCount: number;
   lastUsedAt: string;
 }
@@ -155,7 +158,6 @@ export interface ApiTeamAccessOverview {
 }
 
 export interface ApiAccount {
-
   id: number;
   email: string;
   name: string;
@@ -163,6 +165,7 @@ export interface ApiAccount {
   phone?: string;
   supportPinConfigured?: boolean;
   twoFactorActive?: boolean;
+  sshKeys?: string;
   created_at?: string;
 }
 
@@ -455,13 +458,16 @@ export interface ApiReimageRequest {
   ownerEmail?: string;
   requesterEmail: string;
   requestedOs: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
   requesterNote?: string;
   reviewerEmail?: string;
   reviewerNote?: string;
   createdAt: string;
   reviewedAt?: string;
   cancelledAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  completionNote?: string;
 }
 
 export type ReimageExecutionState = 'created' | 'preflight_passed' | 'awaiting_confirmation' | 'queued' | 'processing' | 'verifying' | 'awaiting_cutover_confirmation' | 'cutover_processing' | 'completed' | 'failed' | 'blocked' | 'cancelled';
@@ -496,6 +502,47 @@ export interface ApiReimageExecution {
 }
 
 class ApiClient {
+  private cache = new Map<string, { data: string, timestamp: number, promise: Promise<string> | null }>();
+
+  private async swrFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    if (init?.method && init.method.toUpperCase() !== 'GET') {
+      return this.apiFetch(input, init);
+    }
+
+    const url = input.toString();
+    const cached = this.cache.get(url);
+    const now = Date.now();
+
+    // 2 second fresh window to dedupe rapid interval polls
+    if (cached && (now - cached.timestamp < 2000) && cached.data) {
+      return new Response(cached.data, { headers: { 'content-type': 'application/json' } });
+    }
+
+    if (cached && cached.promise) {
+      const text = await cached.promise;
+      return new Response(text, { headers: { 'content-type': 'application/json' } });
+    }
+
+    const promise = this.apiFetch(input, init).then(async (res) => {
+      if (res.ok) {
+        const text = await res.text();
+        this.cache.set(url, { data: text, timestamp: Date.now(), promise: null });
+        return text;
+      }
+      this.cache.delete(url);
+      throw res;
+    });
+
+    this.cache.set(url, { data: cached?.data || '', timestamp: now, promise });
+
+    try {
+      const text = await promise;
+      return new Response(text, { headers: { 'content-type': 'application/json' } });
+    } catch (err) {
+      if (err instanceof Response) return err;
+      throw err;
+    }
+  }
   private getToken(): string | null {
     return localStorage.getItem('votion_jwt_token');
   }
@@ -571,7 +618,7 @@ class ApiClient {
    */
   async getClientVmInventory(connectionId?: string): Promise<{ vms: ApiVM[]; providerAvailable: boolean }> {
     const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms${query}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms${query}`, {
       headers: this.getHeaders(),
     });
     const data = await this.readApiResponse(res, 'Unable to load client virtual machines.');
@@ -587,7 +634,7 @@ class ApiClient {
   }
 
   async getTeamAccessOverview(): Promise<ApiTeamAccessOverview> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/client/team-access`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load team access.');
     return data.data as ApiTeamAccessOverview;
   }
@@ -622,7 +669,7 @@ class ApiClient {
   }
 
   async revokeTeamInvitation(invitationId: string): Promise<{ message: string }> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/team-access/invitations/${encodeURIComponent(invitationId)}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/team-access/invitations/${encodeURIComponent(invitationId)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -655,7 +702,7 @@ class ApiClient {
   }
 
   async cancelVmReimageRequest(vmid: number, requestId: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests/${encodeURIComponent(requestId)}/cancel`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/reimage-requests/${encodeURIComponent(requestId)}/cancel`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -679,7 +726,7 @@ class ApiClient {
   }
 
   async reviewAdminReimageRequest(requestId: string, decision: 'approved' | 'rejected', reviewerNote?: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/reimage-requests/${encodeURIComponent(requestId)}/review`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/reimage-requests/${encodeURIComponent(requestId)}/review`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ decision, reviewerNote }),
@@ -691,8 +738,21 @@ class ApiClient {
     return data as { success: true; message: string; data: ApiReimageRequest };
   }
 
+  async completeAdminReimageRequest(requestId: string, completionNote?: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/reimage-requests/${encodeURIComponent(requestId)}/complete`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ completionNote }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || `Unable to complete reimage request (HTTP ${res.status})`);
+    }
+    return data as { success: true; message: string; data: ApiReimageRequest };
+  }
+
   async getOperatorApprovedReimageRequests(): Promise<ApiReimageRequest[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-requests`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-requests`, { headers: this.getHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Operator queue request failed (HTTP ${res.status})`);
     return data.data || [];
@@ -700,42 +760,42 @@ class ApiClient {
 
   async getOperatorReimageExecutions(state?: ReimageExecutionState): Promise<ApiReimageExecution[]> {
     const query = state ? `?state=${encodeURIComponent(state)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions${query}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-executions${query}`, { headers: this.getHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Operator execution history failed (HTTP ${res.status})`);
     return data.data || [];
   }
 
   async createOperatorReimageExecution(requestId: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-requests/${encodeURIComponent(requestId)}/executions`, { method: 'POST', headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-requests/${encodeURIComponent(requestId)}/executions`, { method: 'POST', headers: this.getHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Execution creation failed (HTTP ${res.status})`);
     return data as { success: true; execution: ApiReimageExecution; planHash: string; executionEnabled: boolean; message: string };
   }
 
   async preflightOperatorReimageExecution(executionId: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/preflight`, { method: 'POST', headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/preflight`, { method: 'POST', headers: this.getHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Preflight failed (HTTP ${res.status})`);
     return data as { success: true; execution: ApiReimageExecution; planHash: string; executionEnabled: boolean; message: string };
   }
 
   async confirmOperatorReimageExecution(executionId: string, input: { planHash: string; confirmationPhrase: string; expectedVmid: number; expectedImageProfileVersion: string }) {
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/confirm`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(input) });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/confirm`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify(input) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Execution confirmation failed (HTTP ${res.status})`);
     return data as { success: true; execution: ApiReimageExecution; executionEnabled: boolean; message: string };
   }
 
   async cancelOperatorReimageExecution(executionId: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/cancel`, { method: 'POST', headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/operator/reimage-executions/${encodeURIComponent(executionId)}/cancel`, { method: 'POST', headers: this.getHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) throw new Error(data.error || `Execution cancellation failed (HTTP ${res.status})`);
     return data as { success: true; execution: ApiReimageExecution; message: string };
   }
 
   async getVMMetadata(vmid: number): Promise<ApiVmMetadata> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata`, {
       headers: this.getHeaders(),
     });
     const data = await res.json().catch(() => ({}));
@@ -767,11 +827,11 @@ class ApiClient {
     return data;
   }
 
-  async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown') {
+  async executeClientPowerAction(vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown', proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/power`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, proxmoxConnectionId }),
     });
     return await res.json();
   }
@@ -789,32 +849,32 @@ class ApiClient {
   }
 
   async getClientVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/billing/vm-profiles`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/client/billing/vm-profiles`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load your billing profile.');
     return data.data || [];
   }
 
   async getBillingPlans(): Promise<ApiPricingPlan[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/plans`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/plans`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load pricing plans.');
     return data.data || [];
   }
 
   async getBillingSummary(): Promise<ApiBillingSummary> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/summary`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/summary`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load billing summary.');
     return data.data;
   }
 
   async getBillingInvoices(status?: string): Promise<ApiBillingInvoice[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/invoices${query}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/invoices${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load invoices.');
     return data.data || [];
   }
 
   async getBillingConfig(): Promise<ApiBillingConfig> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/config`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/config`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load billing policy.');
     return data.data;
   }
@@ -832,13 +892,13 @@ class ApiClient {
   }
 
   async toggleBillingPlan(id: string, isActive: boolean): Promise<ApiPricingPlan> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/plans/${encodeURIComponent(id)}`, { method: 'PATCH', headers: this.getHeaders(), body: JSON.stringify({ isActive }) });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/plans/${encodeURIComponent(id)}`, { method: 'PATCH', headers: this.getHeaders(), body: JSON.stringify({ isActive }) });
     const data = await this.readApiResponse(res, 'Unable to update pricing plan.');
     return data.data;
   }
 
   async getBillingCostBases(): Promise<ApiBillingCostBase[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/cost-bases`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/cost-bases`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load cost bases.');
     return data.data || [];
   }
@@ -850,7 +910,7 @@ class ApiClient {
   }
 
   async getBillingServerCosts(): Promise<ApiBillingServerCost[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/server-costs`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load dedicated-server costs.');
     return data.data || [];
   }
@@ -862,19 +922,19 @@ class ApiClient {
   }
 
   async getBillingServerProfitability(): Promise<ApiBillingServerProfitability[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-profitability`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/server-profitability`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load server profitability.');
     return data.data || [];
   }
 
   async deleteBillingServerCost(id: string): Promise<{ id: string; name: string; nodeName: string }> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/server-costs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/server-costs/${encodeURIComponent(id)}`, { method: 'DELETE', headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to delete dedicated-server cost.');
     return data.data;
   }
 
   async getVmBillingProfiles(): Promise<ApiVmBillingProfile[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/vm-profiles`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/vm-profiles`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load VM billing profiles.');
     return data.data || [];
   }
@@ -886,20 +946,20 @@ class ApiClient {
   }
 
   async recordBillingPayment(invoiceId: string, amountCents: number, notes?: string): Promise<ApiBillingInvoice> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}/payment`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ amountCents, method: 'manual', notes }) });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/invoices/${encodeURIComponent(invoiceId)}/payment`, { method: 'POST', headers: this.getHeaders(), body: JSON.stringify({ amountCents, method: 'manual', notes }) });
     const data = await this.readApiResponse(res, 'Unable to record payment.');
     return data.data;
   }
 
   async getBillingSuspensionActions(status?: string): Promise<ApiBillingSuspensionAction[]> {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/suspension-actions${query}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/suspension-actions${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load suspension actions.');
     return data.data || [];
   }
 
   async reverseBillingSuspension(actionId: string): Promise<{ success: boolean; data?: ApiVM; message?: string }> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/suspension-actions/${encodeURIComponent(actionId)}/reverse`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/billing/suspension-actions/${encodeURIComponent(actionId)}/reverse`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ confirmation: 'RESTORE_PAID_SERVICE' }),
@@ -907,20 +967,20 @@ class ApiClient {
     return await this.readApiResponse(res, 'Unable to restore paid service.');
   }
 
-  async updateServerExpiry(vmid: number, additionalDays: number) {
+  async updateServerExpiry(vmid: number, additionalDays: number, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/vms/${vmid}/expiry`, {
       method: 'PUT',
       headers: this.getHeaders(),
-      body: JSON.stringify({ additionalDays }),
+      body: JSON.stringify({ additionalDays, proxmoxConnectionId }),
     });
     return await res.json();
   }
 
-  async toggleServerSuspend(vmid: number, suspend: boolean) {
+  async toggleServerSuspend(vmid: number, suspend: boolean, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/vms/${vmid}/suspend`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ suspend }),
+      body: JSON.stringify({ suspend, proxmoxConnectionId }),
     });
     return await res.json();
   }
@@ -930,14 +990,14 @@ class ApiClient {
    */
   async getAdminNodes(connectionId?: string): Promise<ApiNode[]> {
     const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/nodes${query}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/nodes${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load cluster nodes.');
     return data.data || [];
   }
 
   async getClusterOverview(connectionId?: string): Promise<ApiClusterOverview | null> {
     const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/cluster/overview${query}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/cluster/overview${query}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load cluster overview.');
     return data.data || null;
   }
@@ -945,7 +1005,7 @@ class ApiClient {
   /**
    * Strict Login Authentication Endpoint
    */
-  async login(email: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
+  async login(email: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string, twoFactorRequired?: boolean, tempToken?: string }> {
     try {
       const res = await this.apiFetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
@@ -1050,7 +1110,7 @@ class ApiClient {
   }
 
     async getNavigationUsage(): Promise<ApiNavigationUsage[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/navigation-usage`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/client/navigation-usage`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load personalized navigation.');
     return Array.isArray(data.data) ? data.data as ApiNavigationUsage[] : [];
   }
@@ -1074,7 +1134,7 @@ class ApiClient {
 
   async getUserProfile(email?: string): Promise<ApiAccount | null> {
     const targetEmail = email || this.getUserEmail();
-    const res = await this.apiFetch(`${API_BASE_URL}/user/profile?email=${encodeURIComponent(targetEmail)}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/profile?email=${encodeURIComponent(targetEmail)}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -1084,7 +1144,7 @@ class ApiClient {
   /**
    * Update User Profile & Name/Phone in PostgreSQL
    */
-  async updateUserProfile(profileData: { email?: string; name?: string; phone?: string; supportPin?: string }) {
+  async updateUserProfile(profileData: { email?: string; name?: string; phone?: string; supportPin?: string; sshKeys?: string }) {
     const email = profileData.email || this.getUserEmail();
     const res = await this.apiFetch(`${API_BASE_URL}/user/profile`, {
       method: 'PUT',
@@ -1137,19 +1197,19 @@ class ApiClient {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
     const suffix = params.toString() ? `?${params.toString()}` : '';
-    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets${suffix}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/support/tickets${suffix}`, { headers: this.getHeaders() });
     const data = await this.readTicketResponse(res);
     return Array.isArray(data.data) ? data.data : [];
   }
 
   async getSupportAgents(): Promise<ApiSupportAgent[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/agents`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/support/tickets/agents`, { headers: this.getHeaders() });
     const data = await this.readTicketResponse(res);
     return Array.isArray(data.data) ? data.data : [];
   }
 
   async getTicketDetails(ticketId: string): Promise<{ ticket: ApiSupportTicket; replies: ApiTicketReply[] } | null> {
-    const res = await this.apiFetch(`${API_BASE_URL}/support/tickets/${ticketId}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/support/tickets/${ticketId}`, { headers: this.getHeaders() });
     const data = await this.readTicketResponse(res);
     return data.data || null;
   }
@@ -1210,20 +1270,20 @@ class ApiClient {
   /**
    * VM & EXPIRY SUSPENSION METHODS
    */
-  async suspendVM(vmid: number, suspend: boolean) {
+  async suspendVM(vmid: number, suspend: boolean, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/suspend`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ suspend }),
+      body: JSON.stringify({ suspend, proxmoxConnectionId }),
     });
     return await res.json();
   }
 
-  async extendVMExpiry(vmid: number, additionalDays: number) {
+  async extendVMExpiry(vmid: number, additionalDays: number, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/extend`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ additionalDays }),
+      body: JSON.stringify({ additionalDays, proxmoxConnectionId }),
     });
     return await res.json();
   }
@@ -1241,7 +1301,7 @@ class ApiClient {
    * Fetch Registered Accounts
    */
   async getAccounts(): Promise<ApiAccount[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/accounts`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/accounts`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load accounts.');
     return data.data || [];
   }
@@ -1250,7 +1310,7 @@ class ApiClient {
    * Fetch PVE Nodes Matrix from Express API
    */
   async getNodes(): Promise<ApiNode[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/nodes`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/nodes`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1275,7 +1335,7 @@ class ApiClient {
     if (connectionId) params.set('connectionId', connectionId);
     const query = params.toString();
     const url = query ? `${API_BASE_URL}/vms?${query}` : `${API_BASE_URL}/vms`;
-    const res = await this.apiFetch(url, { headers: this.getHeaders() });
+    const res = await this.swrFetch(url, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load virtual machines.');
     return data.data || [];
   }
@@ -1283,11 +1343,37 @@ class ApiClient {
   /**
    * Admin Reassign VM Ownership by VMID
    */
-  async assignVM(vmid: number, targetEmail: string) {
+
+  async unassignVM(vmid: number, proxmoxConnectionId: string, reason: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/unassign`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ proxmoxConnectionId, reason }),
+    });
+    return await res.json();
+  }
+
+  async getVmAssignmentHistory(vmid: number, proxmoxConnectionId: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/assignment-history?proxmoxConnectionId=${encodeURIComponent(proxmoxConnectionId)}`, {
+      headers: this.getHeaders(),
+    });
+    const data = await this.readApiResponse(res, 'Unable to load assignment history.');
+    return data.data || [];
+  }
+
+  async searchAccounts(q: string): Promise<Array<{ id: number; email: string; name: string; role: string; vm_count: number }>> {
+    const res = await this.swrFetch(`${API_BASE_URL}/accounts/search?q=${encodeURIComponent(q)}`, {
+      headers: this.getHeaders(),
+    });
+    const data = await this.readApiResponse(res, 'Unable to search accounts.');
+    return data.data || [];
+  }
+
+  async assignVM(vmid: number, targetEmail: string, expiry?: { mode: 'keep' | 'never' | 'custom'; date?: string }, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/assign`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ targetEmail }),
+      body: JSON.stringify({ targetEmail, expiryMode: expiry?.mode, expiryDate: expiry?.date, proxmoxConnectionId }),
     });
     return await res.json();
   }
@@ -1295,7 +1381,7 @@ class ApiClient {
   /**
    * Admin Delete VM Allocation by VMID
    */
-  async deleteVM(vmid: number) {
+  async deleteVM(vmid: number, proxmoxConnectionId?: string) {
     const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
@@ -1328,6 +1414,33 @@ class ApiClient {
   }
 
   /**
+   * Inject SSH Keys via Cloud-Init
+   */
+  async injectCloudInitSsh(vmid: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/cloud-init/sync-ssh`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to inject SSH keys');
+    return data;
+  }
+
+  /**
+   * Reset VM Password (Cloud-Init + QEMU Agent Live Update)
+   */
+  async resetVmPassword(vmid: number, password: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/password`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+    return data;
+  }
+
+  /**
    * Execute Command in VNC Terminal Console
    */
   async executeVncCommand(vmid: number, command: string) {
@@ -1343,7 +1456,7 @@ class ApiClient {
    * Fetch ISO & Software Downloads
    */
   async getDownloads() {
-    const res = await this.apiFetch(`${API_BASE_URL}/downloads`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/downloads`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load downloads.');
     return Array.isArray(data.data) ? data.data : [];
   }
@@ -1352,7 +1465,7 @@ class ApiClient {
    * Fetch Data Room Verification Documents
    */
   async getDataRoom() {
-    const res = await this.apiFetch(`${API_BASE_URL}/dataroom`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/dataroom`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1361,7 +1474,7 @@ class ApiClient {
    * Fetch Cluster Pricing & Tier Plans
    */
   async getPricing(): Promise<ApiPricingPlan[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/pricing`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load upgrade plans.');
     return Array.isArray(data.data) ? data.data as ApiPricingPlan[] : [];
   }
@@ -1370,7 +1483,7 @@ class ApiClient {
    * Fetch Engine Release Notes
    */
   async getReleaseNotes() {
-    const res = await this.apiFetch(`${API_BASE_URL}/release-notes`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/release-notes`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1379,7 +1492,7 @@ class ApiClient {
    * Fetch Terms & Privacy SLA
    */
   async getTerms() {
-    const res = await this.apiFetch(`${API_BASE_URL}/terms`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/terms`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load terms.');
     return data.data || { title: 'VOTION Terms', sections: [] };
   }
@@ -1422,7 +1535,7 @@ class ApiClient {
    * Fetch TimescaleDB Telemetry History
    */
   async getTelemetryHistory() {
-    const res = await this.apiFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1431,7 +1544,7 @@ class ApiClient {
    * Fetch Tasks List
    */
   async getTasks(): Promise<ApiTask[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/tasks`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/tasks`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1440,7 +1553,7 @@ class ApiClient {
    * Fetch Cluster Audit Logs
    */
   async getAuditLogs(): Promise<ApiAuditLog[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/audit-logs`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/audit-logs`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1449,7 +1562,7 @@ class ApiClient {
   // ADVANCED USER MANAGEMENT
   // ==========================================
   async getAdminUsers(): Promise<ApiAccount[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/users`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/users`, { headers: this.getHeaders() });
     return await res.json();
   }
 
@@ -1483,13 +1596,13 @@ class ApiClient {
   // CLUSTER CONNECTIONS MANAGER
   // ==========================================
   async getProxmoxVmIdentityConflicts(): Promise<ApiProxmoxVmIdentityConflict[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/vm-identity-conflicts`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/proxmox/vm-identity-conflicts`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load VM identity diagnostics.');
     return data.data || [];
   }
 
   async getProxmoxConnections(): Promise<ApiProxmoxConnection[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/proxmox`, { headers: this.getHeaders() });
     let payload: unknown;
 
     try {
@@ -1513,13 +1626,13 @@ class ApiClient {
   }
 
   async getProxmoxConnectionOverview(): Promise<ApiProxmoxConnectionOverview[]> {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/overview`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/proxmox/overview`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to load connection health overview.');
     return Array.isArray(data.data) ? data.data : [];
   }
 
   async testStoredProxmoxConnection(id: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/admin/proxmox/${encodeURIComponent(id)}/test`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/proxmox/${encodeURIComponent(id)}/test`, {
       method: 'POST',
       headers: this.getHeaders(),
     });
@@ -1574,7 +1687,7 @@ class ApiClient {
   }
 
   async getSecondaryEmails() {
-    const res = await this.apiFetch(`${API_BASE_URL}/user/secondary-emails?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/secondary-emails?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -1591,7 +1704,7 @@ class ApiClient {
   }
 
   async removeSecondaryEmail(secondaryEmail: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/user/secondary-emails/${encodeURIComponent(secondaryEmail)}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/secondary-emails/${encodeURIComponent(secondaryEmail)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -1607,8 +1720,25 @@ class ApiClient {
     return await res.json();
   }
 
+  async verify2FA(totpCode: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/user/2fa/verify`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ email: this.getUserEmail(), totpCode }),
+    });
+    return await res.json();
+  }
+
+  async triggerPbsBackup() {
+    const res = await this.apiFetch(`${API_BASE_URL}/pbs/backup`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+    return await res.json();
+  }
+
   async getPasskeys() {
-    const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/passkeys?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     const data = await res.json();
@@ -1625,9 +1755,27 @@ class ApiClient {
   }
 
   async deletePasskey(credentialId: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/user/passkeys/${encodeURIComponent(credentialId)}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/passkeys/${encodeURIComponent(credentialId)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
+    });
+    return await res.json();
+  }
+
+  async getPasskeyChallenge(email?: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/auth/passkey/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    return await res.json();
+  }
+
+  async loginWithPasskey(payload: { credentialId: string; clientDataJSON?: string; authenticatorData?: string; signature?: string }) {
+    const res = await this.apiFetch(`${API_BASE_URL}/auth/login/passkey`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
     return await res.json();
   }
@@ -1642,7 +1790,7 @@ class ApiClient {
   }
 
   async getActiveRemoteSession() {
-    const res = await this.apiFetch(`${API_BASE_URL}/user/remote-session/active?email=${encodeURIComponent(this.getUserEmail())}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/user/remote-session/active?email=${encodeURIComponent(this.getUserEmail())}`, {
       headers: this.getHeaders(),
     });
     return await res.json();
@@ -1683,7 +1831,7 @@ class ApiClient {
   // VM SNAPSHOTS / BACKUPS
   // ==========================================
   async getVmSnapshots(vmid: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots`, { headers: this.getHeaders() });
     const data = await res.json();
     return data.data || [];
   }
@@ -1698,7 +1846,7 @@ class ApiClient {
   }
 
   async deleteVmSnapshot(vmid: number, name: string) {
-    const res = await this.apiFetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}`, {
+    const res = await this.swrFetch(`${API_BASE_URL}/vms/${vmid}/snapshots/${encodeURIComponent(name)}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
@@ -1709,7 +1857,7 @@ class ApiClient {
   // VM FIREWALL RULES
   // ==========================================
   async getFirewallRules(vmid: number) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/firewall`, { headers: this.getHeaders() });
     return await res.json();
   }
 
@@ -1792,7 +1940,7 @@ class ApiClient {
       if (params.q) qs.set('q', params.q);
       if (params.limit) qs.set('limit', String(params.limit));
       if (params.offset) qs.set('offset', String(params.offset));
-      const res = await this.apiFetch(`${API_BASE_URL}/audit-logs/filtered?${qs.toString()}`, { headers: this.getHeaders() });
+      const res = await this.swrFetch(`${API_BASE_URL}/audit-logs/filtered?${qs.toString()}`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error. Please check your connection.', total: 0, data: [] };
@@ -1801,7 +1949,7 @@ class ApiClient {
 
   async getAuditLogStats() {
     try {
-      const res = await this.apiFetch(`${API_BASE_URL}/audit-logs/stats`, { headers: this.getHeaders() });
+      const res = await this.swrFetch(`${API_BASE_URL}/audit-logs/stats`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: { total: 0, byAction: [], byStatus: [], byUser: [] } };
@@ -1811,7 +1959,7 @@ class ApiClient {
   // MAIL TEMPLATES
   async getMailTemplates() {
     try {
-      const res = await this.apiFetch(`${API_BASE_URL}/admin/mail-templates`, { headers: this.getHeaders() });
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/mail-templates`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: [] };
@@ -1820,7 +1968,7 @@ class ApiClient {
 
   async updateMailTemplate(key: string, payload: { subject?: string; body?: string; enabled?: boolean }) {
     try {
-      const res = await this.apiFetch(`${API_BASE_URL}/admin/mail-templates/${encodeURIComponent(key)}`, {
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/mail-templates/${encodeURIComponent(key)}`, {
         method: 'PUT',
         headers: this.getHeaders(),
         body: JSON.stringify(payload),
@@ -1834,7 +1982,7 @@ class ApiClient {
   // MAIL NOTIFICATIONS
   async getMailNotifications() {
     try {
-      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/mail-notifications`, { headers: this.getHeaders() });
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/settings/mail-notifications`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: {} };
@@ -1854,10 +2002,39 @@ class ApiClient {
     }
   }
 
+  // PLATFORM SETTINGS
+  async getPublicPlatformSettings() {
+    try {
+      const res = await this.swrFetch(`${API_BASE_URL}/settings/public`);
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.', data: { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' } };
+    }
+  }
+  async getPlatformSettings() {
+    try {
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/settings/platform`, { headers: this.getHeaders() });
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.', data: null };
+    }
+  }
+  async savePlatformSettings(payload: { faviconUrl: string; timezone: string }) {
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/platform`, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(payload),
+      });
+      return await res.json();
+    } catch {
+      return { success: false, error: 'Network error.' };
+    }
+  }
   // SMTP (API v1)
   async getSmtpConfig() {
     try {
-      const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/smtp`, { headers: this.getHeaders() });
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/settings/smtp`, { headers: this.getHeaders() });
       return await res.json();
     } catch {
       return { success: false, error: 'Network error.', data: null };
@@ -1884,16 +2061,20 @@ class ApiClient {
         headers: this.getHeaders(),
         body: JSON.stringify({ testEmail }),
       });
-      return await res.json();
-    } catch {
-      return { success: false, error: 'Network error sending test email.' };
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        return { success: false, error: data.error || data.message || `SMTP test failed (HTTP ${res.status}).` };
+      }
+      return data;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unable to reach the Votion API while testing SMTP.' };
     }
   }
 
 // ALERT RULES & NOTIFICATIONS
   // ==========================================
   async getAlertRules() {
-    const res = await this.apiFetch(`${API_BASE_URL}/alert-rules`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/alert-rules`, { headers: this.getHeaders() });
     return await res.json();
   }
 
@@ -1924,7 +2105,7 @@ class ApiClient {
   }
 
   async getNotifications(unreadOnly: boolean = false): Promise<{ success: boolean; unreadCount: number; count: number; data: ApiNotification[] }> {
-    const res = await this.apiFetch(`${API_BASE_URL}/notifications?unreadOnly=${unreadOnly}`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/notifications?unreadOnly=${unreadOnly}`, { headers: this.getHeaders() });
     return await res.json();
   }
 
@@ -1957,8 +2138,20 @@ class ApiClient {
   // TELEMETRY EXPORT
   // ==========================================
   async getTelemetryHistoryFull() {
-    const res = await this.apiFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
+    const res = await this.swrFetch(`${API_BASE_URL}/telemetry/history`, { headers: this.getHeaders() });
     return await res.json();
+  }
+
+  async downloadTelemetryReport(hours: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/telemetry/report?hours=${hours}`, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Telemetry report request failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stellar-performance-report-${hours}h-${Date.now()}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async downloadTelemetryExport(format: 'csv' | 'json' = 'csv', range: '1h' | '24h' | '7d' = '24h') {
@@ -1967,7 +2160,7 @@ class ApiClient {
       window.open(url, '_blank');
       return;
     }
-    const res = await this.apiFetch(url, { headers: this.getHeaders() });
+    const res = await this.swrFetch(url, { headers: this.getHeaders() });
     const json = await res.json();
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1983,7 +2176,7 @@ class ApiClient {
       window.open(url, '_blank');
       return;
     }
-    const res = await this.apiFetch(url, { headers: this.getHeaders() });
+    const res = await this.swrFetch(url, { headers: this.getHeaders() });
     const json = await res.json();
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -2019,6 +2212,213 @@ class ApiClient {
   async addSubUser(vmid: number, email: string, scope: 'readonly' | 'power' | 'full') { return this.automationFetch(`/vms/${vmid}/sub-users`, { method: 'POST', body: JSON.stringify({ email, scope }) }); }
   async updateSubUser(vmid: number, id: number, scope: 'readonly' | 'power' | 'full') { return this.automationFetch(`/vms/${vmid}/sub-users/${id}`, { method: 'PUT', body: JSON.stringify({ scope }) }); }
   async removeSubUser(vmid: number, id: number) { return this.automationFetch(`/vms/${vmid}/sub-users/${id}`, { method: 'DELETE' }); }
+
+  // --- OVH Settings (Admin) ---
+  async getOvhSettings() {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/settings/ovh`, { headers: this.getHeaders() });
+    return await res.json();
+  }
+
+  async saveOvhSettings(settings: any) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/ovh`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(settings)
+    });
+    return await res.json();
+  }
+
+  async testOvhSettings() {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/ovh/test`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  // --- OVH Client VM IP controls ---
+  async getOvhStatus(vmid: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/status`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH status.');
+    return data.data;
+  }
+
+  async setOvhRdns(vmid: number, reverse: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/rdns`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ reverse })
+    });
+    return await res.json();
+  }
+
+  async setOvhDdos(vmid: number, mode: 'automatic' | 'permanent') {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/ddos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ mode })
+    });
+    return await res.json();
+  }
+
+  async toggleOvhFirewall(vmid: number, enabled: boolean) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/firewall/toggle`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ enabled })
+    });
+    return await res.json();
+  }
+
+
+  async unblockOvhAntiHack(vmid: number) {
+    return await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/unblock`, { method: 'POST', headers: this.getHeaders() });
+  }
+  
+  async unblockOvhAntiHackGlobal(ip: string) {
+    return await this.swrFetch(`${API_BASE_URL}/api/ovh/ip/${encodeURIComponent(ip)}/unblock`, { method: 'POST', headers: this.getHeaders() });
+  }
+
+  async getOvhFirewallRules(vmid: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/firewall/rules`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH firewall rules.');
+    return data.data || [];
+  }
+
+  async addOvhFirewallRule(vmid: number, rule: any) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/firewall/rules`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(rule)
+    });
+    return await res.json();
+  }
+
+  async deleteOvhFirewallRule(vmid: number, sequence: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/firewall/rules/${sequence}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  async getOvhGameRules(vmid: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/game-ddos`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH game DDoS rules.');
+    return data.data || [];
+  }
+
+  async addOvhGameRule(vmid: number, rule: any) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/game-ddos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(rule)
+    });
+    return await res.json();
+  }
+
+  async deleteOvhGameRule(vmid: number, ruleId: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/game-ddos/${ruleId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  // --- OVH Admin IP Manager controls ---
+  async getAdminOvhIps() {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/ip`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH account IPs.');
+    return data.data || [];
+  }
+
+  async getAdminOvhStatus(ip: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/status?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH status.');
+    return data.data;
+  }
+
+  async setAdminOvhRdns(ip: string, reverse: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/rdns`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, reverse })
+    });
+    return await res.json();
+  }
+
+  async setAdminOvhDdos(ip: string, mode: 'automatic' | 'permanent') {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/ddos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, mode })
+    });
+    return await res.json();
+  }
+
+  async setAdminOvhMitigationProfile(ip: string, timeout: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/mitigation-profile`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, timeout })
+    });
+    return await res.json();
+  }
+
+  async toggleAdminOvhFirewall(ip: string, enabled: boolean) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/firewall/toggle`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, enabled })
+    });
+    return await res.json();
+  }
+
+  async getAdminOvhFirewallRules(ip: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/firewall/rules?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH firewall rules.');
+    return data.data || [];
+  }
+
+  async addAdminOvhFirewallRule(ip: string, rule: any) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/firewall/rules`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, ...rule })
+    });
+    return await res.json();
+  }
+
+  async deleteAdminOvhFirewallRule(ip: string, sequence: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/firewall/rules/${sequence}?ip=${encodeURIComponent(ip)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  async getAdminOvhGameRules(ip: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/game-ddos?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch OVH game DDoS rules.');
+    return data.data || [];
+  }
+
+  async addAdminOvhGameRule(ip: string, rule: any) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/game-ddos`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, ...rule })
+    });
+    return await res.json();
+  }
+
+  async deleteAdminOvhGameRule(ip: string, ruleId: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/game-ddos/${ruleId}?ip=${encodeURIComponent(ip)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
 }
 
 export const apiClient = new ApiClient();

@@ -20,6 +20,8 @@ export default {
       },
       fontFamily: {
         sans: ['"Inter var"', 'Inter', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+        serif: ['"Newsreader"', '"SangBleu Versailles"', '"Playfair Display"', 'Georgia', 'serif'],
+        mono: ['"JetBrains Mono"', '"Roboto Mono"', 'ui-monospace', 'Menlo', 'Monaco', 'monospace'],
       }
     },
   },

@@ -5,7 +5,8 @@ import { API_ORIGIN } from '../services/apiClient';
 interface VncTerminalProps {
   vmid: number;
   node: string;
-  type: 'qemu' | 'lxc';
+  type: 'qemu' | 'lxc' | string;
+  proxmoxConnectionId?: string | null;
 }
 
 type QualityPreset = 'performance' | 'balanced' | 'clarity';
@@ -21,7 +22,7 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return Boolean(element?.closest('input, textarea, select, button, [contenteditable="true"]'));
 };
 
-export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) => {
+export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, proxmoxConnectionId }) => {
   const shellRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const activeRfbRef = useRef<any>(null);
@@ -203,7 +204,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
             'Content-Type': 'application/json',
             ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
           },
-          body: JSON.stringify({ vmid, node, type }),
+          body: JSON.stringify({ vmid, node, type, proxmoxConnectionId }),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.success) {
@@ -215,7 +216,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type }) =>
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsBase = new URL(apiHost || '/', window.location.origin);
         const wsPath = `${wsBase.pathname.replace(/\/$/, '')}/api/vnc/ws`;
-        const wsUrl = `${wsProtocol}://${wsBase.host}${wsPath}?node=${encodeURIComponent(node)}&vmid=${vmid}&type=${type}&port=${port}&ticket=${encodeURIComponent(ticket)}`;
+        const wsUrl = `${wsProtocol}://${wsBase.host}${wsPath}?node=${encodeURIComponent(node)}&vmid=${vmid}&type=${type}&port=${port}&ticket=${encodeURIComponent(ticket)}${proxmoxConnectionId ? `&proxmoxConnectionId=${encodeURIComponent(proxmoxConnectionId)}` : ''}`;
 
         if (disposed || !containerRef.current) return;
         setStatus('Connecting to console relay…');

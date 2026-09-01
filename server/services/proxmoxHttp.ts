@@ -167,25 +167,21 @@ export async function proxmoxFetch(url: string, options: ProxmoxRequestOptions =
  */
 export function createProxmoxWebSocketTlsOptions(sslFingerprint?: string | null): {
   rejectUnauthorized: boolean;
-  createConnection?: (options: tls.ConnectionOptions) => TLSSocket;
+  checkServerIdentity?: (servername: string, cert: tls.PeerCertificate) => Error | undefined;
 } {
   const expectedFingerprint = normalizeProxmoxFingerprint(sslFingerprint);
   if (!expectedFingerprint) return { rejectUnauthorized: true };
 
   return {
     rejectUnauthorized: false,
-    createConnection: (options) => {
-      const socket = tls.connect({ ...options, rejectUnauthorized: false });
-      socket.once('secureConnect', () => {
-        const actualFingerprint = normalizeProxmoxFingerprint(socket.getPeerCertificate()?.fingerprint256);
-        if (!actualFingerprint || actualFingerprint !== expectedFingerprint) {
-          socket.destroy(new ProxmoxHttpError(
-            'Proxmox TLS certificate fingerprint mismatch',
-            { code: 'PROXMOX_TLS_FINGERPRINT_MISMATCH' },
-          ));
-        }
-      });
-      return socket;
+    checkServerIdentity: (_servername: string, cert: tls.PeerCertificate) => {
+      const actualFingerprint = normalizeProxmoxFingerprint(cert?.fingerprint256);
+      if (!actualFingerprint || actualFingerprint !== expectedFingerprint) {
+        const error = new Error('Proxmox TLS certificate fingerprint mismatch');
+        (error as any).code = 'PROXMOX_TLS_FINGERPRINT_MISMATCH';
+        return error;
+      }
+      return undefined;
     },
   };
 }

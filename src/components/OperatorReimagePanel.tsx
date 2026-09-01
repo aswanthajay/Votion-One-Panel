@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient, ApiReimageExecution, ApiReimageRequest } from '../services/apiClient';
+import { formatDateTime } from '../services/dateTime';
 
 const stateLabels: Record<string, string> = {
   created: 'Created',
@@ -31,7 +32,7 @@ const stateTone: Record<string, string> = {
   cancelled: 'bg-[#f4f5f5] text-[#656b6b]',
 };
 
-const formatDate = (value?: string) => value ? new Date(value).toLocaleString() : '—';
+const formatDate = (value?: string) => value ? formatDateTime(value) : '—';
 
 export const OperatorReimagePanel: React.FC = () => {
   const [requests, setRequests] = useState<ApiReimageRequest[]>([]);

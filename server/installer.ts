@@ -99,7 +99,7 @@ function validApplicationPort(value: unknown): number | null {
 }
 
 async function withDatabase<T>(databaseUrl: string, work: (pool: pg.Pool) => Promise<T>): Promise<T> {
-  const pool = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 5000, idleTimeoutMillis: 5000 });
+  const pool = new Pool({ connectionString: databaseUrl, max: 10, connectionTimeoutMillis: 5000, idleTimeoutMillis: 5000 });
   try {
     return await work(pool);
   } finally {
@@ -194,7 +194,7 @@ app.use(express.json({ limit: '32kb' }));
 
 const installationRateLimit = expressRateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip || 'unknown'),

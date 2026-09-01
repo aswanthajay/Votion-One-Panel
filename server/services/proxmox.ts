@@ -300,149 +300,135 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
   /**
    * Fetch ALL VMs across the Proxmox cluster and merge with local DB assignments
    */
+    private vmCache: { data: any, ts: number } | null = null;
   async getAllProxmoxVMs() {
+    if (this.vmCache && Date.now() - this.vmCache.ts < 10000) return this.vmCache.data;
     const conns = await dbService.getProxmoxConnectionCredentials();
     const dbVms = await dbService.getVMs();
     if (!conns || conns.length === 0) return dbVms;
 
-    let allPveVMs: PveVmResource[] = [];
-    for (const conn of conns) {
+    let allPveVMs: any[] = [];
+    
+    // Fetch from all connections in parallel
+    const connectionResults = await Promise.all(conns.map(async (conn) => {
+      let connectionVms: any[] = [];
       try {
         const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/cluster/resources?type=vm`, {
+        const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/cluster/resources?type=vm`, {
           headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
           sslFingerprint: conn.ssl_fingerprint,
         });
         if (res.ok) {
-          const json = await readPveJson<PveVmResource[]>(res);
-          allPveVMs = allPveVMs.concat(json.data || []);
+          const json = await readPveJson<any>(res);
+          connectionVms = (json.data || []).map((vm: any) => ({
+            ...vm,
+            proxmoxConnectionId: conn.id,
+            proxmoxConnectionName: conn.name,
+          }));
         }
       } catch (e) {
         console.error('Failed to fetch VMs from cluster', e);
       }
 
-      // If cluster endpoint failed, try fetching per-node
-      if (allPveVMs.length === 0) {
+      // Fallback to per-node fetching if cluster fetch failed
+      if (connectionVms.length === 0) {
         try {
           const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-const nodesRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes`, {
+          const nodesRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes`, {
             headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
             sslFingerprint: conn.ssl_fingerprint,
           });
           if (nodesRes.ok) {
-            const nodesJson = await readPveJson<PveNode[]>(nodesRes);
-            for (const node of (nodesJson.data || [])) {
-              // Fetch QEMU
-const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/qemu`, {
-                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
-                sslFingerprint: conn.ssl_fingerprint,
-              });
-              if (qemuRes.ok) {
-                const qemuJson = await readPveJson<PveVmResource[]>(qemuRes);
-                allPveVMs = allPveVMs.concat((qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node })));
-              }
-              // Fetch LXC
-const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/lxc`, {
-                headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
-                sslFingerprint: conn.ssl_fingerprint,
-              });
-              if (lxcRes.ok) {
-                const lxcJson = await readPveJson<PveVmResource[]>(lxcRes);
-                allPveVMs = allPveVMs.concat((lxcJson.data || []).map((v: any) => ({ ...v, type: 'lxc', node: node.node })));
-              }
-            }
+            const nodesJson = await readPveJson<any>(nodesRes);
+            const nodes = nodesJson.data || [];
+            
+            const nodeResults = await Promise.all(nodes.map(async (node: any) => {
+              let nodeVms: any[] = [];
+              try {
+                const qemuRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/qemu`, {
+                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                  sslFingerprint: conn.ssl_fingerprint,
+                });
+                if (qemuRes.ok) {
+                  const qemuJson = await readPveJson<any>(qemuRes);
+                  nodeVms = nodeVms.concat((qemuJson.data || []).map((v: any) => ({ ...v, type: 'qemu', node: node.node, proxmoxConnectionId: conn.id, proxmoxConnectionName: conn.name })));
+                }
+              } catch (e) {}
+              
+              try {
+                const lxcRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/nodes/${node.node}/lxc`, {
+                  headers: { 'Authorization': `PVEAPIToken=${conn.token_id}=${conn.token_secret}` },
+                  sslFingerprint: conn.ssl_fingerprint,
+                });
+                if (lxcRes.ok) {
+                  const lxcJson = await readPveJson<any>(lxcRes);
+                  nodeVms = nodeVms.concat((lxcJson.data || []).map((v: any) => ({ ...v, type: 'lxc', node: node.node, proxmoxConnectionId: conn.id, proxmoxConnectionName: conn.name })));
+                }
+              } catch (e) {}
+              return nodeVms;
+            }));
+            
+            nodeResults.forEach(vms => { connectionVms = connectionVms.concat(vms); });
           }
-        } catch (err) {
-          console.error('Failed per-node VM fetch fallback', err);
+        } catch (e) {
+          console.error('Failed to fallback fetch from nodes', e);
         }
       }
-    }
-    
-    // If we failed to get data from Proxmox, fallback to DB
-    if (allPveVMs.length === 0) return dbVms;
+      return connectionVms;
+    }));
 
-    // Enrich VMs that have no real OS metadata: pull the guest config (ostype) from Proxmox.
-    // This resolves the dashboard rows that currently display 'Unknown' as the OS.
-    const vmIdsNeedingOs = allPveVMs.filter(p => !dbVms.find(db => db.vmid === p.vmid)?.os || /^Unknown$/i.test(dbVms.find(db => db.vmid === p.vmid)?.os || ''));
-    const pveHost = conns[0].host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const pveToken = `${conns[0].token_id}=${conns[0].token_secret}`;
-    const osByVmid: Record<number, string> = {};
-    for (const p of vmIdsNeedingOs) {
-      try {
-const cfgRes = await proxmoxFetch(`https://${pveHost}:${conns[0].port || 8006}/api2/json/nodes/${p.node}/${p.type}/${p.vmid}/config`, {
-          headers: { 'Authorization': `PVEAPIToken=${pveToken}` },
-          sslFingerprint: conns[0].ssl_fingerprint,
-        });
-        if (cfgRes.ok) {
-          const cfgJson = await readPveJson<PveConfig>(cfgRes);
-          const cfg = cfgJson.data || {};
-          const ostype = cfg.ostype || cfg.os || '';
-          const ostypes: Record<string, string> = {
-            l26: 'Linux', win7: 'Windows', win8: 'Windows 8+', win10: 'Windows 10/11', win11: 'Windows 11',
-            w2k: 'Windows 2000', wxp: 'Windows XP', w2k3: 'Windows Server 2003', w2k8: 'Windows Server 2008',
-            w2k12: 'Windows Server 2012', w2k16: 'Windows Server 2016', w2k19: 'Windows Server 2019',
-            solaris: 'Solaris', other: 'Other OS',
-          };
-          if (ostype) osByVmid[p.vmid] = ostypes[ostype] || ostype;
-        }
-      } catch (e) { /* keep Unknown, skip enrichment on failure */ }
-    }
+    connectionResults.forEach(vms => { allPveVMs = allPveVMs.concat(vms); });
 
-    // Collect all parent IPs to scrub them from VM data
-    const dbNodes = await dbService.getNodes();
-    const parentIps = conns.flatMap(c => {
-      const cleanHost = c.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      const bareIp = cleanHost.split(':')[0];
-      return [c.host_ip, cleanHost, bareIp];
+    // Merge with DB State
+    const merged = allPveVMs.map(pveVm => {
+      const dbMatch = dbVms.find(d => String(d.vmid) === String(pveVm.vmid) && d.proxmoxConnectionId === pveVm.proxmoxConnectionId);
+      if (dbMatch) {
+        return {
+          ...pveVm,
+          
+          ownerEmail: dbMatch.ownerEmail,
+          expiryDate: dbMatch.expiryDate,
+          
+          
+          
+          dbStatus: dbMatch.status,
+          isSuspended: dbMatch.status === 'suspended',
+        };
+      }
+      return { ...pveVm, isSuspended: false, dbStatus: 'active' };
     });
-        dbNodes.forEach(n => {
-      if (n.ip) parentIps.push(n.ip);
-      if ((n as any).ip_address) parentIps.push((n as any).ip_address);
-    });
-    // Explicitly block known public host IPs
-    parentIps.push('103.118.182.14');
-    // Merge Proxmox live VM data with DB allocations
-    return allPveVMs.map(pve => {
-      const dbMatch = dbVms.find(db => db.vmid === pve.vmid);
-      const detectedOs = osByVmid[pve.vmid];
-      let safeIp = dbMatch?.ipAddress || '';
-      
-      // Strict scrubbing: if the DB IP contains any part of a parent host IP, wipe it.
-      if (parentIps.some(pip => safeIp.includes(pip) || pip.includes(safeIp))) safeIp = '';
 
-      return {
-        vmid: pve.vmid,
-        name: dbMatch?.name || pve.name,
-        type: pve.type === 'qemu' ? 'qemu' : 'lxc',
-        node: pve.node || (dbMatch?.node || 'stellar-node-01'),
-        ownerEmail: dbMatch?.ownerEmail || 'Unassigned',
-        status: pve.status || (dbMatch?.status || 'stopped'),
-        cpus: pve.maxcpu || (dbMatch?.cpus || 1),
-        memory: pve.maxmem || (dbMatch?.memory || 0),
-        disk: pve.maxdisk || (dbMatch?.disk || 0),
-        expiryDate: dbMatch?.expiryDate || null,
-        isSuspended: dbMatch?.isSuspended || false,
-        ipAddress: safeIp,
-        os: detectedOs || dbMatch?.os || (String(pve.name || '').toLowerCase().includes('ubuntu') ? 'Ubuntu' : '') || '—'
-      };
-    });
+    return merged;
   }
 
-  /**
-   * Get VMs for a specific user, enriched with real-time telemetry from Proxmox
-   */
+    private liveVmsCache: { data: any, ts: number } | null = null;
     async getLiveVMs(ownerEmail?: string, proxmoxConnectionId?: string, allowedVmids?: number[]) {
-    const allowedVmidSet = allowedVmids ? new Set(allowedVmids.map((vmid) => Number(vmid))) : null;
-    const vms = (await dbService.getVMs(ownerEmail, undefined, proxmoxConnectionId))
-      .filter((vm) => !allowedVmidSet || allowedVmidSet.has(vm.vmid));
-    const connections = await dbService.getProxmoxConnectionCredentials();
-    const conns = Array.isArray(connections) ? connections : [];
-    if (conns.length === 0) return vms;
+      if (this.liveVmsCache && Date.now() - this.liveVmsCache.ts < 15000) {
+        let cached = this.liveVmsCache.data;
+        if (allowedVmids) {
+          const allowedVmidSet = new Set(allowedVmids.map(Number));
+          cached = cached.filter((vm: any) => allowedVmidSet.has(vm.vmid));
+        }
+        if (ownerEmail) {
+          const clean = ownerEmail.toLowerCase().trim();
+          cached = cached.filter((vm: any) => vm.ownerEmail === clean);
+        }
+        if (proxmoxConnectionId) {
+          cached = cached.filter((vm: any) => vm.proxmoxConnectionId === proxmoxConnectionId);
+        }
+        return cached;
+      }
+      
+      const allowedVmidSet = allowedVmids ? new Set(allowedVmids.map((vmid) => Number(vmid))) : null;
+      const vms = await dbService.getVMs();
+      const connections = await dbService.getProxmoxConnectionCredentials();
+      const conns = Array.isArray(connections) ? connections : [];
+      if (conns.length === 0) return vms;
 
-    const conn = proxmoxConnectionId
-      ? conns.find(connection => connection.id === proxmoxConnectionId)
-      : conns[0];
-    if (!conn) return vms;
+      const conn = proxmoxConnectionId
+        ? conns.find(connection => connection.id === proxmoxConnectionId)
+        : conns[0];
+      if (!conn) return vms;
 
     const cleanHost = conn.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const bareHost = cleanHost.split(':')[0];
@@ -558,13 +544,23 @@ const confRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/
       };
     }));
     
-    return enrichedVMs;
+          this.liveVmsCache = { data: enrichedVMs, ts: Date.now() };
+      let finalResult = enrichedVMs;
+      if (allowedVmidSet) finalResult = finalResult.filter(vm => allowedVmidSet.has(vm.vmid));
+      if (ownerEmail) {
+        const clean = ownerEmail.toLowerCase().trim();
+        finalResult = finalResult.filter(vm => vm.ownerEmail === clean);
+      }
+      if (proxmoxConnectionId) finalResult = finalResult.filter(vm => vm.proxmoxConnectionId === proxmoxConnectionId);
+      return finalResult;
   }
 
   /**
    * Aggregated Cluster Overview Metrics
    */
+  private overviewCache: { data: any, ts: number } | null = null;
   async getClusterOverview(proxmoxConnectionId?: string) {
+    if (!proxmoxConnectionId && this.overviewCache && Date.now() - this.overviewCache.ts < 10000) return this.overviewCache.data;
     const nodes = await this.getNodeMetrics(undefined, proxmoxConnectionId);
     const vms = await dbService.getVMs(undefined, undefined, proxmoxConnectionId);
     const scopedConnection = proxmoxConnectionId
@@ -699,7 +695,7 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
                 const diskRead = json.data.diskread || 0;
                 const diskWrite = json.data.diskwrite || 0;
                 
-                await dbService.insertVmTelemetry(vm.vmid, cpuPct, ramBytes, netIn, netOut, diskRead, diskWrite);
+                await dbService.insertVmTelemetry(vm.vmid, cpuPct, ramBytes, netIn, netOut, diskRead, diskWrite, conn.id);
                 
                 // ---- Per-VM alert evaluation ----
                 const vmMaxMem = Number(vm.maxmem) || Number((vm as any).memory) || 0;
@@ -740,3 +736,52 @@ const res = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/node
 }
 
 export const proxmoxApi = new ProxmoxApiService();
+
+export async function updateVMNetworkRateLimit(
+  connection: any,
+  node: string,
+  vmid: number,
+  isLxc: boolean,
+  rateLimitMb: number | null
+): Promise<boolean> {
+  const type = isLxc ? 'lxc' : 'qemu';
+  const cleanHost = String(connection.host_ip || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const url = `https://${cleanHost}:${connection.port || 8006}/api2/json/nodes/${encodeURIComponent(node)}/${type}/${vmid}/config`;
+  
+  const headers = { 'Authorization': `PVEAPIToken=${connection.token_id}=${connection.secret}` };
+  const sslFingerprint = connection.tls_fingerprint;
+
+  try {
+    const res = await proxmoxFetch(url, { headers, sslFingerprint });
+    if (!res.ok) return false;
+    const json = await res.json() as any;
+    const config = json.data || {};
+    
+    let net0 = String(config.net0 || '');
+    if (!net0) return false;
+
+    const parts = net0.split(',').filter(p => !p.startsWith('rate='));
+    
+    if (rateLimitMb !== null) {
+      parts.push(`rate=${rateLimitMb}`);
+    }
+    
+    const newNet0 = parts.join(',');
+    if (newNet0 === net0) return true;
+
+    const formData = new URLSearchParams();
+    formData.append('net0', newNet0);
+    
+    const putRes = await proxmoxFetch(url, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
+      sslFingerprint
+    });
+    
+    return putRes.ok;
+  } catch (err) {
+    console.error('[PROXMOX] Failed to update VM rate limit', err);
+    return false;
+  }
+}

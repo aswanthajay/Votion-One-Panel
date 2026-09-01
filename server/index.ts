@@ -3,7 +3,12 @@ import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import { rateLimit as expressRateLimit, ipKeyGenerator } from 'express-rate-limit';
+import { authRouter } from './routes/v1/auth.js';
+import { userRouter } from './routes/v1/user.js';
+import { vmRouter } from './routes/v1/vm.js';
+import { billingRouter } from './routes/v1/billing.js';
 import { apiRouter } from './routes/api.js';
 import { adminRouter } from './routes/admin.js';
 import { clientRouter } from './routes/client.js';
@@ -21,6 +26,7 @@ import { beginInitialAdminSetup, bootstrapInitialAdmin } from './db/bootstrapAdm
 import { proxmoxApi } from './services/proxmox.js';
 import { proxmoxSync } from './services/proxmoxSync.js';
 import { billingWorker } from './jobs/billingWorker.js';
+import { startQueue } from './queue.js';
 import {
   initializeProviderCredentialKey,
   isProviderCredentialKeyConfigured,
@@ -60,8 +66,16 @@ async function getProxmoxTicket(host: string, port: number, username: string, pa
 }
 
 const app = express();
+app.use(compression());
 app.disable('x-powered-by');
-const nodeEnvironment = process.env.NODE_ENV || 'development';
+const configuredNodeEnvironment = process.env.NODE_ENV?.trim().toLowerCase();
+const configuredPublicAppUrl = process.env.PUBLIC_APP_URL?.trim();
+const publicUrlIsLocal = !configuredPublicAppUrl || /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(configuredPublicAppUrl);
+const nodeEnvironment = configuredNodeEnvironment || (!publicUrlIsLocal ? 'production' : 'development');
+const isProduction = nodeEnvironment === 'production';
+if (isProduction && !configuredNodeEnvironment) {
+  console.warn('[CONFIG] NODE_ENV was not set; production mode was inferred from PUBLIC_APP_URL. Set NODE_ENV=production explicitly.');
+}
 const trustProxy = process.env.TRUST_PROXY?.trim() || 'false';
 if (trustProxy === 'true') {
   app.set('trust proxy', true);
@@ -73,16 +87,20 @@ if (trustProxy === 'true') {
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  hsts: nodeEnvironment === 'production',
+  hsts: isProduction,
 }));
 app.use(requestLogger);
-const PORT = process.env.PORT || 5000;
+const configuredPort = Number.parseInt(process.env.PORT || '5000', 10);
+if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65535) {
+  throw new Error('PORT must be an integer between 1 and 65535.');
+}
+const PORT = configuredPort;
 
-const allowedOrigins = (process.env.CORS_ORIGINS || (nodeEnvironment === 'production' ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
+const allowedOrigins = (process.env.CORS_ORIGINS || (isProduction ? '' : 'http://localhost:3000,http://127.0.0.1:3000'))
   .split(',')
   .map(origin => origin.trim())
   .filter(Boolean);
-if (nodeEnvironment === 'production' && allowedOrigins.length === 0) {
+if (isProduction && allowedOrigins.length === 0) {
   throw new Error('CORS_ORIGINS must contain at least one trusted origin in production.');
 }
 
@@ -119,8 +137,8 @@ app.get('/readyz', async (_req, res) => {
   }
 });
 
-const anonymousApiRateLimit = Number(process.env.API_RATE_LIMIT_MAX || 300);
-const authenticatedApiRateLimit = Number(process.env.AUTHENTICATED_API_RATE_LIMIT_MAX || 1500);
+const anonymousApiRateLimit = Number(process.env.API_RATE_LIMIT_MAX || 1200);
+const authenticatedApiRateLimit = Number(process.env.AUTHENTICATED_API_RATE_LIMIT_MAX || 6000);
 
 const resolveRateLimitIdentity = (req: express.Request, _res: express.Response, next: express.NextFunction): void => {
   const authorization = req.header('authorization');
@@ -152,12 +170,18 @@ const apiRateLimiter = expressRateLimit({
 });
 app.use('/api', resolveRateLimitIdentity, apiRateLimiter);
 
-// API Router Registrations
+// API Router Registrations - Specific Sub-Routers Mounted First
 app.use('/api/auth', authKeyRouter);
 app.use('/api/v1/auth', authKeyRouter);
-app.use('/api/v1', apiRouter);
+app.use('/api/v1/auth', authRouter);
+app.use('/api/user', userRouter);
+app.use('/api/v1/user', userRouter);
+app.use('/api/billing', billingRouter);
+app.use('/api/v1/billing', billingRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/v1/admin', adminRouter);
+app.use('/api/client/scheduled-tasks', scheduledTasksRouter);
+app.use('/api/v1/client/scheduled-tasks', scheduledTasksRouter);
 app.use('/api/client', clientRouter);
 app.use('/api/v1/client', clientRouter);
 app.use('/api/operator', operatorRouter);
@@ -168,11 +192,12 @@ app.use('/api/support/tickets', ticketRouter);
 app.use('/api/v1/support/tickets', ticketRouter);
 app.use('/api/automation', automationRouter);
 app.use('/api/v1/automation', automationRouter);
-app.use('/api/client/scheduled-tasks', scheduledTasksRouter);
-app.use('/api/v1/client/scheduled-tasks', scheduledTasksRouter);
-
 app.use('/api/vnc', vncRouter);
 app.use('/api/v1/vnc', vncRouter);
+
+// Core API Router (Mounted after specific prefixes)
+app.use('/api/v1', apiRouter);
+app.use('/api', apiRouter);
 
 // Cache connection for synchronous WS proxy routing
 let cachedConn: any = null;
@@ -303,6 +328,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, next: exp
 
 // Apply versioned migrations before any route, worker, or proxy queries run.
 const appliedMigrations = await runMigrations();
+  try { await startQueue(); } catch (err) { console.warn('[Queue] Failed to initialize queue:', err); }
 if (appliedMigrations.length > 0) {
   console.log(`[MIGRATIONS] Applied ${appliedMigrations.length} migration(s)`);
 }
@@ -317,7 +343,7 @@ if (initialAdminBootstrap.status === 'promoted') {
 }
 if (initialAdminBootstrap.status === 'pending-configuration') {
   const setup = beginInitialAdminSetup();
-  const appUrl = (process.env.PUBLIC_APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const appUrl = (configuredPublicAppUrl || 'http://localhost:3000').replace(/\/$/, '');
   const setupLink = `${appUrl}/setup?token=${encodeURIComponent(setup.token)}`;
   log('warn', 'startup.initial_admin_pending', {
     email: initialAdminBootstrap.email,
@@ -367,7 +393,7 @@ if (providerCredentialsAvailable) {
 }
 
 // Billing and database-backed functions remain available without provider credentials.
-billingWorker.start();
+try { await billingWorker.registerQueueJobs(); } catch (err) { console.warn('[Billing] Queue jobs failed to register:', err); }
 
   console.log(providerCredentialsAvailable
     ? '[ALERTS] Telemetry threshold monitor started (15s interval)'
@@ -376,7 +402,7 @@ billingWorker.start();
 const server = app.listen(PORT, () => {
   console.log(`================================================================`);
   console.log(`🚀 Votion One™ Platform Backend Server running on port ${PORT}`);
-  console.log(`👉 API Endpoint: http://localhost:${PORT}/api/v1/health`);
+  console.log(`👉 API Endpoint: ${configuredPublicAppUrl || `http://localhost:${PORT}`}/api/v1/health`);
   console.log(`🗄️ Database: PostgreSQL + TimescaleDB (TSDB) Telemetry Layer`);
   console.log(providerCredentialsAvailable
     ? '🔐 Proxmox API Auth: configured; strict TLS fingerprint pinning enforced'
@@ -403,7 +429,8 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
     try {
       const url = new URL(req.url, 'http://localhost');
       const vmid = url.searchParams.get('vmid');
-      const requestedVm = vmid ? await dbService.getVMByVMID(Number(vmid)) : null;
+        const proxmoxConnectionId = url.searchParams.get('proxmoxConnectionId');
+        const requestedVm = vmid ? await dbService.getVMByVMID(Number(vmid), proxmoxConnectionId || undefined) : null;
       const sessionIsAdmin = ['administrator', 'admin', 'moderator'].includes(sessionUser.role);
       if (!requestedVm || (!sessionIsAdmin && String(requestedVm.ownerEmail).toLowerCase() !== String(sessionUser.email).toLowerCase())) {
         socket.destroy();

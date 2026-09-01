@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import os from 'os';
 import pg from 'pg';
+import { VmRepository } from '../repositories/VmRepository.js';
 import { loadRuntimeConfiguration } from '../services/runtimeConfig.js';
 import { isPendingTeamInvitationActive } from '../services/teamAccessPolicy.js';
 import {
@@ -75,9 +76,9 @@ const poolConfig: pg.PoolConfig = databaseUrl
 
 export const pgPool = new Pool({
   ...poolConfig,
-  max: 20,
+  max: 100,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,
 });
 
 export const REQUIRED_DATABASE_TABLES = [
@@ -458,30 +459,8 @@ export class DatabaseService {
     }
 
   async upsertProxmoxVMs(resources: Array<{ vmid: number; node: string; name?: string; status?: string; cpus?: number; maxmem?: number; maxdisk?: number; type?: string; proxmoxConnectionId: string }>, defaultOwnerEmail: string) {
-    if (resources.length === 0) return { synchronized: 0, conflicts: 0, synchronizedVmids: [] as number[] };
-    const vmids = resources.map(resource => resource.vmid);
-    const existing = await pgPool.query(
-      'SELECT vmid, proxmox_connection_id, vm_name FROM vms WHERE vmid = ANY($1::int[])',
-      [vmids]
-    );
-    const existingByVmid = new Map(existing.rows.map(row => [Number(row.vmid), row]));
-    const safeResources = resources.filter(resource => {
-      const row = existingByVmid.get(resource.vmid);
-      if (!row?.proxmox_connection_id || row.proxmox_connection_id === resource.proxmoxConnectionId) return true;
-      void pgPool.query(
-        `INSERT INTO vm_identity_conflicts (vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id, existing_vm_name, incoming_vm_name, raw_node_name, detected_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
-         ON CONFLICT (vmid, existing_proxmox_connection_id, incoming_proxmox_connection_id) DO UPDATE SET
-           existing_vm_name = EXCLUDED.existing_vm_name,
-           incoming_vm_name = EXCLUDED.incoming_vm_name,
-           raw_node_name = EXCLUDED.raw_node_name,
-           detected_at = NOW()`,
-        [resource.vmid, row.proxmox_connection_id, resource.proxmoxConnectionId, row.vm_name, resource.name || `vm-${resource.vmid}`, resource.node]
-      ).catch(error => console.error('[PROXMOX SYNC] Unable to record VM identity conflict:', error?.message || error));
-      return false;
-    });
-    if (safeResources.length === 0) return { synchronized: 0, conflicts: resources.length, synchronizedVmids: [] as number[] };
-    const dbResources = safeResources.map(resource => ({
+    if (resources.length === 0) return { synchronized: 0, conflicts: 0, synchronizedVmids: [] as number[], synchronizedVmKeys: [] as string[] };
+    const dbResources = resources.map(resource => ({
       ...resource,
       proxmox_connection_id: resource.proxmoxConnectionId,
     }));
@@ -505,10 +484,10 @@ export class DatabaseService {
        FROM jsonb_to_recordset($1::jsonb) AS resource(
          vmid INT, node TEXT, name TEXT, proxmox_connection_id TEXT, status TEXT, cpus INT, maxmem BIGINT, maxdisk BIGINT, type TEXT
        )
-       ON CONFLICT (vmid) DO UPDATE SET
+       ON CONFLICT (proxmox_connection_id, vmid) DO UPDATE SET
          vm_name = EXCLUDED.vm_name,
          node = EXCLUDED.node,
-         proxmox_connection_id = COALESCE(vms.proxmox_connection_id, EXCLUDED.proxmox_connection_id),
+         proxmox_connection_id = EXCLUDED.proxmox_connection_id,
          status = CASE
            WHEN vms.status IN ('starting', 'stopping', 'restarting') AND EXCLUDED.status = 'unknown' THEN vms.status
            ELSE EXCLUDED.status
@@ -522,22 +501,41 @@ export class DatabaseService {
          ram_mb = EXCLUDED.ram_mb,
          disk_gb = EXCLUDED.disk_gb,
          type = EXCLUDED.type
-       WHERE vms.proxmox_connection_id IS NULL
-          OR vms.proxmox_connection_id = EXCLUDED.proxmox_connection_id`,
+       WHERE vms.proxmox_connection_id = EXCLUDED.proxmox_connection_id`,
       [JSON.stringify(dbResources), defaultOwnerEmail]
     );
-    return { synchronized: safeResources.length, conflicts: resources.length - safeResources.length, synchronizedVmids: safeResources.map(resource => resource.vmid) };
+    return {
+      synchronized: resources.length,
+      conflicts: 0,
+      synchronizedVmids: resources.map(resource => resource.vmid),
+      synchronizedVmKeys: resources.map(resource => `${resource.proxmoxConnectionId}:${resource.vmid}`),
+    };
   }
 
-  async insertVmMetricsBatch(samples: Array<{ vmid: number; cpuPct: number; ramBytes: number; netInBytes: number; netOutBytes: number; diskReadBytes?: number; diskWriteBytes?: number }>) {
+   async deleteStaleProxmoxVMs(proxmoxConnectionId: string, activeVmIds: number[], allowPurgeAll: boolean = false) {
+    if (activeVmIds.length === 0) {
+      if (!allowPurgeAll) {
+        console.warn(`[DB] Refusing to delete all VMs for connection ${proxmoxConnectionId} without explicit allowPurgeAll flag.`);
+        return;
+      }
+      await pgPool.query('DELETE FROM vms WHERE proxmox_connection_id = $1', [proxmoxConnectionId]);
+    } else {
+      await pgPool.query(
+        'DELETE FROM vms WHERE proxmox_connection_id = $1 AND vmid != ALL($2::int[])',
+        [proxmoxConnectionId, activeVmIds]
+      );
+    }
+  }
+
+  async insertVmMetricsBatch(samples: Array<{ vmid: number; proxmox_connection_id?: string; cpu_pct: number; ram_bytes: number; net_in_bytes: number; net_out_bytes: number; diskread_bytes?: number; diskwrite_bytes?: number }>) {
     if (samples.length === 0) return;
     await pgPool.query(
-      `INSERT INTO vm_metrics (vmid, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
-       SELECT sample.vmid, sample.cpu_pct, sample.ram_bytes, sample.net_in_bytes, sample.net_out_bytes, sample.diskread_bytes, sample.diskwrite_bytes
+      `INSERT INTO vm_metrics (vmid, proxmox_connection_id, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
+       SELECT sample.vmid, COALESCE(sample.proxmox_connection_id, 'legacy-local'), sample.cpu_pct, sample.ram_bytes, sample.net_in_bytes, sample.net_out_bytes, sample.diskread_bytes, sample.diskwrite_bytes
        FROM jsonb_to_recordset($1::jsonb) AS sample(
-         vmid INT, cpu_pct NUMERIC, ram_bytes BIGINT, net_in_bytes BIGINT, net_out_bytes BIGINT, diskread_bytes BIGINT, diskwrite_bytes BIGINT
+         vmid INT, proxmox_connection_id TEXT, cpu_pct NUMERIC, ram_bytes BIGINT, net_in_bytes BIGINT, net_out_bytes BIGINT, diskread_bytes BIGINT, diskwrite_bytes BIGINT
        )
-       ON CONFLICT (vmid, timestamp) DO UPDATE SET
+       ON CONFLICT (proxmox_connection_id, vmid, timestamp) DO UPDATE SET
          cpu_pct = EXCLUDED.cpu_pct,
          ram_bytes = EXCLUDED.ram_bytes,
          net_in_bytes = EXCLUDED.net_in_bytes,
@@ -548,27 +546,31 @@ export class DatabaseService {
     );
   }
 
-  async updateVmStatus(vmid: number, status: string) {
-    const result = await pgPool.query('UPDATE vms SET status = $1 WHERE vmid = $2 RETURNING *', [status, vmid]);
+  async updateVmStatus(vmid: number, status: string, proxmoxConnectionId?: string) {
+    const result = await pgPool.query('UPDATE vms SET status = $1 WHERE vmid = $2 AND ($3::text IS NULL OR proxmox_connection_id = $3) RETURNING *', [status, vmid, proxmoxConnectionId || null]);
     return result.rows[0] || null;
   }
 
-  async insertVmTelemetry(vmid: number, cpuPct: number, ramBytes: number, netIn: number, netOut: number, diskRead?: number, diskWrite?: number) {
+  async updateVmIpAddress(vmid: number, proxmoxConnectionId: string, ipAddress: string) {
+    await pgPool.query('UPDATE vms SET ip_address = $1 WHERE vmid = $2 AND proxmox_connection_id = $3', [ipAddress, vmid, proxmoxConnectionId]);
+  };
+
+  async insertVmTelemetry(vmid: number, cpuPct: number, ramBytes: number, netIn: number, netOut: number, diskRead?: number, diskWrite?: number, proxmoxConnectionId?: string) {
     // UPSERT with a per-VMID+timestamp uniqueness rule: if a sample for this exact
     // second already exists, it is refreshed instead of duplicated. A matching unique
     // index is created automatically by migrateVmTelemetryColumns() on startup.
     try {
       await pgPool.query(
-        `INSERT INTO vm_metrics (vmid, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (vmid, timestamp) DO UPDATE SET
+        `INSERT INTO vm_metrics (vmid, proxmox_connection_id, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes)
+         VALUES ($1, $8, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (proxmox_connection_id, vmid, timestamp) DO UPDATE SET
            cpu_pct = EXCLUDED.cpu_pct,
            ram_bytes = EXCLUDED.ram_bytes,
            net_in_bytes = EXCLUDED.net_in_bytes,
            net_out_bytes = EXCLUDED.net_out_bytes,
            diskread_bytes = EXCLUDED.diskread_bytes,
            diskwrite_bytes = EXCLUDED.diskwrite_bytes`,
-        [vmid, cpuPct, ramBytes, netIn, netOut, diskRead ?? null, diskWrite ?? null]
+        [vmid, cpuPct, ramBytes, netIn, netOut, diskRead ?? null, diskWrite ?? null, proxmoxConnectionId || 'legacy-local']
       );
     } catch (err) {
       console.error('Error inserting telemetry:', err);
@@ -606,17 +608,25 @@ export class DatabaseService {
     const vmFilter = vmids ? (vmids.length > 0 ? `AND vmid = ANY($2::int[])` : 'AND FALSE') : '';
     if (vmids) params.push(vmids);
     const res = await pgPool.query(
-      `SELECT vmid,
+      `WITH diffs AS (
+         SELECT vmid,
+                cpu_pct,
+                ram_bytes,
+                GREATEST(0, net_in_bytes - lag(net_in_bytes) OVER (PARTITION BY vmid ORDER BY timestamp)) AS in_diff,
+                GREATEST(0, net_out_bytes - lag(net_out_bytes) OVER (PARTITION BY vmid ORDER BY timestamp)) AS out_diff
+         FROM vm_metrics
+         WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
+         ${vmFilter}
+       )
+       SELECT vmid,
               round(avg(cpu_pct)::numeric, 2) AS avg_cpu,
               round(max(cpu_pct)::numeric, 2) AS peak_cpu,
               round(min(cpu_pct)::numeric, 2) AS min_cpu,
               round(avg(ram_bytes)::numeric, 0) AS avg_ram_bytes,
               max(ram_bytes) AS peak_ram_bytes,
-              sum(net_in_bytes) AS total_net_in_bytes,
-              sum(net_out_bytes) AS total_net_out_bytes
-              FROM vm_metrics
-       WHERE timestamp > NOW() - INTERVAL '1 hour' * $1
-       ${vmFilter}
+              sum(in_diff) AS total_net_in_bytes,
+              sum(out_diff) AS total_net_out_bytes
+       FROM diffs
        GROUP BY vmid`,
       params
     );
@@ -864,9 +874,11 @@ export class DatabaseService {
     const res = await pgPool.query(
       `SELECT usage.item_key, usage.item_type, usage.vmid, usage.usage_count, usage.last_used_at,
               CASE WHEN usage.item_type = 'vm' THEN vm.vm_name ELSE NULL END AS vm_name,
-              CASE WHEN usage.item_type = 'vm' THEN vm.status ELSE NULL END AS vm_status
-       FROM user_navigation_usage AS usage
-       LEFT JOIN vms AS vm ON vm.vmid = usage.vmid AND vm.owner_email = usage.account_email
+              CASE WHEN usage.item_type = 'vm' THEN vm.status ELSE NULL END AS vm_status,
+                CASE WHEN usage.item_type = 'vm' THEN pc.name ELSE NULL END AS proxmox_connection_name
+         FROM user_navigation_usage AS usage
+         LEFT JOIN vms AS vm ON vm.vmid = usage.vmid AND vm.owner_email = usage.account_email
+         LEFT JOIN proxmox_connections AS pc ON pc.id = vm.proxmox_connection_id
        WHERE usage.account_email = $1
          AND (usage.item_type = 'destination' OR vm.vmid IS NOT NULL)
        ORDER BY usage.usage_count DESC, usage.last_used_at DESC
@@ -879,6 +891,7 @@ export class DatabaseService {
       vmid: row.vmid === null ? null : Number(row.vmid),
       name: row.vm_name ? String(row.vm_name) : null,
       status: row.vm_status ? String(row.vm_status) : null,
+        proxmoxConnectionName: row.proxmox_connection_name ? String(row.proxmox_connection_name) : null,
       usageCount: Number(row.usage_count),
       lastUsedAt: row.last_used_at,
     }));
@@ -970,23 +983,62 @@ export class DatabaseService {
 
     if (conditions.length > 0) query += ` WHERE ${conditions.join(' AND ')}`;
 
+    query += ' ORDER BY vmid ASC';
 
-    
     const res = await pgPool.query(query, params);
-    return res.rows.map(v => ({
-      vmid: v.vmid, name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
+    const mapped = res.rows.map(v => ({
+      vmid: v.vmid,
+      vmKey: `${v.proxmox_connection_id || 'legacy-local'}:${v.node || 'unknown'}:${v.vmid}`,
+      name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
     }));
+    
+        // Find all vmids that exist under an active Proxmox connection
+    const activeVmids = new Set(
+      mapped.filter(v => v.proxmoxConnectionId !== 'legacy-local' && v.proxmoxConnectionId !== null).map(v => v.vmid)
+    );
+
+    // Filter out legacy ghosts ONLY if an active connection claims this vmid
+    const filtered = mapped.filter(v => {
+      if ((v.proxmoxConnectionId === 'legacy-local' || v.proxmoxConnectionId === null) && activeVmids.has(v.vmid)) {
+        return false;
+      }
+      return true;
+    });
+
+    // De-duplicate strictly by vmKey so identical vmids on different connections can co-exist safely
+    const finalMap = new Map<string, typeof mapped[0]>();
+    for (const vm of filtered) {
+      finalMap.set(vm.vmKey, vm);
+    }
+    
+    return Array.from(finalMap.values());
   }
 
-  async getVMByVMID(vmid: number) {
-    const vms = await this.getVMs(undefined, vmid);
-    return vms[0] || null;
+  async getVMByVMID(vmid: number, proxmoxConnectionId?: string, ownerEmail?: string) {
+    if (ownerEmail) {
+      const ownedVms = await this.getVMs(ownerEmail, vmid, proxmoxConnectionId);
+      if (ownedVms.length > 0) {
+        const active = ownedVms.find(v => v.proxmoxConnectionId !== 'legacy-local');
+        return active || ownedVms[0];
+      }
+    }
+    const vms = await this.getVMs(undefined, vmid, proxmoxConnectionId);
+    if (vms.length === 0) return null;
+    if (vms.length === 1) return vms[0];
+    const active = vms.find(v => v.proxmoxConnectionId !== 'legacy-local');
+    return active || vms[0];
   }
 
   async createVM(vmData: any, userEmail: string = 'admin@votioncloud.org') {
+    const proxmoxConnectionId = String(vmData.proxmoxConnectionId || 'legacy-local');
     const vmid = Number(vmData.vmid) || Math.floor(100 + Math.random() * 900);
     const expiryDays = Number(vmData.expiryDays) || 30;
-    const expiryDate = new Date(Date.now() + expiryDays * 86400000).toISOString();
+    const requestedExpiry = vmData.neverExpire === true
+      ? null
+      : vmData.expiryDate
+        ? new Date(vmData.expiryDate)
+        : new Date(Date.now() + expiryDays * 86400000);
+    const expiryDate = requestedExpiry === null ? null : Number.isNaN(requestedExpiry.getTime()) ? new Date(Date.now() + expiryDays * 86400000).toISOString() : requestedExpiry.toISOString();
     
     const name = vmData.name || `vm-${vmid}`;
     const type = vmData.type || 'qemu';
@@ -999,17 +1051,88 @@ export class DatabaseService {
     const ip = `10.0.10.${Math.floor(50 + Math.random() * 150)}`;
 
     await pgPool.query(
-      `INSERT INTO vms (vmid, vm_name, type, node, owner_email, status, cpu_cores, ram_mb, disk_gb, os_type, expiry_date, is_suspended, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [vmid, name, type, node, owner, 'running', cpus, ram, disk, osType, expiryDate, false, ip]
+      `INSERT INTO vms (vmid, vm_name, type, node, owner_email, status, cpu_cores, ram_mb, disk_gb, os_type, expiry_date, is_suspended, ip_address, proxmox_connection_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [vmid, name, type, node, owner, 'running', cpus, ram, disk, osType, expiryDate, false, ip, proxmoxConnectionId]
     );
 
     await this.logAudit(userEmail, 'PROVISION_VM', `VMID ${vmid}`, `Provisioned VMID ${vmid} for ${owner}`);
-    return await this.getVMByVMID(vmid);
+    return (await this.getVMByVMID(vmid, proxmoxConnectionId))!;
   }
 
-  async assignVM(vmid: number, targetEmail: string, userEmail: string = 'admin@votioncloud.org') {
-    const res = await pgPool.query("UPDATE vms SET owner_email = $1 WHERE vmid = $2 RETURNING *", [targetEmail.trim(), vmid]);
+
+  async unassignVM(vmid: number, proxmoxConnectionId: string, reason: string, adminEmail: string) {
+    const vm = await this.getVMByVMID(vmid, proxmoxConnectionId);
+    if (!vm) return null;
+    const unassignedEmail = `unassigned@${proxmoxConnectionId}`;
+    const res = await pgPool.query(
+      `UPDATE vms SET owner_email = $1, expiry_date = NULL WHERE vmid = $2 AND proxmox_connection_id = $3 RETURNING *`,
+      [unassignedEmail, vmid, proxmoxConnectionId]
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      await pgPool.query(
+        `INSERT INTO vm_assignment_history (vmid, proxmox_connection_id, action, from_email, to_email, reason, performed_by)
+         VALUES ($1, $2, 'unassign', $3, $4, $5, $6)`,
+        [vmid, proxmoxConnectionId, vm.ownerEmail, unassignedEmail, reason || null, adminEmail]
+      );
+      await this.logAudit(adminEmail, 'UNASSIGN_VM', `VMID ${vmid}`, `Unassigned from ${vm.ownerEmail}. Reason: ${reason}`);
+    }
+    return res.rows[0] || null;
+  }
+
+  async getVmAssignmentHistory(vmid: number, proxmoxConnectionId: string) {
+    const res = await pgPool.query(
+      `SELECT * FROM vm_assignment_history WHERE vmid = $1 AND proxmox_connection_id = $2 ORDER BY performed_at DESC LIMIT 100`,
+      [vmid, proxmoxConnectionId]
+    );
+    return res.rows.map(row => ({
+      id: row.id,
+      vmid: Number(row.vmid),
+      proxmoxConnectionId: row.proxmox_connection_id,
+      action: row.action,
+      fromEmail: row.from_email,
+      toEmail: row.to_email,
+      reason: row.reason,
+      expiryDate: row.expiry_date,
+      gracePeriodDays: row.grace_period_days,
+      performedBy: row.performed_by,
+      performedAt: row.performed_at,
+    }));
+  }
+
+  async getAccountVmCount(email: string): Promise<number> {
+    const res = await pgPool.query(
+      `SELECT COUNT(*)::int AS cnt FROM vms WHERE owner_email = $1`,
+      [email.toLowerCase().trim()]
+    );
+    return res.rows[0]?.cnt ?? 0;
+  }
+
+  async searchAccounts(query: string) {
+    const q = `%${query.toLowerCase().trim()}%`;
+    const res = await pgPool.query(
+      `SELECT a.id, a.email, a.name, a.role,
+              COUNT(v.vmid)::int AS vm_count
+       FROM accounts a
+       LEFT JOIN vms v ON LOWER(v.owner_email) = LOWER(a.email) AND v.owner_email NOT LIKE 'unassigned@%'
+       WHERE LOWER(a.email) LIKE $1 OR LOWER(a.name) LIKE $1
+       GROUP BY a.id, a.email, a.name, a.role
+       ORDER BY a.email ASC
+       LIMIT 30`,
+      [q]
+    );
+    return res.rows;
+  }
+
+  async assignVM(vmid: number, targetEmail: string, userEmail: string = 'admin@votioncloud.org', expiryDate?: string | null, proxmoxConnectionId?: string) {
+    const res = await pgPool.query(
+      `UPDATE vms
+       SET owner_email = $1,
+           expiry_date = CASE WHEN $3::boolean THEN NULL WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz ELSE expiry_date END
+       WHERE vmid = $2 AND ($5::text IS NULL OR proxmox_connection_id = $5)
+       RETURNING *`,
+      [targetEmail.trim(), vmid, expiryDate === null, expiryDate === null ? null : expiryDate || null, proxmoxConnectionId || null],
+    );
     if ((res.rowCount ?? 0) > 0) {
       await this.logAudit(userEmail, 'REASSIGN_VM', `VMID ${vmid}`, `Reassigned to ${targetEmail}`);
       return res.rows[0];
@@ -1017,8 +1140,8 @@ export class DatabaseService {
     return null;
   }
 
-  async executeVMAction(vmid: number, action: string, userEmail: string = 'system') {
-    const vm = await this.getVMByVMID(vmid);
+  async executeVMAction(vmid: number, action: string, userEmail: string = 'system', proxmoxConnectionId?: string) {
+    const vm = await this.getVMByVMID(vmid, proxmoxConnectionId);
     if (!vm) return null;
 
     if (vm.isSuspended && action !== 'unsuspend') {
@@ -1030,26 +1153,26 @@ export class DatabaseService {
     if (action === 'stop') status = 'stopped';
     if (action === 'reboot') status = 'running';
 
-    await pgPool.query("UPDATE vms SET status = $1 WHERE vmid = $2", [status, vmid]);
+    await pgPool.query("UPDATE vms SET status = $1 WHERE vmid = $2 AND ($3::text IS NULL OR proxmox_connection_id = $3)", [status, vmid, proxmoxConnectionId || null]);
     await this.logAudit(userEmail, `VM_${action.toUpperCase()}`, `VMID ${vmid}`, `Executed ${action}`);
-    return await this.getVMByVMID(vmid);
+    return await this.getVMByVMID(vmid, proxmoxConnectionId);
   }
 
-  async suspendVM(vmid: number, suspend: boolean, userEmail: string = 'admin@votioncloud.org') {
-    await pgPool.query('UPDATE vms SET is_suspended = $1, status = $2 WHERE vmid = $3', [suspend, suspend ? 'stopped' : 'running', vmid]);
+  async suspendVM(vmid: number, suspend: boolean, userEmail: string = 'admin@votioncloud.org', proxmoxConnectionId?: string) {
+    await pgPool.query('UPDATE vms SET is_suspended = $1, status = $2 WHERE vmid = $3 AND ($4::text IS NULL OR proxmox_connection_id = $4)', [suspend, suspend ? 'stopped' : 'running', vmid, proxmoxConnectionId || null]);
     await this.logAudit(userEmail, suspend ? 'SUSPEND_VM' : 'UNSUSPEND_VM', `VMID ${vmid}`, `${suspend ? 'Suspended' : 'Unsuspended'} VMID ${vmid}`);
-    return await this.getVMByVMID(vmid);
+    return await this.getVMByVMID(vmid, proxmoxConnectionId);
   }
 
-  async extendVMExpiry(vmid: number, additionalDays: number, userEmail: string = 'admin@votioncloud.org') {
-    const vm = await this.getVMByVMID(vmid);
+  async extendVMExpiry(vmid: number, additionalDays: number, userEmail: string = 'admin@votioncloud.org', proxmoxConnectionId?: string) {
+    const vm = await this.getVMByVMID(vmid, proxmoxConnectionId);
     if (!vm) return null;
     const currentExpiry = new Date(vm.expiryDate && new Date(vm.expiryDate) > new Date() ? vm.expiryDate : Date.now());
     const newExpiry = new Date(currentExpiry.getTime() + additionalDays * 86400000).toISOString();
     
-    await pgPool.query('UPDATE vms SET expiry_date = $1, is_suspended = false, status = $2 WHERE vmid = $3', [newExpiry, 'running', vmid]);
+    await pgPool.query('UPDATE vms SET expiry_date = $1, is_suspended = false, status = $2 WHERE vmid = $3 AND ($4::text IS NULL OR proxmox_connection_id = $4)', [newExpiry, 'running', vmid, proxmoxConnectionId || null]);
     await this.logAudit(userEmail, 'EXTEND_VM_EXPIRY', `VMID ${vmid}`, `Extended expiry date to ${newExpiry}`);
-    return await this.getVMByVMID(vmid);
+    return await this.getVMByVMID(vmid, proxmoxConnectionId);
   }
 
   private mapReimageRequest(row: any) {
@@ -1068,31 +1191,35 @@ export class DatabaseService {
       createdAt: row.created_at,
       reviewedAt: row.reviewed_at || undefined,
       cancelledAt: row.cancelled_at || undefined,
+      completedAt: row.completed_at || undefined,
+      completedBy: row.completed_by || undefined,
+      completionNote: row.completion_note || undefined,
     };
   }
 
-  async createReimageRequest(vmid: number, requestedOs: string, requesterEmail: string, requesterNote?: string) {
+  async createReimageRequest(vmid: number, requestedOs: string, requesterEmail: string, requesterNote?: string, proxmoxConnectionId?: string) {
     const vm = await this.getVMByVMID(vmid);
     if (!vm) return null;
     if (vm.isSuspended) throw new Error(`VMID ${vmid} is currently suspended. Reimage requests are blocked.`);
+    const connId = proxmoxConnectionId || (vm as any).proxmoxConnectionId || 'legacy-local';
 
     const duplicate = await pgPool.query(
       `SELECT id FROM vm_reimage_requests
-       WHERE vmid = $1 AND status = 'pending'
+       WHERE vmid = $1 AND proxmox_connection_id = $2 AND status = 'pending'
        LIMIT 1`,
-      [vmid],
+      [vmid, connId],
     );
     if (duplicate.rows.length > 0) {
       throw new Error('A pending OS reimage request already exists for this VM.');
     }
 
-    const id = `reimage-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const id = `reimage-${Date.now()}-${require('crypto').randomBytes(4).toString('hex')}`;
     const email = requesterEmail.toLowerCase().trim();
     await pgPool.query(
       `INSERT INTO vm_reimage_requests
-       (id, vmid, requester_email, requested_os, status, requester_note, created_at)
-       VALUES ($1, $2, $3, $4, 'pending', $5, NOW())`,
-      [id, vmid, email, requestedOs, requesterNote?.trim() || null],
+       (id, vmid, proxmox_connection_id, requester_email, requested_os, status, requester_note, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6, NOW())`,
+      [id, vmid, connId, email, requestedOs, requesterNote?.trim() || null],
     );
 
     await this.logAudit(
@@ -1422,6 +1549,51 @@ export class DatabaseService {
     return this.mapReimageRequest(detailed.rows[0]);
   }
 
+  async completeReimageRequest(requestId: string, completedBy: string, completionNote?: string) {
+    const email = completedBy.toLowerCase().trim();
+    const note = completionNote?.trim().slice(0, 2000) || null;
+    const client = await pgPool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `UPDATE vm_reimage_requests
+         SET status = 'completed', completed_at = NOW(), completed_by = $2, completion_note = $3
+         WHERE id = $1 AND status = 'approved'
+         RETURNING *`,
+        [requestId, email, note],
+      );
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      const row = result.rows[0];
+      await client.query(
+        `UPDATE vms SET os_type = $1 WHERE vmid = $2`,
+        [row.requested_os, row.vmid],
+      );
+      await client.query('COMMIT');
+      await this.logAudit(
+        email,
+        'COMPLETE_REIMAGE_REQUEST',
+        `VMID ${row.vmid}`,
+        `Marked OS reimage request ${requestId} completed after manual administrator action. No automated Proxmox operation was performed.`,
+      );
+      const detailed = await pgPool.query(
+        `SELECT r.*, v.vm_name, v.type AS vm_type, v.owner_email
+         FROM vm_reimage_requests r
+         JOIN vms v ON v.vmid = r.vmid
+         WHERE r.id = $1`,
+        [requestId],
+      );
+      return this.mapReimageRequest(detailed.rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async reinstallVMOS(vmid: number, osType: string, userEmail: string = 'client@votioncloud.org') {
     const vm = await this.getVMByVMID(vmid);
     if (!vm) return null;
@@ -1432,7 +1604,7 @@ export class DatabaseService {
     return await this.getVMByVMID(vmid);
   }
 
-  async deleteVM(vmid: number, userEmail: string = 'admin@votioncloud.org') {
+  async deleteVM(vmid: number, userEmail: string = 'admin@votioncloud.org', proxmoxConnectionId?: string) {
     const res = await pgPool.query('DELETE FROM vms WHERE vmid = $1', [vmid]);
     if ((res.rowCount ?? 0) > 0) {
       await this.logAudit(userEmail, 'DELETE_VM', `VMID ${vmid}`, `Deleted VMID ${vmid}`);
@@ -1635,8 +1807,16 @@ export class DatabaseService {
   async getHaFencing() { return []; }
   async getInbox() { return CONSTANTS.inbox; }
   
-  async getAuditLogs() {
-    const res = await pgPool.query("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 50");
+  async getAuditLogs(accountEmail?: string, limit = 50) {
+    const clampedLimit = Math.max(1, Math.min(Number(limit) || 50, 500));
+    if (accountEmail) {
+      const res = await pgPool.query(
+        "SELECT * FROM audit_logs WHERE LOWER(user_email) = $1 ORDER BY timestamp DESC LIMIT $2",
+        [accountEmail.toLowerCase().trim(), clampedLimit]
+      );
+      return res.rows;
+    }
+    const res = await pgPool.query("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT $1", [clampedLimit]);
     return res.rows;
   }
 
@@ -1713,6 +1893,22 @@ export class DatabaseService {
     return (res.rowCount ?? 0) > 0;
   }
 
+  async findPasskeyByCredentialId(credentialId: string): Promise<{ credentialId: string; accountEmail: string; keyName: string; created_at: Date } | null> {
+    const res = await pgPool.query(
+      'SELECT credential_id as "credentialId", account_email as "accountEmail", key_name as "keyName", created_at FROM passkeys WHERE credential_id = $1',
+      [credentialId]
+    );
+    return res.rows[0] || null;
+  }
+
+  async findPasskeysByEmail(accountEmail: string): Promise<Array<{ credentialId: string; keyName: string; created_at: Date }>> {
+    const res = await pgPool.query(
+      'SELECT credential_id as "credentialId", key_name as "keyName", created_at FROM passkeys WHERE account_email = $1 ORDER BY created_at ASC',
+      [accountEmail.toLowerCase().trim()]
+    );
+    return res.rows;
+  }
+
   // TOTP SECRETS
   async getTotpSecret(accountEmail: string) {
     const res = await pgPool.query('SELECT secret FROM totp_secrets WHERE account_email = $1', [accountEmail.toLowerCase().trim()]);
@@ -1773,7 +1969,7 @@ export class DatabaseService {
 
   async getUploadedFiles(accountEmail?: string) {
     let query = 'SELECT file_name as "fileName", original_name as "originalName", size_bytes as "sizeBytes", mime_type as "mimeType", created_at FROM uploaded_files';
-    let params: any[] = [];
+    const params: any[] = [];
     if (accountEmail) {
       query += ' WHERE account_email = $1';
       params.push(accountEmail.toLowerCase().trim());
@@ -1784,7 +1980,7 @@ export class DatabaseService {
   }
 
   // VM SNAPSHOTS
-  async createVmSnapshot(vmid: number, name: string, description: string) {
+  async createVmSnapshot(vmid: number, proxmoxConnectionId: string, name: string, description: string) {
     await pgPool.query(
       'INSERT INTO vm_snapshots (vmid, snapshot_name, description) VALUES ($1, $2, $3)',
       [vmid, name, description]
@@ -1793,7 +1989,7 @@ export class DatabaseService {
     return { success: true, name, description };
   }
 
-  async getVmSnapshots(vmid: number) {
+  async getVmSnapshots(vmid: number, proxmoxConnectionId: string) {
     const res = await pgPool.query(
       'SELECT snapshot_name as "name", description, snaptime as "snaptime", created_at FROM vm_snapshots WHERE vmid = $1 ORDER BY created_at DESC',
       [vmid]
@@ -1801,7 +1997,7 @@ export class DatabaseService {
     return res.rows;
   }
 
-  async deleteVmSnapshot(vmid: number, snapshotName: string) {
+  async deleteVmSnapshot(vmid: number, proxmoxConnectionId: string, snapshotName: string) {
     const res = await pgPool.query('DELETE FROM vm_snapshots WHERE vmid = $1 AND snapshot_name = $2', [vmid, snapshotName]);
     return (res.rowCount ?? 0) > 0;
   }
@@ -1816,7 +2012,24 @@ export class DatabaseService {
     return { success: true, id, title, status };
   }
 
-  async getTasks() {
+  async getTasks(accountEmail?: string) {
+    if (accountEmail) {
+      const res = await pgPool.query(
+        "SELECT * FROM tasks WHERE LOWER(user_email) = $1 ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, created_at DESC LIMIT 50",
+        [accountEmail.toLowerCase().trim()]
+      );
+      return res.rows.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        status: t.status,
+        priority: t.priority,
+        progressPct: Number(t.progress_pct),
+        userEmail: t.user_email,
+        startedAt: t.started_at,
+        createdAt: t.created_at,
+      }));
+    }
     const res = await pgPool.query(
       "SELECT * FROM tasks ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, created_at DESC LIMIT 50"
     );
@@ -1926,7 +2139,7 @@ export class DatabaseService {
 
   async addVmFirewallRule(vmid: number, rule: { ruleType: string; action: string; proto?: string; dport?: string; enable?: boolean; comment?: string }) {
     const res = await pgPool.query(
-      `INSERT INTO firewall_rules (vmid, rule_type, action, proto, dport, enabled, comment)
+      `INSERT INTO firewall_rules (proxmox_connection_id, vmid, rule_type, action, proto, dport, enabled, comment)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
       [vmid, rule.ruleType, rule.action, rule.proto || null, rule.dport || null, rule.enable !== false, rule.comment || null]
     );

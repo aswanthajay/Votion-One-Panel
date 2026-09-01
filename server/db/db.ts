@@ -9,8 +9,9 @@ export const pool = new Pool({
   database: process.env.POSTGRES_DB || 'votion_proxmox',
   password: process.env.POSTGRES_PASSWORD || 'postgres',
   port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-  max: 10,
+  max: 50,
   idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
 export const queryDb = async (text: string, params?: any[]) => {

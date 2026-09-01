@@ -2,8 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { apiClient } from '../services/apiClient';
 
-const API_BASE_URL = 'http://localhost:5000/api/v1';
-
 interface TelemetryRow {
   time: string;
   cpu: number;
@@ -141,21 +139,7 @@ export const TelemetryChart: React.FC = () => {
               onClick={async () => {
                 setIsGenerating(true);
                 try {
-                  const res = await fetch(`${API_BASE_URL}/telemetry/report?hours=${reportHours}`, {
-                    headers: {
-                      'x-user-email': localStorage.getItem('votion_user_email') || 'admin@votioncloud.org',
-                      Authorization: `Bearer ${localStorage.getItem('votion_jwt_token') || ''}`,
-                    },
-                  });
-                  if (res.ok) {
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `stellar-performance-report-${reportHours}h-${Date.now()}.pdf`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }
+                  await apiClient.downloadTelemetryReport(reportHours);
                 } finally {
                   setIsGenerating(false);
                 }

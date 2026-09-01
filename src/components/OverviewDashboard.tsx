@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan, ApiVmBillingProfile } from '../services/apiClient';
+import { formatDate, formatTime } from '../services/dateTime';
 
 /*
   OVERVIEW — v3 (editorial Carta Ink redesign)
@@ -49,20 +50,44 @@ const GB = 1073741824;
 const MB = 1048576;
 
 /* ---------------- safe json fetch with hard timeout ---------------- */
+const fetchOneCache = new Map<string, { data: any, timestamp: number, promise: Promise<any> | null }>();
+
 async function fetchOne(path: string, ms = 12000): Promise<any | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ms);
-  try {
-    const r = await fetch(path, { headers: { Authorization: TOKEN() }, signal: ctrl.signal });
-    if (!r.ok) return null;
-    const ct = r.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) return null;
-    return await r.json();
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
+  const now = Date.now();
+  const cached = fetchOneCache.get(path);
+  
+  // 15-second cache for Overview metrics to prevent N+1 request waterfalls
+  if (cached && (now - cached.timestamp < 15000) && cached.data) {
+    return cached.data;
   }
+  if (cached && cached.promise) {
+    return cached.promise;
+  }
+
+  const promise = (async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(path, { headers: { Authorization: TOKEN() }, signal: ctrl.signal });
+      if (!r.ok) {
+        fetchOneCache.delete(path);
+        return null;
+      }
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return null;
+      const json = await r.json();
+      fetchOneCache.set(path, { data: json, timestamp: Date.now(), promise: null });
+      return json;
+    } catch {
+      fetchOneCache.delete(path);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
+
+  fetchOneCache.set(path, { data: cached?.data, timestamp: now, promise });
+  return promise;
 }
 
 /* ---------------- tiny svg sparkline ---------------- */
@@ -135,11 +160,68 @@ const uptimeStr = (seconds: number): string => {
 };
 
 const customerAuditDetail = (entry: ApiAuditLog): string => {
-  const detail = String(entry.details || entry.action || '');
-  if (!/proxmox/i.test(detail)) return detail;
-  if (/action accepted|starting|stopping|reboot|shutdown/i.test(detail)) return 'Server service updated';
-  if (/connection|cluster|node/i.test(detail)) return 'Service infrastructure updated';
-  return 'Server service event recorded';
+  const detail = String(entry.details || entry.action || '').trim();
+  if (!detail) return 'Account activity recorded';
+  if (/action accepted|starting|stopping|reboot|shutdown|start|power/i.test(detail)) return 'Server power state updated';
+  if (/connection|cluster|node|infrastructure/i.test(detail)) return 'Infrastructure verified';
+  if (/login|auth|session|passkey|password|2fa/i.test(detail)) return 'Account security event';
+  if (/ticket|support|reply/i.test(detail)) return 'Support ticket updated';
+  if (/billing|invoice|payment|plan/i.test(detail)) return 'Billing event recorded';
+  if (/ssh|credential|profile/i.test(detail)) return 'Security settings updated';
+  return detail
+    .replace(/proxmox/gi, 'cloud')
+    .replace(/postgres(?:ql)?/gi, 'system')
+    .replace(/qemu|lxc|kvm/gi, 'compute')
+    .replace(/vmids*[:#]?s*d+/gi, 'server')
+    .replace(/nodes*[:#]?s*w+/gi, 'region');
+};
+
+const defaultBillingSummary: ApiBillingSummary = {
+  invoiceCount: 0,
+  vmCount: 0,
+  billedCents: 0,
+  collectedCents: 0,
+  outstandingCents: 0,
+  overdueCount: 0,
+  overdueCents: 0,
+  suspendedInvoiceCount: 0,
+  monthlyCostCents: 0,
+  estimatedGrossProfitCents: 0,
+  collectedGrossProfitCents: 0,
+  estimatedMarginPercent: 0,
+  reportingCurrency: 'USD',
+  inrBilledPaise: 0,
+  inrCollectedPaise: 0,
+  inrOutstandingPaise: 0,
+  inrGrossProfitPaise: 0,
+  inrCollectedGrossProfitPaise: 0,
+  projectedInrRevenuePaise: 0,
+  projectedInrGrossProfitPaise: 0,
+  projectedInrMarginPercent: null,
+  projectedRevenueByCurrency: {},
+  revenueByCurrency: [],
+  monthlySharedCostPaise: 0,
+  monthlyServerCostPaise: 0,
+  monthlyIpCostPaise: 0,
+  totalInrCostPaise: 0,
+  totalServerCapacityVms: 0,
+  totalAssignedServerVms: 0,
+  totalRunningServerVms: 0,
+  availableServerCapacityVms: 0,
+  totalRunningIpCount: 0,
+  totalAssignedIpCount: 0,
+  totalIncludedIpCount: 0,
+  billableIpCount: 0,
+  billableRunningIpCount: 0,
+};
+
+const formatTicketNumber = (t: any): string => {
+  if (t.ticket_number) return String(t.ticket_number);
+  const raw = String(t.id || '');
+  const digits = raw.replace(/[^0-9]/g, '');
+  if (digits.length >= 3) return `#${digits.slice(-4)}`;
+  const alphaNum = raw.replace(/[^a-zA-Z0-9]/g, '');
+  return `#${alphaNum.slice(-4) || '001'}`;
 };
 
 /* ---------------- main ---------------- */
@@ -155,7 +237,7 @@ export const OverviewDashboard: React.FC<{
   const [selectedVmid, setSelectedVmid] = useState<number | null>(null);
   const [tickets, setTickets] = useState<any[]>([]);
   const [audit, setAudit] = useState<ApiAuditLog[]>([]);
-  const [billingSummary, setBillingSummary] = useState<ApiBillingSummary | null>(null);
+  const [billingSummary, setBillingSummary] = useState<ApiBillingSummary | null>(defaultBillingSummary);
   const [billingInvoices, setBillingInvoices] = useState<ApiBillingInvoice[]>([]);
   const [billingPlans, setBillingPlans] = useState<ApiPricingPlan[]>([]);
   const [billingProfiles, setBillingProfiles] = useState<ApiVmBillingProfile[]>([]);
@@ -208,14 +290,20 @@ export const OverviewDashboard: React.FC<{
       apiClient.getClientVmBillingProfiles(),
     ]).then(([summary, invoices, plans, profiles]) => {
       if (!mountedRef.current) return;
-      if (summary.status === 'fulfilled') setBillingSummary(summary.value);
-      if (invoices.status === 'fulfilled') setBillingInvoices(invoices.value);
-      if (plans.status === 'fulfilled') setBillingPlans(plans.value);
-      if (profiles.status === 'fulfilled') setBillingProfiles(profiles.value);
+      if (summary.status === 'fulfilled' && summary.value) {
+        setBillingSummary(summary.value);
+      } else {
+        setBillingSummary(defaultBillingSummary);
+      }
+      if (invoices.status === 'fulfilled' && Array.isArray(invoices.value)) setBillingInvoices(invoices.value);
+      else setBillingInvoices([]);
+      if (plans.status === 'fulfilled' && Array.isArray(plans.value)) setBillingPlans(plans.value);
+      if (profiles.status === 'fulfilled' && Array.isArray(profiles.value)) setBillingProfiles(profiles.value);
+    }).catch(() => {
+      if (mountedRef.current) setBillingSummary(defaultBillingSummary);
     });
 
-    // FLEET STREAM with backoff retry — hard-capped at 12s total so the UI
-    // always fails CLOSED (error card) instead of hanging on skeleton bars.
+    // FLEET STREAM with backoff retry
     let vmsRes: ApiVM[] = [];
     let fleetOk = false;
     let providerIsAvailable = true;
@@ -228,63 +316,23 @@ export const OverviewDashboard: React.FC<{
         fleetOk = true;
         break;
       } catch {
-        if (Date.now() - t0 > 12000) break; // hard cap — never wait forever
+        if (Date.now() - t0 > 12000) break;
         await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
       }
     }
     if (!mountedRef.current) { setIsRefreshing(false); return; }
 
-    setFleetFailed(!fleetOk);
-    if (fleetOk) {
-      setProviderAvailable(providerIsAvailable);
-      setVms(vmsRes);
-      if (!backgroundOnly || selectedVmid === null) {
-        setSelectedVmid(previous => vmsRes.some(vm => vm.vmid === previous) ? previous : (vmsRes[0]?.vmid || null));
-      }
-      setFleetLoading(false); // STAGE 1: roster renders immediately
-    } else {
-      setFleetLoading(false); // always render — skeleton or error card, never blank
-    }
-
-    const ids = vmsRes.map(v => v.vmid);
-    if (!ids.length) {
-      if (!mountedRef.current) return;
-      retryCountRef.current = 0;
-      setLoadDone(true);
-      setDataAge(0);
+    setProviderAvailable(providerIsAvailable);
+    if (!fleetOk) {
+      setFleetFailed(true);
+      setFleetLoading(false);
       setIsRefreshing(false);
       return;
     }
 
-    // STAGE 2: mark every VM as loading until its data lands
-    if (!mountedRef.current) return;
-    setVmLoading(Object.fromEntries(ids.map(id => [id, { telemetry: true, history: true }])));
-
-    // Telemetry per VM, independent — allSettled so one failing/slow VM never
-    // blocks the others; each result is merged into state as it resolves.
-    ids.forEach(id => {
-      fetchOne(`${API_BASE}/client/vms/${id}/telemetry`).then(t => {
-        if (!mountedRef.current) return;
-        const tel = t?.telemetry;
-        if (tel) {
-          setLiveTelemetry(prev => ({ ...prev, [id]: { cpu: num(tel.cpu), mem: num(tel.mem), maxmem: num(tel.maxmem), netin: num(tel.netin), netout: num(tel.netout), diskread: num(tel.diskread), diskwrite: num(tel.diskwrite), uptime: num(tel.uptime) } }));
-        }
-        setVmLoading(prev => ({ ...prev, [id]: { ...(prev[id] || { telemetry: true, history: true }), telemetry: false } }));
-      }).catch(() => {
-        if (!mountedRef.current) return;
-        setVmLoading(prev => ({ ...prev, [id]: { ...(prev[id] || { telemetry: true, history: true }), telemetry: false } }));
-      });
-      fetchOne(`${API_BASE}/client/vms/${id}/metrics`).then(h => {
-        if (!mountedRef.current) return;
-        if (h?.history) {
-          setHistMetrics(prev => ({ ...prev, [id]: { history: h.history, aggregations: h.aggregations } }));
-        }
-        setVmLoading(prev => ({ ...prev, [id]: { ...(prev[id] || { telemetry: true, history: true }), history: false } }));
-      }).catch(() => {
-        if (!mountedRef.current) return;
-        setVmLoading(prev => ({ ...prev, [id]: { ...(prev[id] || { telemetry: true, history: true }), history: false } }));
-      });
-    });
+    setVms(vmsRes);
+    setFleetLoading(false);
+    setFleetFailed(false);
 
     if (!mountedRef.current) return;
     retryCountRef.current = 0;
@@ -300,11 +348,31 @@ export const OverviewDashboard: React.FC<{
     setHistMetrics({});
     loadData(false);
     // Background pulse: light streams every 5s, full refresh every 20s (self-heals after blips)
-    const ivLight = setInterval(() => loadData(true), 5000);
-    const ivFull = setInterval(() => loadData(false), 20000);
-    const ageTick = setInterval(() => setDataAge(a => a + 1), 1000);
-    return () => { mountedRef.current = false; clearInterval(ivLight); clearInterval(ivFull); clearInterval(ageTick); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const ivLight = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadData(true);
+    }, 5000);
+    const ivFull = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadData(false);
+    }, 20000);
+    const ageTick = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      setDataAge(a => a + 1);
+    }, 1000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadData(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      mountedRef.current = false;
+      clearInterval(ivLight);
+      clearInterval(ivFull);
+      clearInterval(ageTick);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [workspaceConnectionId]);
 
   const openTickets = tickets.filter(t => t.status === 'pending' || t.status === 'open' || t.status === 'in-progress');
@@ -349,7 +417,7 @@ export const OverviewDashboard: React.FC<{
       projectedMonthlyLabel,
       hasCompleteBillingProfiles,
       ceilings,
-      nextPayment: nextInvoice ? new Date(nextInvoice.dueAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase() : '—',
+      nextPayment: nextInvoice ? formatDate(nextInvoice.dueAt, { month: 'short', day: 'numeric' }).toUpperCase() : '—',
       outstandingCents: billingSummary?.outstandingCents || 0,
       overdueCount: billingSummary?.overdueCount || 0,
       overdueCents: billingSummary?.overdueCents || 0,
@@ -445,7 +513,7 @@ export const OverviewDashboard: React.FC<{
       {/* ================= TOP BAR (house app-header style) ================= */}
       <header className="overview-header app-header !px-5 sm:!px-7 min-w-0 overflow-hidden" style={{ height: '56px' }}>
         <div className="flex-1 min-w-0 flex items-baseline gap-5 overflow-hidden">
-          <h1 className="page-heading !text-[22px] !mb-0 !leading-none truncate">Overview</h1>
+          <h1 className="page-heading !text-[24px] font-serif font-medium !mb-0 !leading-none truncate">Overview</h1>
           <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate">
             {loadDone
               ? `Fleet of ${vms.length} instance${vms.length === 1 ? '' : 's'} · ${scopeLabel} · refreshed ${dataAge}s ago`
@@ -483,7 +551,7 @@ export const OverviewDashboard: React.FC<{
           <div className="px-5 sm:px-7 pt-5 pb-3 flex items-center justify-between border-b border-[#dedfdf] bg-white">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className={`w-2 h-2 rounded-full shrink-0 ${runningVms > 0 ? 'bg-[#10b981] animate-pulse' : 'bg-[#a0a1a2]'}`} />
-              <span className="text-sm text-[#1a1a1a] font-medium truncate">Fleet Operations Overview</span>
+              <span className="text-sm font-serif font-medium text-[#1a1a1a] tracking-[-0.015em] truncate">Fleet Operations Overview</span>
               {loadDone && (
                 <>
                   <span className="hidden sm:inline text-[12px] text-[#a0a1a2]">·</span>
@@ -521,7 +589,7 @@ export const OverviewDashboard: React.FC<{
             ) : vms.length === 0 ? (
               <div className="px-4 py-10 flex flex-col items-center justify-center text-center max-w-md mx-auto mt-10">
                 <div className="w-12 h-12 bg-white border border-[#dedfdf] rounded-lg mb-4 flex items-center justify-center text-lg shadow-sm">☁️</div>
-                <h3 className="text-sm font-semibold text-[#1a1a1a] mb-1">No server purchased yet</h3>
+                <h3 className="text-base font-serif font-medium text-[#1a1a1a] mb-1">No server purchased yet</h3>
                 <p className="text-[12px] text-[#656b6b] mb-5 leading-relaxed">Purchase a server to get started. Once your order is active, your server details and live service status will appear here.</p>
                 <button type="button" onClick={() => onOpenModal('pricing')} className="btn-secondary !px-4 !py-2 !text-[11px] cursor-pointer">View server plans</button>
               </div>
@@ -530,7 +598,7 @@ export const OverviewDashboard: React.FC<{
                 {/* telemetry instrument block */}
                 <div className="ink-block-wrapper !mb-0">
                   <div className="ink-block-header !px-4 !py-3 flex items-center justify-between">
-                    <span className="ink-block-title !text-[12px]">Aggregated Fleet Telemetry</span>
+                    <span className="ink-block-title !text-[13px] font-serif font-medium">Aggregated Fleet Telemetry</span>
                     <span className="text-[10px] text-[#a0a1a2] font-mono">{providerAvailable ? 'LIVE' : 'STORED'}</span>
                   </div>
                   <table className="overview-telemetry-table w-full border-collapse table-fixed">
@@ -625,7 +693,7 @@ export const OverviewDashboard: React.FC<{
           <aside className="overview-ops-rail hidden xl:flex flex-col w-[320px] max-w-[360px] border-l border-[#dedfdf] bg-white overflow-y-auto shrink-0">
             {/* 1. open tickets */}
             <div className="ink-block-header !px-4 py-3 flex items-center justify-between">
-              <span className="ink-block-title !text-[12px] flex items-center gap-2">
+              <span className="ink-block-title !text-[13px] font-serif font-medium flex items-center gap-2">
                 Open tickets
                 <span className="bg-[#1a1a1a] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">{openTickets.length}</span>
               </span>
@@ -639,7 +707,7 @@ export const OverviewDashboard: React.FC<{
                 {openTickets.map(t => (
                   <div key={t.id} className="py-2.5">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-[11px] text-[#656b6b]">#{String(t.id).slice(-4)}</span>
+                      <span className="font-mono text-[11px] text-[#656b6b]">{formatTicketNumber(t)}</span>
                       <span className="text-xs flex-1 truncate">{t.subject || 'Untitled'}</span>
                       <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
                         (t.priority === 'urgent' || t.priority === 'high')
@@ -661,7 +729,7 @@ export const OverviewDashboard: React.FC<{
 
             {/* 2. account & billing */}
             <div className="ink-block-header !px-4 py-3">
-              <span className="ink-block-title !text-[12px]">Account & billing</span>
+              <span className="ink-block-title !text-[13px] font-serif font-medium">Account & billing</span>
             </div>
             <div className="px-4 py-2.5 border-b border-[#dedfdf]">
               {billingSummary === null ? (
@@ -718,20 +786,32 @@ export const OverviewDashboard: React.FC<{
 
             {/* 3. incidents & audit */}
             <div className="ink-block-header !px-4 py-3">
-              <span className="ink-block-title !text-[12px]">Incidents & audit</span>
+              <span className="ink-block-title !text-[13px] font-serif font-medium">Incidents & audit</span>
             </div>
             <div className="px-4 py-2.5 flex-1">
               <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
-                {audit.slice(0, 12).map(a => (
-                  <div key={a.id} className="flex items-start gap-2 text-[11px]">
-                    <span className="font-mono text-[10px] text-[#a0a1a2] shrink-0 w-14">{new Date(a.timestamp).toLocaleTimeString('en-GB')}</span>
-                    <span className="flex-1">
-                      <span className="text-[#1a1a1a]">{customerAuditDetail(a)}</span>
-                      {a.status === 'failed' && <span className="text-[9px] font-bold uppercase bg-[#1a1a1a] text-white px-1 py-0.5 rounded ml-1">Failed</span>}
-                    </span>
-                  </div>
-                ))}
-                {audit.length === 0 && <div className="text-[11px] text-[#656b6b]">No recent events.</div>}
+                {(() => {
+                  const userAudit = audit.filter(a => {
+                    const detail = customerAuditDetail(a);
+                    return detail !== 'Server service updated' && 
+                           detail !== 'Service infrastructure updated' && 
+                           detail !== 'Server service event recorded';
+                  });
+                  return (
+                    <>
+                      {userAudit.slice(0, 12).map(a => (
+                        <div key={a.id} className="flex items-start gap-2 text-[11px]">
+                          <span className="font-mono text-[10px] text-[#a0a1a2] shrink-0 w-14">{formatTime(a.timestamp, { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+                          <span className="flex-1">
+                            <span className="text-[#1a1a1a]">{customerAuditDetail(a)}</span>
+                            {a.status === 'failed' && <span className="text-[9px] font-bold uppercase bg-[#1a1a1a] text-white px-1 py-0.5 rounded ml-1">Failed</span>}
+                          </span>
+                        </div>
+                      ))}
+                      {userAudit.length === 0 && <div className="text-[11px] text-[#656b6b]">No recent user events.</div>}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </aside>

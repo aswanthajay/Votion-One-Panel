@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import os from 'os';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -8,7 +7,7 @@ export const pgPool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: parseInt(process.env.PGPORT || '5432', 10),
   user: process.env.PGUSER || 'votion',
-  password: process.env.PGPASSWORD || 'votion_secret_2026',
+  password: process.env.PGPASSWORD,
   database: process.env.PGDATABASE || 'votion_proxmox_db',
   max: 20,
   idleTimeoutMillis: 30000,
@@ -53,8 +52,12 @@ export async function initializeDatabaseSchema() {
         phone VARCHAR(50),
         support_pin VARCHAR(10),
         two_factor_active BOOLEAN DEFAULT false,
+        ssh_keys TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Add ssh_keys column to existing installations
+      ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ssh_keys TEXT;
 
       CREATE TABLE IF NOT EXISTS proxmox_connections (
         id VARCHAR(50) PRIMARY KEY,
@@ -106,8 +109,14 @@ export async function initializeDatabaseSchema() {
         maxdisk BIGINT DEFAULT 68719476736,
         uptime BIGINT DEFAULT 0,
         ip_address VARCHAR(50),
+        bandwidth_limit BIGINT,
+        bandwidth_usage BIGINT DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Add bandwidth columns to existing installations
+      ALTER TABLE vms ADD COLUMN IF NOT EXISTS bandwidth_limit BIGINT;
+      ALTER TABLE vms ADD COLUMN IF NOT EXISTS bandwidth_usage BIGINT DEFAULT 0;
 
       CREATE TABLE IF NOT EXISTS audit_logs (
         id VARCHAR(100) PRIMARY KEY,
@@ -350,19 +359,19 @@ export class DatabaseService {
 
   // ACCOUNTS & USERS
   async getAccounts() {
-    const res = await pgPool.query('SELECT id, email, name, role, phone, support_pin as "supportPin", two_factor_active as "twoFactorActive", created_at FROM accounts ORDER BY id ASC');
+    const res = await pgPool.query('SELECT id, email, name, role, phone, support_pin as "supportPin", two_factor_active as "twoFactorActive", ssh_keys as "sshKeys", created_at FROM accounts ORDER BY id ASC');
     return res.rows;
   }
 
   async findUserByEmail(email: string) {
     const clean = email.toLowerCase().trim();
-    const res = await pgPool.query('SELECT * FROM accounts WHERE email = $1', [clean]);
+    const res = await pgPool.query('SELECT id, email, password_hash, name, role, phone, support_pin, two_factor_active, ssh_keys, created_at FROM accounts WHERE email = $1', [clean]);
     return res.rows[0] || null;
   }
 
   async findUserBySupportPin(pin: string) {
     const cleanPin = pin.trim();
-    const res = await pgPool.query('SELECT * FROM accounts WHERE support_pin = $1 LIMIT 1', [cleanPin]);
+    const res = await pgPool.query('SELECT id, email, password_hash, name, role, phone, support_pin, two_factor_active, ssh_keys, created_at FROM accounts WHERE support_pin = $1 LIMIT 1', [cleanPin]);
     return res.rows[0] || null;
   }
 
@@ -423,14 +432,15 @@ export class DatabaseService {
     const phone = updates.phone || user.phone;
     const support_pin = updates.supportPin || user.support_pin;
     const two_factor_active = updates.twoFactorActive !== undefined ? updates.twoFactorActive : user.two_factor_active;
+    const ssh_keys = updates.sshKeys !== undefined ? updates.sshKeys : user.ssh_keys;
     
     await pgPool.query(
-      `UPDATE accounts SET name = $1, phone = $2, support_pin = $3, two_factor_active = $4 WHERE email = $5`,
-      [name, phone, support_pin, two_factor_active, clean]
+      `UPDATE accounts SET name = $1, phone = $2, support_pin = $3, two_factor_active = $4, ssh_keys = $5 WHERE email = $6`,
+      [name, phone, support_pin, two_factor_active, ssh_keys, clean]
     );
     
     await this.logAudit(clean, 'UPDATE_PROFILE', clean, 'Updated profile fields in PostgreSQL');
-    return { id: user.id, email: clean, name, role: user.role, phone, supportPin: support_pin, twoFactorActive: two_factor_active };
+    return { id: user.id, email: clean, name, role: user.role, phone, supportPin: support_pin, twoFactorActive: two_factor_active, sshKeys: ssh_keys };
   }
 
   async changeUserPassword(email: string, currentPass: string, newPass: string) {
@@ -481,8 +491,8 @@ export class DatabaseService {
   // VMS & EXPIRY SUSPENSION ENGINE
   async getVMs(ownerEmail?: string, vmid?: number) {
     let query = "SELECT * FROM vms";
-    let params: any[] = [];
-    let conditions = [];
+    const params: any[] = [];
+    const conditions = [];
     
     if (vmid) {
       params.push(vmid);
@@ -597,7 +607,7 @@ export class DatabaseService {
   // SUPPORT TICKET SYSTEM & REPLIES
   async getSupportTickets(userEmail?: string) {
     let query = 'SELECT * FROM tickets';
-    let params: any[] = [];
+    const params: any[] = [];
     if (userEmail) {
       query += ' WHERE user_email = $1';
       params.push(userEmail.toLowerCase().trim());
@@ -807,7 +817,7 @@ export class DatabaseService {
 
   async getUploadedFiles(accountEmail?: string) {
     let query = 'SELECT file_name as "fileName", original_name as "originalName", size_bytes as "sizeBytes", mime_type as "mimeType", created_at FROM uploaded_files';
-    let params: any[] = [];
+    const params: any[] = [];
     if (accountEmail) {
       query += ' WHERE account_email = $1';
       params.push(accountEmail.toLowerCase().trim());
@@ -885,7 +895,7 @@ export class DatabaseService {
     if (exists) {
       return { success: false, error: `Account with email ${clean} already exists.` };
     }
-    const password = initialPassword && initialPassword.length >= 8 ? initialPassword : 'TempPass2026!';
+    const password = initialPassword && initialPassword.length >= 8 ? initialPassword : crypto.randomBytes(8).toString('hex');
     const { hash, salt } = hashPassword(password);
     const storedHash = `${hash}:${salt}`;
     const pin = Math.floor(100000 + Math.random() * 900000).toString();

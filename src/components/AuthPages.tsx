@@ -1,11 +1,10 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { apiClient, API_BASE_URL } from '../services/apiClient';
-const ThreeBackground = lazy(() => import('./ThreeBackground').then(module => ({ default: module.ThreeBackground })));
 
 interface AuthPagesProps {
-  initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin';
+  initialMode?: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin' | '2fa';
   onNavigateToDashboard?: () => void;
-  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin') => void;
+  onNavigateToAuth?: (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin' | '2fa') => void;
   onLoginSuccess?: (userRole: 'admin' | 'client') => void;
 }
 
@@ -15,7 +14,9 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   onNavigateToAuth,
   onLoginSuccess,
 }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin'>(initialMode);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin' | '2fa'>(initialMode);
+  const [tempToken, setTempToken] = useState('');
+  const [totpCode, setTotpCode] = useState('');
 
   useEffect(() => {
     setAuthMode(initialMode);
@@ -79,7 +80,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
     if (onLoginSuccess) onLoginSuccess(role);
   };
 
-  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin') => {
+  const changeMode = (mode: 'login' | 'register' | 'forgot-password' | 'reset-password' | 'setup-admin' | '2fa') => {
     setAuthMode(mode);
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -146,6 +147,34 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
   };
 
   // Handle Login Submission
+  
+  const handle2FASubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const response = await fetch('/api/v1/auth/login/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tempToken, totpCode })
+      });
+      const data = await response.json();
+      if (data.success) {
+        localStorage.setItem('votion_jwt_token', data.token);
+        localStorage.setItem('votion_user_email', data.user.email);
+        localStorage.setItem('votion_user_role', data.user.role);
+        const role = data.user?.role || 'client';
+        if (onLoginSuccess) onLoginSuccess(role);
+        else window.location.href = role === 'admin' ? '/admin' : '/client';
+      } else {
+        setErrorMsg(data.error || 'Invalid 2FA code');
+      }
+    } catch (err) {
+      setErrorMsg('Connection failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
@@ -162,6 +191,88 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
       triggerSuccess(res.user.role as 'admin' | 'client');
     } else {
       setErrorMsg(res.error || 'Invalid email address or password. Please verify your credentials or use Account Recovery.');
+    }
+  };
+
+  const handlePasskeyLogin = async () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    if (typeof window === 'undefined' || !window.PublicKeyCredential || !navigator.credentials?.get) {
+      setErrorMsg('WebAuthn Passkeys are not supported in this browser environment.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const challengeRes = await apiClient.getPasskeyChallenge(email.trim() || undefined);
+      if (!challengeRes.success || !challengeRes.challenge) {
+        setErrorMsg(challengeRes.error || 'Failed to initialize passkey authentication challenge.');
+        setIsLoading(false);
+        return;
+      }
+
+      const challengeBuf = Uint8Array.from(atob(challengeRes.challenge.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+
+      const allowCredentials = Array.isArray(challengeRes.allowCredentials) && challengeRes.allowCredentials.length > 0
+        ? challengeRes.allowCredentials.map((c: any) => ({
+            id: Uint8Array.from(atob(c.id.replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0)),
+            type: 'public-key' as const,
+          }))
+        : undefined;
+
+      const assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: challengeBuf,
+          rpId: challengeRes.rpId || window.location.hostname,
+          allowCredentials,
+          timeout: 60000,
+          userVerification: 'preferred',
+        },
+      }) as PublicKeyCredential | null;
+
+      if (!assertion) {
+        throw new Error('No passkey credential received.');
+      }
+
+      const rawIdB64 = btoa(String.fromCharCode(...new Uint8Array(assertion.rawId)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+      const response = assertion.response as AuthenticatorAssertionResponse;
+      const clientDataJSON = response.clientDataJSON
+        ? btoa(String.fromCharCode(...new Uint8Array(response.clientDataJSON))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+        : undefined;
+      const authenticatorData = response.authenticatorData
+        ? btoa(String.fromCharCode(...new Uint8Array(response.authenticatorData))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+        : undefined;
+      const signature = response.signature
+        ? btoa(String.fromCharCode(...new Uint8Array(response.signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+        : undefined;
+
+      const loginRes = await apiClient.loginWithPasskey({
+        credentialId: rawIdB64,
+        clientDataJSON,
+        authenticatorData,
+        signature,
+      });
+
+      if (loginRes.success && loginRes.user) {
+        localStorage.setItem('votion_jwt_token', loginRes.token || 'votion_auth_token');
+        localStorage.setItem('votion_user_email', loginRes.user.email);
+        localStorage.setItem('votion_user_role', loginRes.user.role || 'client');
+        setSuccessMsg(`Welcome back, ${loginRes.user.name || loginRes.user.email}!`);
+        setTimeout(() => triggerSuccess(loginRes.user.role as 'admin' | 'client'), 600);
+      } else {
+        setErrorMsg(loginRes.error || 'Passkey authentication failed.');
+      }
+    } catch (err: any) {
+      if (err.name === 'NotAllowedError') {
+        setErrorMsg('Passkey authentication was cancelled or timed out.');
+      } else {
+        setErrorMsg(err.message || 'Passkey sign-in failed.');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -286,7 +397,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
 
   return (
     <div className="auth-page relative min-h-screen w-full font-sans bg-[#ffffff] overflow-hidden">
-      <div className="absolute inset-0 z-0 opacity-[0.12]"><Suspense fallback={<div className="absolute inset-0 bg-[#0b0f14]" aria-hidden="true" />}><ThreeBackground /></Suspense></div>
+      <div className="auth-grid absolute inset-0 z-0 opacity-[0.2]" aria-hidden="true" />
 
       {/* ================= LEFT BLACK EDITORIAL PANEL ================= */}
       <div className="hidden lg:flex fixed inset-y-0 left-0 w-[42%] bg-[#000000] flex-col justify-between p-12 z-10">
@@ -515,6 +626,45 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
             </>
           )}
 
+                    {authMode === '2fa' && (
+            <div className="flex flex-col flex-1">
+              <div className="mb-8">
+                <h2 className="text-[24px] font-semibold text-[#1a1a1a] mb-2">Two-Factor Authentication</h2>
+                <p className="text-[#656b6c] text-[15px]">Enter the 6-digit code from your authenticator app.</p>
+              </div>
+              <form onSubmit={handle2FASubmit} className="flex flex-col gap-6">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[13px] font-semibold text-[#1a1a1a] uppercase tracking-wide">Authenticator Code</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    required
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+                    className="border border-[#dedfdf] bg-white rounded-md px-4 py-3 text-[15px] text-[#1a1a1a] outline-none focus:border-[#1a1a1a] transition-colors"
+                    placeholder="123456"
+                  />
+                </div>
+                {errorMsg && (
+                  <div className="bg-red-50 text-red-600 px-4 py-3 rounded-md text-[14px]">
+                    {errorMsg}
+                  </div>
+                )}
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="bg-[#1a1a1a] text-white font-semibold py-3.5 px-4 rounded-md hover:bg-[#333] transition-colors mt-2 disabled:opacity-70"
+                >
+                  {isLoading ? 'Verifying...' : 'Verify Code'}
+                </button>
+                <div className="text-center mt-2">
+                  <button type="button" onClick={() => changeMode('login')} className="text-[#656b6c] text-[14px] hover:text-[#1a1a1a] underline underline-offset-2">
+                    Back to Login
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
           {authMode === 'login' && (
             <>
               <form onSubmit={handleLoginSubmit} className="flex flex-col gap-6">
@@ -582,6 +732,25 @@ export const AuthPages: React.FC<AuthPagesProps> = ({
                     <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                   )}
                   Log in
+                </button>
+
+                {/* Divider */}
+                <div className="relative flex items-center justify-center my-0.5">
+                  <div className="border-t border-[#e5e5e5] w-full"></div>
+                  <span className="bg-white px-3 text-[11px] font-medium text-[#8a8a8a] uppercase tracking-wider">or</span>
+                </div>
+
+                {/* Sign in with Passkey button */}
+                <button
+                  type="button"
+                  onClick={handlePasskeyLogin}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-4 rounded-full border border-[#111111] bg-white text-[#111111] text-sm font-semibold tracking-wide hover:bg-[#f4f4f5] active:scale-[0.99] transition-all disabled:opacity-60 flex items-center justify-center gap-2.5 cursor-pointer shadow-sm"
+                >
+                  <svg className="w-4 h-4 text-[#111111]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                  Sign in with Passkey
                 </button>
 
                 {/* Link row with dividers, Carta-style */}

@@ -119,7 +119,7 @@ export const VmMetadataPanel: React.FC<VmMetadataPanelProps> = ({ metadata, isLo
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-[#dedfdf] pt-3 text-[10px] text-[#656b6b]">
           <span>Guest agent: {metadata.network.guestAgentAvailable ? 'Available' : 'Not available'}</span>
           <span>Ballooning: {metadata.hardware.ballooning === null ? 'Not reported' : metadata.hardware.ballooning ? 'Enabled' : 'Disabled'}</span>
-          {metadata.hardware.qemuGuestAgent !== null && <span>QEMU agent configured: {metadata.hardware.qemuGuestAgent ? 'Yes' : 'No'}</span>}
+          {metadata.hardware.qemuGuestAgent !== null && <span>Guest integration agent: {metadata.hardware.qemuGuestAgent ? 'Active' : 'Disabled'}</span>}
         </div>
       </>
     )}

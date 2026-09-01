@@ -8,6 +8,7 @@ import {
   type SupportTicketPriority,
   type SupportTicketStatus,
 } from '../services/apiClient';
+import { formatDateTime } from '../services/dateTime';
 
 type SupportCenterProps = {
   userRole: 'admin' | 'client';
@@ -32,7 +33,7 @@ const priorityOptions: SupportTicketPriority[] = ['low', 'medium', 'high', 'urge
 const categoryOptions = ['Technical assistance', 'Service & billing', 'Account access', 'Network & connectivity', 'Service request', 'Other'];
 
 const displayStatus = (status: string) => status === 'replied' ? 'Awaiting client' : status.replace('-', ' ');
-const formatDate = (value?: string) => value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const formatDate = (value?: string) => value ? formatDateTime(value) : '—';
 const initials = (value?: string) => (value || 'V').split(/[@.\s_-]/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join('');
 
 const statusClass = (status: string) => {

@@ -127,11 +127,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       shortcut: 'A B',
       action: async () => {
         try {
-          const res = await fetch('http://localhost:5000/api/v1/pbs/backup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-          });
-          const data = await res.json();
+          const data = await apiClient.triggerPbsBackup();
           showToast(data.message || 'PBS cluster snapshot backup job queued');
         } catch {
           showToast('PBS backup job queued (cluster will process on next cycle)');

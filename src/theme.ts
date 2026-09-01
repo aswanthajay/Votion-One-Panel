@@ -40,10 +40,13 @@ function applyTheme(mode: ThemeMode) {
   if (typeof document === 'undefined') return;
   const effective = resolve(mode);
   const html = document.documentElement;
+  const preloader = document.getElementById('votion-global-preloader');
   if (effective === 'dark') {
     html.setAttribute(ATTR, 'dark');
+    preloader?.classList.add('dark');
   } else {
     html.removeAttribute(ATTR);
+    preloader?.classList.remove('dark');
   }
   html.style.colorScheme = effective;
   updateThemeColor(effective);

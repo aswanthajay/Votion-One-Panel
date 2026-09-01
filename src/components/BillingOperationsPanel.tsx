@@ -319,7 +319,7 @@ export const BillingOperationsPanel: React.FC = () => {
         <header className="ink-block-wrapper !mb-6 flex flex-col gap-5 p-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#8b5e00]">Finance operations</p>
-            <h1 className="page-heading !mb-1">Billing control plane</h1>
+            <h1 className="page-heading !mb-1 font-serif font-medium tracking-[-0.03em]">Billing control plane</h1>
             <p className="ink-description-text !mt-0 max-w-3xl">A single operating view for revenue collection, infrastructure cost allocation, dedicated-server economics, and controlled lifecycle policy.</p>
           </div>
           <FinanceOperationsVisual summary={summary} loading={loading} />

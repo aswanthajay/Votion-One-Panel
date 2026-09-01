@@ -30,6 +30,7 @@ export const UserSettingsContent: React.FC = () => {
     | 'reconfigure-2fa'
     | 'disable-2fa'
     | 'add-phone'
+    | 'edit-ssh-keys'
     | 'add-passkey'
     | 'remote-session'
     | 'file-upload'
@@ -74,6 +75,8 @@ export const UserSettingsContent: React.FC = () => {
   }, []);
 
   // STEP 3.1: Load Live User Profile Details from GET /api/v1/user/profile
+  const [sshKeys, setSshKeys] = useState('');
+
   const loadUserProfile = async () => {
     setIsLoading(true);
     try {
@@ -83,12 +86,13 @@ export const UserSettingsContent: React.FC = () => {
         setPrimaryEmail(data.email);
         if (data.name) {
           const parts = data.name.split(' ');
-          setFirstName(parts[0] || 'Aswanth');
-          setLastName(parts.slice(1).join(' ') || 'Ajay');
+          setFirstName(parts[0] || 'User');
+          setLastName(parts.slice(1).join(' ') || '');
         }
         if (data.phone) setPhoneNumber(data.phone);
         setSupportPinConfigured(Boolean(data.supportPinConfigured));
         if (data.twoFactorActive !== undefined) setTwoFactorActive(data.twoFactorActive);
+        if (data.sshKeys !== undefined) setSshKeys(data.sshKeys);
       }
     } catch (err) {
       // Catch network error
@@ -255,7 +259,7 @@ export const UserSettingsContent: React.FC = () => {
 
           {isLoading ? (
             <div className="p-12 text-center text-[#656b6b] font-mono text-xs border border-[#dedfdf] rounded-xl bg-white">
-              Fetching user profile and security details from PostgreSQL...
+              Loading profile and security settings…
             </div>
           ) : activeTab === 'team-access' ? (
             <TeamAccessContent embedded />
@@ -264,7 +268,7 @@ export const UserSettingsContent: React.FC = () => {
               {/* BLOCK 1: ACCOUNT CREDENTIALS & INK TABLE */}
               <section className="ink-block-wrapper">
                 <div className="ink-block-header">
-                  <h2 className="ink-block-title">Account credentials</h2>
+                  <h2 className="ink-block-title font-serif text-base font-medium">Account credentials</h2>
                 </div>
 
                 <div className="responsive-table-container">
@@ -323,7 +327,28 @@ export const UserSettingsContent: React.FC = () => {
                       </td>
                     </tr>
 
-                    {/* ROW 3: TWO-FACTOR AUTH (2FA) */}
+                    {/* ROW 3: SSH KEYS */}
+                    <tr className="ink-table-row">
+                      <th className="ink-table-th">Public SSH Keys</th>
+                      <td className="ink-table-td">
+                        {sshKeys && sshKeys.trim().length > 0 ? (
+                          <span className="font-semibold text-[#1a1a1a]">Configured</span>
+                        ) : (
+                          <span className="text-[#656b6b]">Not configured</span>
+                        )}
+                        <div className="text-xs text-[#656b6b] mt-0.5">Used for Cloud-Init VM injections</div>
+                      </td>
+                      <td className="ink-table-td-action">
+                        <button 
+                          onClick={() => setActiveModal('edit-ssh-keys')}
+                          className="btn-secondary py-1 px-3 text-xs cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+
+                    {/* ROW 4: TWO-FACTOR AUTH (2FA) */}
                     <tr className="ink-table-row">
                       <th className="ink-table-th">2FA Authenticator</th>
                       <td className="ink-table-td">
@@ -409,7 +434,7 @@ export const UserSettingsContent: React.FC = () => {
               {/* BLOCK 2: SUPPORT & LIVE REMOTE ASSISTANCE */}
               <section className="ink-block-wrapper">
                 <div className="ink-block-header">
-                  <h2 className="ink-block-title">Support and remote access</h2>
+                  <h2 className="ink-block-title font-serif text-base font-medium">Support and remote access</h2>
                 </div>
 
                 <div className="responsive-table-container">
@@ -486,7 +511,7 @@ export const UserSettingsContent: React.FC = () => {
           ) : activeTab === 'appearance' ? (
             <section className="ink-block-wrapper appearance-settings-panel">
               <div className="ink-block-header">
-                <h2 className="ink-block-title">Appearance</h2>
+                <h2 className="ink-block-title font-serif text-base font-medium">Appearance</h2>
                 <p className="ink-description-text">Choose how Votion One™ looks on this device. System follows your operating system preference.</p>
               </div>
               <div className="p-6">
@@ -532,7 +557,7 @@ export const UserSettingsContent: React.FC = () => {
             /* NAME AND SIGNATURE TAB */
             <section className="ink-block-wrapper">
               <div className="ink-block-header">
-                <h2 className="ink-block-title">Name and signature details</h2>
+                <h2 className="ink-block-title font-serif text-base font-medium">Name and signature details</h2>
               </div>
 
               <div className="p-6">
@@ -544,7 +569,7 @@ export const UserSettingsContent: React.FC = () => {
                     name: fullName,
                   });
                   if (res.success) {
-                    showToast('User profile & name details saved to PostgreSQL database');
+                    showToast('Profile updated successfully.');
                   } else {
                     showToast(res.error || 'Failed to update profile');
                   }
@@ -621,7 +646,7 @@ export const UserSettingsContent: React.FC = () => {
                 if (res.success) {
                   setPrimaryEmail(inputEmail.trim());
                   localStorage.setItem('votion_user_email', inputEmail.trim());
-                  showToast(`Primary email updated to ${inputEmail.trim()} in PostgreSQL`);
+                  showToast('Primary email updated successfully.');
                   setActiveModal(null);
                   setInputEmail('');
                   loadUserProfile();
@@ -668,15 +693,10 @@ export const UserSettingsContent: React.FC = () => {
               e.preventDefault();
               if (!inputEmail.trim()) return;
               try {
-                const res = await fetch('http://localhost:5000/api/v1/user/secondary-emails', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-                  body: JSON.stringify({ email: primaryEmail, secondaryEmail: inputEmail.trim() }),
-                });
-                const data = await res.json();
+                const data = await apiClient.addSecondaryEmail(inputEmail.trim());
                 if (data.success) {
                   setSecondaryEmails([...secondaryEmails, inputEmail.trim()]);
-                  showToast(`Secondary backup email ${inputEmail.trim()} saved to PostgreSQL`);
+                  showToast('Backup email saved successfully.');
                 } else {
                   showToast(`⚠️ ${data.error || 'Failed to add secondary email'}`);
                 }
@@ -706,6 +726,46 @@ export const UserSettingsContent: React.FC = () => {
         </div>
       )}
 
+      {/* 2.5 EDIT SSH KEYS MODAL */}
+      {activeModal === 'edit-ssh-keys' && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
+          <div className="w-full max-w-[440px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl p-6 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-[#dedfdf] pb-3">
+              <h3 className="text-base font-bold text-[#1a1a1a]">Public SSH Keys</h3>
+              <button onClick={() => setActiveModal(null)} className="text-[#656b6b] font-bold cursor-pointer">✕</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const res = await apiClient.updateUserProfile({
+                email: primaryEmail,
+                sshKeys: sshKeys,
+              });
+              if (res.success) {
+                showToast('SSH Keys saved to profile successfully.');
+                setActiveModal(null);
+              } else {
+                showToast(`❌ ${res.error || 'Failed to update SSH keys'}`);
+              }
+            }} className="flex flex-col gap-3 text-xs">
+              <div>
+                <label className="block font-semibold mb-1">Your Public SSH Keys</label>
+                <textarea 
+                  value={sshKeys} 
+                  onChange={(e) => setSshKeys(e.target.value)} 
+                  className="w-full p-2 border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a] h-32 font-mono text-[10px]" 
+                  placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQ... user@host"
+                />
+                <p className="text-[#656b6b] mt-1">Paste your public keys (e.g. ~/.ssh/id_rsa.pub) separated by newlines.</p>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] mt-2">
+                <button type="button" onClick={() => setActiveModal(null)} className="btn-secondary">Cancel</button>
+                <button type="submit" className="btn-primary">Save Keys</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 3. CHANGE PASSWORD MODAL */}
       {activeModal === 'change-password' && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
@@ -722,7 +782,7 @@ export const UserSettingsContent: React.FC = () => {
               }
               const res = await apiClient.changePassword(inputPassword, inputNewPassword);
               if (res.success) {
-                showToast('Account password updated and hashed via PBKDF2 in PostgreSQL');
+                showToast('Password changed successfully.');
                 setActiveModal(null);
                 setInputPassword('');
                 setInputNewPassword('');
@@ -801,12 +861,7 @@ export const UserSettingsContent: React.FC = () => {
                     return;
                   }
                   try {
-                    const res = await fetch('http://localhost:5000/api/v1/user/2fa/verify', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('votion_jwt_token')}` },
-                      body: JSON.stringify({ email: primaryEmail, totpCode: inputTotpCode }),
-                    });
-                    const data = await res.json();
+                    const data = await apiClient.verify2FA(inputTotpCode);
                     if (data.success && data.verified) {
                           showToast('2FA activated — the code matched your authenticator app');
                     } else {
@@ -899,7 +954,7 @@ export const UserSettingsContent: React.FC = () => {
                 });
                 if (res.success) {
                   setPhoneNumber(inputPhone.trim());
-                  showToast(`Phone number ${inputPhone.trim()} registered in PostgreSQL`);
+                  showToast('Phone number updated successfully.');
                   setActiveModal(null);
                   setInputPhone('');
                 }
@@ -960,7 +1015,7 @@ export const UserSettingsContent: React.FC = () => {
                     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
                   const res = await apiClient.registerPasskey(credId, `Passkey ${new Date().toLocaleDateString()}`);
                   if (res.success) {
-                    showToast('Passkey registered successfully in PostgreSQL');
+                    showToast('Passkey registered successfully.');
                     loadPasskeys();
                   } else {
                     showToast(`⚠️ ${res.error || 'Failed to register passkey'}`);
@@ -998,7 +1053,7 @@ export const UserSettingsContent: React.FC = () => {
             <button onClick={async () => {
               try {
                 const res = await apiClient.disconnectRemoteSession();
-                showToast(res?.success ? 'Remote support session terminated in PostgreSQL' : res?.error || 'Could not end session');
+                showToast(res?.success ? 'Support session ended.' : res?.error || 'Could not end session.');
               } catch {
                 showToast('⚠️ Network error — session may still be active on the server');
               }

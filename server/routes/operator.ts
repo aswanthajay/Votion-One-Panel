@@ -32,13 +32,12 @@ operatorRouter.get('/reimage-executions', async (req, res) => {
   }
 });
 
-operatorRouter.post('/reimage-requests/:requestId/executions', async (req, res) => {
-  try {
-    const result = await reimageExecutionService.createExecution(req.params.requestId, req.authUser!.email);
-    res.status(201).json({ success: true, ...result, message: 'Execution record created. No Proxmox operation was performed.' });
-  } catch (error) {
-    sendExecutionError(res, error);
-  }
+operatorRouter.post('/reimage-requests/:requestId/executions', async (_req, res) => {
+  res.status(409).json({
+    success: false,
+    code: 'MANUAL_WORKFLOW_ONLY',
+    error: 'OS reimage is manual in this deployment. Perform the approved change in Proxmox, then mark the request completed in the administrator queue.',
+  });
 });
 
 operatorRouter.post('/reimage-executions/:executionId/preflight', async (req, res) => {

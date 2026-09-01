@@ -42,6 +42,24 @@ export function rateLimit(options: RateLimitOptions) {
   };
 }
 
+export function createTemp2FaToken(accountId: number): string {
+  const payload = `2fa_${accountId}_${Date.now()}`;
+  const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+  return `${payload}.${signature}`;
+}
+
+export function verifyTemp2FaToken(token: string): number | null {
+  if (!token || !token.includes('.')) return null;
+  const [payload, sig] = token.split('.');
+  if (!payload.startsWith('2fa_')) return null;
+  const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
+  if (expected !== sig) return null;
+  const parts = payload.split('_');
+  const issuedAt = Number(parts[2]);
+  if (Date.now() - issuedAt > 5 * 60 * 1000) return null; // 5 mins expiry
+  return parseInt(parts[1], 10);
+}
+
 export function createSessionToken(accountId: number): string {
   const payload = `votion_${accountId}_${Date.now()}`;
   const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');

@@ -39,8 +39,18 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open, onTogg
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      load();
+    }, 10000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   useEffect(() => {

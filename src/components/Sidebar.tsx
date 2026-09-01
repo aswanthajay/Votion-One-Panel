@@ -42,6 +42,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     {
+      title: 'Virtual Machines',
+      key: 'instances-qemu',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M2 3a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3zm2 1v14h14V4H4zm2 2h10v2H6V6zm0 4h10v2H6v-2zm0 4h5v2H6v-2z"/>
+        </svg>
+      )
+    },
+    { 
+      title: 'All Instances',
+      key: 'instances',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path clipRule="evenodd" d="M18.8 6.55a5.55 5.55 0 1 1-11.1 0 5.55 5.55 0 0 1 11.1 0ZM13.25 3a3.55 3.55 0 1 0 0 7.1 3.55 3.55 0 0 0 0-7.1ZM1 13.9a1 1 0 0 1 1-1h18a1 1 0 1 1 0 2H2a1 1 0 0 1-1-1ZM6.3 17.5a1 1 0 0 1 1-1h9.4a1 1 0 1 1 0 2H7.3a1 1 0 0 1-1-1Z" fillRule="evenodd"></path>
+        </svg>
+      )
+    },
+    
+    {
       title: 'Billing Operations',
       key: 'billing-operations',
       icon: (
@@ -109,6 +128,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     { 
+      title: 'OVH Router Manager', 
+      key: 'ovh-manager',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="2" width="18" height="7" rx="2" ry="2" />
+          <rect x="2" y="13" width="18" height="7" rx="2" ry="2" />
+          <line x1="6" y1="5.5" x2="6.01" y2="5.5" />
+          <line x1="6" y1="16.5" x2="6.01" y2="16.5" />
+        </svg>
+      )
+    },
+    { 
       title: 'System Settings', 
       key: 'system-settings',
       icon: (
@@ -129,6 +160,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       )
     },
+    {
+      title: 'Virtual Machines',
+      key: 'instances-qemu',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M2 3a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3zm2 1v14h14V4H4zm2 2h10v2H6V6zm0 4h10v2H6v-2zm0 4h5v2H6v-2z"/>
+        </svg>
+      )
+    },
     { 
       title: 'All Instances',
       key: 'instances',
@@ -139,20 +179,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     {
-      title: 'Virtual Machines (QEMU)',
-      key: 'instances-qemu',
+      title: 'Support Tickets',
+      key: 'support',
       icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M4 2.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5v2h3a1 1 0 1 1 0 2H7a1 1 0 1 1 0-2h3v-2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Zm0 2v9h14v-9H4Zm2 2h2v2H6v-2Zm0 3h2v2H6v-2Zm4-3h6v2h-6v-2Zm0 3h4v2h-4v-2Z" fillRule="evenodd"></path>
-        </svg>
-      )
-    },
-    { 
-      title: 'LXC Containers', 
-      key: 'instances-lxc',
-      icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M1 5a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v12a4 4 0 0 1-4 4H5a4 4 0 0 1-4-4V5Zm4-2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Z" fillRule="evenodd"></path>
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h9A2.5 2.5 0 0 1 18 5.5v7A2.5 2.5 0 0 1 15.5 15H10l-4.5 3V15.2A2.5 2.5 0 0 1 4 12.5v-7Z" />
+          <path d="M7.5 8.5h7M7.5 11.5h4.5" />
         </svg>
       )
     },
@@ -175,42 +207,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       )
     },
-    {
-      title: 'Team Access',
-      key: 'team-access',
+    { 
+      title: 'Network Firewall', 
+      key: 'client-instances-firewall',
       icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="8" cy="8" r="3" />
-          <path d="M2.5 19c.65-3.15 2.45-4.8 5.5-4.8s4.85 1.65 5.5 4.8" />
-          <path d="M15.5 6.2a2.55 2.55 0 0 1 0 4.95M17.15 14.65c1.5.65 2.25 2.08 2.35 4.35" />
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M11 2L2 6v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V6l-9-4zm0 2.18l7 3.12v4.7c0 4.67-3.13 8.89-7 10.02-3.87-1.13-7-5.35-7-10.02v-4.7l7-3.12zM11 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"></path>
         </svg>
       )
     },
     { 
-      title: 'Support Center',
-      key: 'support',
+      title: 'Snapshot Backups', 
+      key: 'client-instances-backups',
       icon: (
-        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="11" cy="11" r="8" />
-          <path d="M8.7 8.5a2.4 2.4 0 1 1 3.55 2.1c-.86.46-1.25.94-1.25 1.9M11 15.2h.01" />
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M19.53 8.35C18.9 5.86 16.65 4 14 4c-1.87 0-3.51.98-4.43 2.45C9.07 6.16 8.55 6 8 6 6.34 6 5 7.34 5 9c0 .17.02.34.05.5C3.3 9.87 2 11.28 2 13c0 1.93 1.57 3.5 3.5 3.5h13.17c1.84 0 3.33-1.49 3.33-3.33 0-1.7-1.26-3.11-2.92-3.32h-.05C19.51 8.84 19.53 8.6 19.53 8.35zM14 5.5c2.08 0 3.88 1.45 4.38 3.47l.13.56.57.06c1.07.12 1.92 1.05 1.92 2.16 0 1.2-.97 2.17-2.17 2.17H5.5C4.4 13.86 3.5 12.96 3.5 11.86c0-1.07.83-1.95 1.88-2.03l.63-.05.15-.61c.15-.65.73-1.11 1.4-1.11.45 0 .86.2 1.15.54l.32.39.42-.25C10.22 7.74 12 6.55 14 5.5z"></path>
         </svg>
       )
     },
     {
-      title: 'Firewall Rules', 
-      key: 'client-instances-firewall',
+      title: 'Reimage Requests',
+      key: 'reimage-requests',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
-          <path clipRule="evenodd" d="M11 1.25a8.75 8.75 0 1 0 0 17.5 8.75 8.75 0 0 0 0-17.5ZM.25 10a10.75 10.75 0 1 1 21.5 0 10.75 10.75 0 0 1-21.5 0Zm14.28-2.53a1 1 0 0 1 0 1.41l-4.5 4.5a1 1 0 0 1-1.41 0l-2-2a1 1 0 0 1 1.41-1.41l1.3 1.29 3.79-3.79a1 1 0 0 1 1.41 0Z" fillRule="evenodd"></path>
+          <path d="M11 2.5a8.5 8.5 0 1 0 8.5 8.5A8.51 8.51 0 0 0 11 2.5Zm0 15a6.5 6.5 0 1 1 6.5-6.5 6.51 6.51 0 0 1-6.5-6.5Z" />
+          <path d="M10 6h2v6h-2zm0 7.5h2v2h-2z" />
         </svg>
       )
     },
+    { 
+      title: 'API Access Keys', 
+      key: 'client-api-keys',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M12.65 3.35A5.5 5.5 0 0 0 4.5 10.7L1.35 13.85v3.65h3.65l1.05-1.05h2.1v-2.1l2.45-2.45a5.5 5.5 0 0 0 6.6-4.9c0-.44-.06-.88-.17-1.3l-2.43 2.43-2.1-2.1 2.43-2.43a5.5 5.5 0 0 0-1.3-.17ZM10.5 8.85l-4.1 4.1L3.85 15.5H2.85v-1l2.55-2.55 4.1-4.1a4 4 0 1 1 1 1Z" />
+          <circle cx="15.5" cy="6.5" r="1.5" />
+        </svg>
+      )
+    },
+    { 
+      title: 'SSH Public Keys', 
+      key: 'client-ssh-keys',
+      icon: (
+        <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-5.5V11H7v2h3v1.5L13.5 12 10 9.5v1.5z"></path>
+        </svg>
+      )
+    }
   ];
+
+
+  const getVmPrefix = (connName?: string | null) => {
+    if (!connName) return 'VM';
+    return connName.match(/[A-Z]{2}/)?.[0] || 'VM';
+  };
 
   const activeNavItems = userRole === 'admin' ? adminNavItems : clientNavItems;
 
     const defaultClientEssentials = [
-    { title: 'My Virtual Machines', key: 'instances-qemu' },
+    
     { title: 'VNC Console Access', key: 'client-instances-vnc' },
     { title: 'Resource Metrics', key: 'client-instances-metrics' },
     { title: 'Snapshot Backups', key: 'client-instances-backups' },
@@ -222,7 +277,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const destinationTitles: Record<string, string> = {
     'instances': 'All Instances',
     'instances-qemu': 'My Virtual Machines',
-    'instances-lxc': 'LXC Containers',
+    
     'client-instances-vnc': 'VNC Console Access',
     'client-instances-metrics': 'Resource Metrics',
     'client-instances-firewall': 'Network Firewall',
@@ -251,24 +306,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [userRole]);
 
   const personalizedClientEssentials = navigationUsage
-    .filter(item => item.type === 'vm' || (item.key !== 'overview' && destinationTitles[item.key]))
+    .filter(item => item.type === 'vm' || (item.key !== 'overview' && item.key !== 'instances' && item.key !== 'instances-qemu' && destinationTitles[item.key]))
     .map(item => item.type === 'vm'
-      ? { title: item.name ? `VM ${item.vmid} · ${item.name}` : `VM ${item.vmid}`, key: `vm:${item.vmid}` }
+      ? { title: item.name ? `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid} · ${item.name}` : `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid}`, key: `vm:${item.vmid}` }
       : { title: destinationTitles[item.key], key: item.key })
     .filter((item, index, items) => items.findIndex(candidate => candidate.key === item.key) === index);
   const personalizedKeys = new Set(personalizedClientEssentials.map(item => item.key));
   const clientEssentials = [...personalizedClientEssentials, ...defaultClientEssentials.filter(item => !personalizedKeys.has(item.key))].slice(0, 5);
   const essentialsSublinks = userRole === 'admin' ? [
-    { title: 'Virtual Machines', key: 'instances-qemu' },
-    { title: 'LXC Containers', key: 'instances-lxc' },
-    { title: 'System Settings (SMTP)', key: 'system-settings' },
-    { title: 'Manage Users & Roles', key: 'user-management' },
+    
+    
   ] : clientEssentials;
 
   const q = searchQuery.toLowerCase().trim();
 
   const filteredSublinks = essentialsSublinks.filter(s => !q || s.title.toLowerCase().includes(q));
-  const isEssentialsMatch = !q || 'essentials'.includes(q) || filteredSublinks.length > 0;
+  const isEssentialsMatch = essentialsSublinks.length > 0 && (!q || 'essentials'.includes(q) || filteredSublinks.length > 0);
 
   return (
     <aside className={`app-sidenav ${isCollapsed ? 'collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
@@ -395,6 +448,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Other Active Items (Each with its distinct SVG icon and view key!) */}
         {activeNavItems.slice(1).map((item) => {
           if (q && !item.title.toLowerCase().includes(q)) return null;
+          if (essentialsSublinks.some(sub => sub.key === item.key)) return null;
           return (
             <li key={item.title} className="sidenav-item">
               <div 
@@ -430,6 +484,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </svg>
                 </span>
                 <span className="sidenav-link-text">User Settings</span>
+              </div>
+            </div>
+          </li>
+        )}
+
+        {/* System Settings for Admin in MORE section */}
+        {userRole === 'admin' && (!q || 'system settings'.includes(q) || 'cluster settings'.includes(q)) && (
+          <li className="sidenav-item">
+            <div 
+              onClick={() => onNavigate('system-settings')}
+              className={`sidenav-link cursor-pointer ${currentView === 'system-settings' ? 'active' : ''}`}
+              title="System Settings"
+            >
+              <div className="sidenav-link-left">
+                <span className="sidenav-icon">
+                  <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="currentColor">
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                </span>
+                <span className="sidenav-link-text">System Settings</span>
+              </div>
+            </div>
+          </li>
+        )}
+
+        {/* Support Tickets for Client in MORE section */}
+        {userRole === 'client' && (!q || 'support tickets'.includes(q) || 'help'.includes(q)) && (
+          <li className="sidenav-item">
+            <div 
+              onClick={() => onNavigate('support')}
+              className={`sidenav-link cursor-pointer ${currentView === 'support' ? 'active' : ''}`}
+              title="Support Tickets"
+            >
+              <div className="sidenav-link-left">
+                <span className="sidenav-icon">
+                  <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h9A2.5 2.5 0 0 1 18 5.5v7A2.5 2.5 0 0 1 15.5 15H10l-4.5 3V15.2A2.5 2.5 0 0 1 4 12.5v-7Z" />
+                    <path d="M7.5 8.5h7M7.5 11.5h4.5" />
+                  </svg>
+                </span>
+                <span className="sidenav-link-text">Support Tickets</span>
               </div>
             </div>
           </li>

@@ -1,13 +1,8 @@
+import { queue, isQueueAvailable } from '../queue.js';
 import { dbService } from '../db/database.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 
-const proxmoxApi = new ProxmoxService({
-  hostIp: process.env.PVE_HOST || '',
-  port: Number(process.env.PVE_PORT || 8006),
-  tokenId: process.env.PVE_TOKEN_ID || '',
-  tokenSecret: process.env.PVE_TOKEN_SECRET || '',
-  sslFingerprint: process.env.PVE_SSL_FINGERPRINT,
-});
+const proxmoxApi = new ProxmoxService({} as any);
 import { emailService } from '../services/email.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -26,6 +21,28 @@ export class BillingLifecycleWorker {
     console.log(`[BILLING WORKER] Lifecycle monitor registered (${Math.round(this.intervalMs / 60000)} minute interval; policy-controlled)`);
     this.timer = setInterval(() => void this.runCheck(), this.intervalMs);
     this.timer.unref?.();
+  }
+
+
+  async registerQueueJobs() {
+    if (!isQueueAvailable()) {
+      // Fall back to built-in interval timer if pg-boss queue is not active
+      this.start();
+      return;
+    }
+    try {
+      // Schedule the billing sweep to run every 5 minutes
+      await queue.schedule('billing-sweep', '*/5 * * * *');
+      
+      // Register the worker to consume 'billing-sweep' jobs
+      await queue.work('billing-sweep', async (job: any) => {
+        console.log(`[QUEUE] Executing billing-sweep job: ${job.id}`);
+        await this.runCheck();
+      });
+    } catch (err: any) {
+      console.warn('[Billing] Queue scheduling failed, using internal timer:', err?.message || err);
+      this.start();
+    }
   }
 
   stop() {

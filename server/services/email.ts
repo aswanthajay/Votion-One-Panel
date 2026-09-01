@@ -78,6 +78,10 @@ class EmailService {
     void this.refreshTransporter();
   }
 
+  isReady(): boolean {
+    return this.isEnabled && this.transporter !== null;
+  }
+
   async refreshTransporter() {
     try {
       const config = await dbService.getSystemSetting('smtp_config');
@@ -91,6 +95,9 @@ class EmailService {
           auth: {
             user: config.user,
             pass: config.pass,
+          },
+          tls: {
+            rejectUnauthorized: false,
           },
         });
         console.log('[SMTP] Mailer initialized and enabled.');
@@ -341,6 +348,55 @@ class EmailService {
         { label: 'Access level', value: scopeLabel },
       ],
       securityNote: 'This invitation is valid for seven days and is tied to this email address. Never forward the invitation link. If you were not expecting this invitation, you may safely ignore it.',
+    });
+  }
+
+
+  async sendVmAssignmentEmail(to: string, details: { name: string; vmid: number; vmName: string; node: string; expiryDate?: string | null }) {
+    const portalUrl = getPortalUrl();
+    const expiryText = details.expiryDate
+      ? new Date(details.expiryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : 'No expiry set';
+    return this.sendBrandedTemplate({
+      to,
+      templateKey: 'vm_assignment',
+      fallbackSubject: 'Your VPS has been assigned — VM-{vmid}',
+      fallbackBody: '<p style="margin: 0 0 16px;">Hello {name},</p><p style="margin: 0;">A virtual server has been assigned to your Votion One account. You can access and manage it from your dashboard.</p>',
+      variables: { name: details.name || 'there', vmid: details.vmid, vmName: details.vmName, node: details.node, expiryText },
+      eyebrow: 'Service activation',
+      title: `Your VPS is ready — ${details.vmName || `VM-${details.vmid}`}`,
+      preheader: `VM-${details.vmid} (${details.vmName}) has been assigned to your account.`,
+      action: { label: 'Open your workspace', url: portalUrl },
+      metadata: [
+        { label: 'VM Reference', value: `VM-${details.vmid}` },
+        { label: 'VM Name', value: details.vmName || '—' },
+        { label: 'Node', value: details.node || '—' },
+        { label: 'Expiry', value: expiryText },
+      ],
+      securityNote: 'If you were not expecting this assignment, please contact support immediately.',
+    });
+  }
+
+  async sendExpiryWarningEmail(to: string, details: { name: string; vmid: number; vmName: string; daysLeft: number; expiryDate: string }) {
+    const portalUrl = getPortalUrl();
+    const expiryText = new Date(details.expiryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+    const urgency = details.daysLeft <= 1 ? 'expires today' : `expires in ${details.daysLeft} day${details.daysLeft === 1 ? '' : 's'}`;
+    return this.sendBrandedTemplate({
+      to,
+      templateKey: 'vm_expiry_warning',
+      fallbackSubject: 'Service expiry notice — VM-{vmid} {urgency}',
+      fallbackBody: '<p style="margin: 0 0 16px;">Hello {name},</p><p style="margin: 0;">Your virtual server VM-{vmid} ({vmName}) {urgency} on {expiryText}. Please contact support if you would like to renew your service.</p>',
+      variables: { name: details.name || 'there', vmid: details.vmid, vmName: details.vmName, urgency, expiryText },
+      eyebrow: 'Service expiry notice',
+      title: `Your VPS ${urgency}`,
+      preheader: `VM-${details.vmid} (${details.vmName}) ${urgency} on ${expiryText}.`,
+      action: { label: 'Contact support', url: `${portalUrl}/support` },
+      metadata: [
+        { label: 'VM Reference', value: `VM-${details.vmid}` },
+        { label: 'VM Name', value: details.vmName || '—' },
+        { label: 'Expiry date', value: expiryText },
+      ],
+      securityNote: 'To keep your service active beyond the expiry date, please reach out to your service provider.',
     });
   }
 

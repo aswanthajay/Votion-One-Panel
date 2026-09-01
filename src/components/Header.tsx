@@ -139,8 +139,18 @@ export const Header: React.FC<HeaderProps> = ({
       }
     };
     loadHeaderData();
-    const interval = setInterval(loadHeaderData, 10000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadHeaderData();
+    }, 10000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadHeaderData();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [userRole]);
 
   useEffect(() => {
@@ -236,7 +246,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )) : (
                   <div className="px-2 py-2 text-xs text-[#a7aaaa]">
-                    {userRole === 'admin' ? 'No Proxmox connections are configured yet.' : 'No service locations are assigned to this account.'}
+                    {userRole === 'admin' ? 'No cluster connections are configured yet.' : 'No service locations are assigned to this account.'}
                   </div>
                 )}
               </div>
@@ -415,6 +425,15 @@ export const Header: React.FC<HeaderProps> = ({
                 User settings
               </button>
 
+              {userRole === 'admin' && (
+                <button 
+                  onClick={() => { onNavigate('system-settings'); setUserMenuOpen(false); }}
+                  className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors cursor-pointer"
+                >
+                  System settings
+                </button>
+              )}
+
               {/* Inbox — opens the dedicated ticket workspace */}
               <button 
                 onClick={() => { onNavigate('support'); setUserMenuOpen(false); }}
@@ -435,9 +454,14 @@ export const Header: React.FC<HeaderProps> = ({
 
               <button 
                 onClick={() => { onNavigate('support'); setUserMenuOpen(false); }}
-                className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors cursor-pointer"
+                className="w-full text-left px-4 py-2 hover:bg-[#f1f1f1] transition-colors flex items-center justify-between cursor-pointer"
               >
-                {userRole === 'admin' ? 'Ticket management' : 'Support center'}
+                <span>{userRole === 'admin' ? 'Ticket management' : 'Support tickets'}</span>
+                {inboxCount > 0 && (
+                  <span className="bg-[#2563eb] text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+                    {inboxCount}
+                  </span>
+                )}
               </button>
 
               <button 
@@ -497,7 +521,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div className="bg-[#fbfaf9] border border-[#dedfdf] rounded-lg p-3 text-xs flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-[#656b6b]">Node</span>
+                <span className="text-[#656b6b]">Region</span>
                 <span className="font-mono font-bold text-[#1a1a1a]">{selectedTaskDetail.node}</span>
               </div>
               <div className="flex items-center justify-between">

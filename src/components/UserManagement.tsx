@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { apiClient, ApiAccount } from '../services/apiClient';
+import { apiClient, ApiAccount, ApiVM } from '../services/apiClient';
 
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<ApiAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [vms, setVms] = useState<ApiVM[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Add User State
@@ -34,8 +36,12 @@ export const UserManagement: React.FC = () => {
 
   const loadUsers = async () => {
     try {
-      const data = await apiClient.getAdminUsers();
-      setUsers(data);
+      const [usersData, vmsData] = await Promise.all([
+        apiClient.getAdminUsers(),
+        apiClient.getVMs().catch(() => [])
+      ]);
+      setUsers(usersData);
+      setVms(vmsData);
     } catch (e) {
       showToast('Failed to load users');
     } finally {
@@ -179,17 +185,26 @@ export const UserManagement: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 gap-4">
         <div>
-          <h1 className="page-heading mb-1">Advanced User Management</h1>
+          <h1 className="page-heading mb-1 font-serif font-medium tracking-[-0.03em]">Advanced User Management</h1>
           <p className="text-xs text-[#656b6b]">Manage roles, permissions, and platform access</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="btn-primary cursor-pointer"
-        >
-          + Add New User
-        </button>
+        <div className="flex items-center gap-3">
+          <input 
+            type="text" 
+            placeholder="Search by name, email or role..." 
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-64 text-xs px-3 py-1.5 bg-white border border-[#dedfdf] rounded outline-none focus:border-[#1a1a1a]"
+          />
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary cursor-pointer"
+          >
+            + Add New User
+          </button>
+        </div>
       </div>
 
       <div className="bg-ink-card border border-[#dedfdf] rounded-xl overflow-hidden shadow-sm">
@@ -200,12 +215,20 @@ export const UserManagement: React.FC = () => {
                 <th className="px-4 py-3 font-semibold tracking-wider">User</th>
                 <th className="px-4 py-3 font-semibold tracking-wider">Email</th>
                 <th className="px-4 py-3 font-semibold tracking-wider">Role</th>
+                <th className="px-4 py-3 font-semibold tracking-wider">Servers</th>
                 <th className="px-4 py-3 font-semibold tracking-wider">Support verification</th>
                 <th className="px-4 py-3 font-semibold tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#dedfdf]">
-              {users.map((user) => (
+              {users
+                .filter(u => 
+                  searchQuery === '' || 
+                  (u.name + u.email + u.role).toLowerCase().includes(searchQuery.toLowerCase())
+                )
+                .map((user) => {
+                  const userVms = vms.filter(v => v.ownerEmail === user.email);
+                  return (
                 <tr key={user.id} className="hover:bg-[#f9fafa] transition-colors">
                   <td className="px-4 py-3 font-medium text-[#1a1a1a]">{user.name}</td>
                   <td className="px-4 py-3 text-[#656b6b]">{user.email}</td>
@@ -220,6 +243,19 @@ export const UserManagement: React.FC = () => {
                       <option value="user">User</option>
                       <option value="client">Client</option>
                     </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    {userVms.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {userVms.map(vm => (
+                          <span key={vm.vmid} className="text-[10px] font-semibold bg-[#f1f1f1] border border-[#dedfdf] rounded px-1.5 py-0.5 text-[#1a1a1a]" title={vm.name}>
+                            {vm.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-[#a7aaaa]">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-[#656b6b]">{user.supportPinConfigured ? 'Configured' : 'Not configured'}</td>
                   <td className="px-4 py-3 text-right">
@@ -245,7 +281,7 @@ export const UserManagement: React.FC = () => {
                     </div>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>

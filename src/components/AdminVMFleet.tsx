@@ -17,7 +17,10 @@ import { apiClient } from '../services/apiClient';
 // Types (aligned with server/adminVmFleet.ts + db/database.ts)
 // ---------------------------------------------------------------------------
 interface FleetVM {
+  vmKey: string;
   vmid: number;
+  proxmoxConnectionId: string | null;
+  proxmoxConnectionName: string;
   name: string;
   type: 'qemu' | 'lxc' | string;
   node: string;
@@ -121,7 +124,7 @@ const toneColor: Record<string, string> = {
   ok: '#34d399',
   warn: '#fbbf24',
   bad: '#f87171',
-  muted: '#71717a',
+  muted: '#a7aaaa',
 };
 
 function StatusPill({ status, isSuspended }: { status: string; isSuspended?: boolean }) {
@@ -163,7 +166,7 @@ const AllocationBreakdown: React.FC<{
     : { cpu: 0, ram: 0, vms: 0 };
 
   return (
-    <div className="mb-5 rounded-md border" style={{ backgroundColor: '#151515', borderColor: '#313131' }}>
+    <div className="mb-5 rounded-md border" style={{ backgroundColor: '#0a0a0a', borderColor: '#313131' }}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3" style={{ borderColor: '#313131' }}>
         <div style={moduleSecLabel}>Allocation Breakdown — CPU & RAM across the cluster</div>
         <div className="flex items-center gap-3 text-[11px]">
@@ -243,16 +246,18 @@ export const AdminVMFleet: React.FC = () => {
   const [nodes, setNodes] = useState<NodeMetric[]>([]);
   const [capacity, setCapacity] = useState<NodeCapacity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [actioning, setActioning] = useState<Record<number, string>>({});
+  const [actioning, setActioning] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [nodeFilter, setNodeFilter] = useState('all');
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'bad' | 'info' } | null>(null);
 
   // Modals
   const [editVM, setEditVM] = useState<FleetVM | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [assignVM, setAssignVM] = useState<FleetVM | null>(null);
   const [nodesOpen, setNodesOpen] = useState(true);
 
   const toastTimer = useRef<number | null>(null);
@@ -317,7 +322,10 @@ export const AdminVMFleet: React.FC = () => {
         const j = await vmsRes.json();
         // Normalize: /vms returns Proxmox-backed rows with ownerEmail camelCase fields
         const rows: FleetVM[] = (j.data || []).map((v: any) => ({
+          vmKey: v.vmKey ?? `${v.proxmoxConnectionId ?? 'legacy-local'}:${v.node ?? 'unknown'}:${v.vmid}`,
           vmid: v.vmid,
+          proxmoxConnectionId: v.proxmoxConnectionId ?? v.proxmox_connection_id ?? null,
+          proxmoxConnectionName: v.proxmoxConnectionName ?? v.proxmox_connection_name ?? 'Unassigned location',
           name: v.name ?? v.vm_name ?? `vm-${v.vmid}`,
           type: v.type || 'qemu',
           node: v.node || '—',
@@ -354,7 +362,6 @@ export const AdminVMFleet: React.FC = () => {
   useEffect(() => {
     const t = window.setInterval(fetchFleet, 30000);
     return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
@@ -362,13 +369,25 @@ export const AdminVMFleet: React.FC = () => {
     return vms.filter(v => {
       if (statusFilter !== 'all' && (v.isSuspended ? 'suspended' : v.status.toLowerCase()) !== statusFilter) return false;
       if (nodeFilter !== 'all' && v.node !== nodeFilter) return false;
+      if (locationFilter !== 'all' && v.proxmoxConnectionId !== locationFilter) return false;
       if (q) {
-        const hay = `${v.vmid} ${v.name} ${v.ownerEmail} ${v.os} ${v.ipAddress ?? ''}`.toLowerCase();
+        const hay = `${v.vmid} ${v.vmKey} ${v.proxmoxConnectionName} ${v.name} ${v.ownerEmail} ${v.os} ${v.ipAddress ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [vms, search, statusFilter, nodeFilter]);
+  }, [vms, search, statusFilter, nodeFilter, locationFilter]);
+
+  const locationsList = useMemo(() => {
+    const locations = new Map<string, string>();
+    vms.forEach(v => { if (v.proxmoxConnectionId) locations.set(v.proxmoxConnectionId, v.proxmoxConnectionName); });
+    return Array.from(locations.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [vms]);
+
+  React.useEffect(() => { if (locationFilter === 'all' && locationsList.length > 0) setLocationFilter(locationsList[0][0]); }, [locationsList, locationFilter]);
+
+  const assignedRows = useMemo(() => filtered.filter(vm => !/^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
+  const unassignedRows = useMemo(() => filtered.filter(vm => /^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
 
   const nodesList = useMemo(() => {
     const ids = Array.from(new Set(vms.map(v => v.node).filter(n => n && n !== '—')));
@@ -378,25 +397,25 @@ export const AdminVMFleet: React.FC = () => {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
-  const runAction = async (vmid: number, action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
-    setActioning(a => ({ ...a, [vmid]: action }));
+  const runAction = async (vm: FleetVM, action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
+    setActioning(a => ({ ...a, [vm.vmKey]: action }));
     try {
-      const res = await fetch(`${base}/vms/${vmid}/action`, {
+      const res = await fetch(`${base}/vms/${vm.vmid}/action`, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, proxmoxConnectionId: vm.proxmoxConnectionId }),
       });
       const j = await res.json();
       if (res.ok) {
-        flash(`VMID ${vmid} — ${action} issued. ${j.message}`, 'ok');
+        flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} — ${action} issued. ${j.message}`, 'ok');
         await fetchFleet();
       } else {
-        flash(`VMID ${vmid} — ${action} failed: ${j.error || 'Unknown error'}`, 'bad');
+        flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} — ${action} failed: ${j.error || 'Unknown error'}`, 'bad');
       }
     } catch (e: any) {
-      flash(`VMID ${vmid} — ${action} failed`, 'bad');
+      flash(`VMID ${vm.vmid} — ${action} failed`, 'bad');
     } finally {
-      setActioning(a => { const n = { ...a }; delete n[vmid]; return n; });
+      setActioning(a => { const n = { ...a }; delete n[vm.vmKey]; return n; });
     }
   };
 
@@ -416,15 +435,15 @@ export const AdminVMFleet: React.FC = () => {
     }
   };
 
-  const runUnassign = async (vmid: number) => {
-    if (!window.confirm(`Unassign VMID ${vmid}? The client loses access to this server.`)) return;
+  const runUnassign = async (vm: FleetVM) => {
+    if (!window.confirm(`Unassign VMID ${vm.vmid} from ${vm.proxmoxConnectionName}? The client loses access to this server.`)) return;
     try {
-      const res = await fetch(`${base}/vms/${vmid}/unassign`, {
+      const res = await fetch(`${base}/vms/${vm.vmid}/unassign?proxmoxConnectionId=${encodeURIComponent(vm.proxmoxConnectionId || '')}`, {
         method: 'DELETE',
         headers: apiHeaders(),
       });
       const j = await res.json();
-      if (res.ok) flash(`VMID ${vmid} unassigned — now in the free pool`, 'ok');
+      if (res.ok) flash(`${vm.proxmoxConnectionName} · VMID ${vm.vmid} unassigned — now in the free pool`, 'ok');
       else flash(`Unassign failed: ${j.error}`, 'bad');
       await fetchFleet();
     } catch (e: any) {
@@ -434,9 +453,9 @@ export const AdminVMFleet: React.FC = () => {
 
   const bulkAction = async (action: 'start' | 'stop') => {
     if (selected.size === 0) { flash('Select servers first', 'info'); return; }
-    const ids = Array.from(selected);
-    flash(`Issuing ${action} on ${ids.length} server${ids.length > 1 ? 's' : ''}…`, 'info');
-    for (const id of ids) await runAction(id, action);
+    const selectedVms = vms.filter(vm => selected.has(vm.vmKey));
+    flash(`Issuing ${action} on ${selectedVms.length} server${selectedVms.length > 1 ? 's' : ''}…`, 'info');
+    for (const vm of selectedVms) await runAction(vm, action);
     setSelected(new Set());
   };
 
@@ -448,7 +467,8 @@ export const AdminVMFleet: React.FC = () => {
   };
 
   return (
-    <div className="px-5 pb-10 pt-6 max-w-[1400px] mx-auto w-full">
+    <div className="flex flex-col flex-1 min-w-0 min-h-0 w-full bg-[#0a0a0a] font-sans text-[#e8e8e8] overflow-y-auto">
+      <div className="px-5 pb-10 pt-6 max-w-[1400px] mx-auto w-full">
       {/* Page header */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
@@ -459,8 +479,8 @@ export const AdminVMFleet: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors"
-            style={{ borderColor: '#313131', color: '#e8e8e8', backgroundColor: 'transparent' }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
+            style={{ borderColor: '#313131', color: 'var(--theme-text)', backgroundColor: 'transparent' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#151515')}
             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
             onClick={() => { setNodesOpen(!nodesOpen); }}>
             <svg width="14" height="14" viewBox="0 0 22 22" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -476,13 +496,31 @@ export const AdminVMFleet: React.FC = () => {
         </div>
       </div>
 
+
+        {/* Location Tabs */}
+        {locationsList.length > 0 && (
+          <div className="mb-6 flex gap-1 overflow-x-auto border-b" style={{ borderColor: '#313131' }}>
+            {locationsList.map(([id, name]) => (
+              <button
+                key={id}
+                onClick={() => setLocationFilter(id)}
+                className="border-b-2 px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap"
+                style={{
+                  borderColor: locationFilter === id ? '#5b8def' : 'transparent',
+                  color: locationFilter === id ? 'var(--theme-text)' : '#a7aaaa'
+                }}>
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
       {/* Toast */}
       {toast && (
         <div className="fixed right-5 top-20 z-[80] max-w-sm rounded-md border px-4 py-3 text-sm shadow-xl animate-in fade-in slide-in-from-top-2"
           style={{
-            backgroundColor: '#1c1c1c',
+            backgroundColor: '#151515',
             borderColor: toast.tone === 'ok' ? '#34d399' : toast.tone === 'bad' ? '#f87171' : '#4a4a4a',
-            color: toast.tone === 'bad' ? '#f87171' : '#e8e8e8',
+            color: toast.tone === 'bad' ? '#f87171' : 'var(--theme-text)',
           }}>
           {toast.text}
         </div>
@@ -500,9 +538,9 @@ export const AdminVMFleet: React.FC = () => {
               { label: 'Cluster Nodes', value: summary.totalNodes },
               { label: 'Unassigned', value: summary.unassigned },
             ].map(card => (
-              <div key={card.label} className="rounded-md border p-4" style={{ backgroundColor: '#151515', borderColor: '#313131' }}>
+              <div key={card.label} className="rounded-md border p-4" style={{ backgroundColor: '#0a0a0a', borderColor: '#313131' }}>
                 <div style={secLabel}>{card.label}</div>
-                <div className="mt-1 text-2xl font-semibold" style={{ color: card.accent || '#e8e8e8' }}>
+                <div className="mt-1 text-2xl font-semibold" style={{ color: card.accent || 'var(--theme-text)' }}>
                   {card.value}
                 </div>
               </div>
@@ -516,7 +554,7 @@ export const AdminVMFleet: React.FC = () => {
 
       {/* Node inventory (collapsible) */}
       {nodesOpen && (
-        <div className="mb-5 rounded-md border" style={{ backgroundColor: '#151515', borderColor: '#313131' }}>
+        <div className="mb-5 rounded-md border" style={{ backgroundColor: '#0a0a0a', borderColor: '#313131' }}>
           <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: '#313131' }}>
             <div style={secLabel}>Node Inventory — Live from Engine</div>
             <div className="text-xs text-[#71717a]">{nodes.length} node{nodes.length === 1 ? '' : 's'} connected</div>
@@ -526,7 +564,7 @@ export const AdminVMFleet: React.FC = () => {
           ) : (
             <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
               {nodes.map(n => (
-                <div key={n.node} className="rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#1c1c1c' }}>
+                <div key={n.node} className="rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#151515' }}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: n.status === 'online' ? '#34d399' : '#f87171' }} />
@@ -562,7 +600,7 @@ export const AdminVMFleet: React.FC = () => {
       )}
 
       {/* Fleet table */}
-      <div className="rounded-md border" style={{ backgroundColor: '#151515', borderColor: '#313131' }}>
+      <div className="rounded-md border" style={{ backgroundColor: '#0a0a0a', borderColor: '#313131' }}>
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3" style={{ borderColor: '#313131' }}>
           <div className="relative min-w-[240px] flex-1">
@@ -571,7 +609,7 @@ export const AdminVMFleet: React.FC = () => {
             </svg>
             <input
               className="w-full rounded-md border py-2 pl-9 pr-3 text-sm outline-none"
-              style={{ backgroundColor: '#1c1c1c', borderColor: '#313131', color: '#e8e8e8' }}
+              style={{ backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)' }}
               placeholder="Search by VMID, name, client, OS…"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -579,7 +617,7 @@ export const AdminVMFleet: React.FC = () => {
           </div>
           <select
             className="rounded-md border px-3 py-2 text-sm outline-none"
-            style={{ backgroundColor: '#1c1c1c', borderColor: '#313131', color: '#e8e8e8' }}
+            style={{ backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)' }}
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}>
             <option value="all">All status</option>
@@ -589,7 +627,7 @@ export const AdminVMFleet: React.FC = () => {
           </select>
           <select
             className="rounded-md border px-3 py-2 text-sm outline-none"
-            style={{ backgroundColor: '#1c1c1c', borderColor: '#313131', color: '#e8e8e8' }}
+            style={{ backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)' }}
             value={nodeFilter}
             onChange={e => setNodeFilter(e.target.value)}>
             <option value="all">All nodes</option>
@@ -604,13 +642,13 @@ export const AdminVMFleet: React.FC = () => {
               </span>
             )}
             <button className="rounded-md border px-3 py-2 text-sm font-medium"
-              style={{ borderColor: '#313131', color: '#e8e8e8' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
+              style={{ borderColor: '#313131', color: 'var(--theme-text)' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#151515')}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
               onClick={() => bulkAction('start')}>▶ Start</button>
             <button className="rounded-md border px-3 py-2 text-sm font-medium"
-              style={{ borderColor: '#313131', color: '#e8e8e8' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
+              style={{ borderColor: '#313131', color: 'var(--theme-text)' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#151515')}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
               onClick={() => bulkAction('stop')}>■ Stop</button>
             <button className="rounded-md px-3 py-2 text-sm font-medium"
@@ -628,135 +666,180 @@ export const AdminVMFleet: React.FC = () => {
               No servers match your filters.
             </div>
           ) : (
-            <table className="w-full min-w-[980px] text-sm">
-              <thead>
-                <tr className="border-b text-left" style={{ borderColor: '#313131' }}>
-                  <th className="w-10 px-3 py-3"></th>
-                  <th className="px-3 py-3" style={secLabel}>VMID</th>
-                  <th className="px-3 py-3" style={secLabel}>Name</th>
-                  <th className="px-3 py-3" style={secLabel}>Client</th>
-                  <th className="px-3 py-3" style={secLabel}>Status</th>
-                  <th className="px-3 py-3" style={secLabel}>Specs</th>
-                  <th className="px-3 py-3" style={secLabel}>Load</th>
-                  <th className="px-3 py-3" style={secLabel}>Expiry</th>
-                  <th className="px-3 py-3" style={secLabel}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(v => {
-                  const memGb = Math.round((v.maxmem || 8 * 1073741824) / 1073741824);
-                  const diskGb = Math.round((v.maxdisk || 64 * 1073741824) / 1073741824);
-                  const isClient = /^unassigned@/i.test(v.ownerEmail || '');
-                  const ex = expiryLabel(v.expiryDate, v.isSuspended);
-                  const busy = !!actioning[v.vmid];
-                  const live = v.live;
-                  const memPct = live?.memPct ?? (v.memory ? Math.round((v.memory / Math.max(v.maxmem, 1)) * 100) : 0);
-                  const cpuPct = live?.cpuPct ?? 0;
-                  const selectedRow = selected.has(v.vmid);
+                        <div className="space-y-8">
+              
+              
+              {/* ASSIGNED SERVERS */}
+              <div className="ink-block-wrapper shadow-sm mb-8 border border-[#313131]">
+                <div className="ink-block-header flex items-center justify-between bg-[var(--theme-surface-muted)]">
+                  <div>
+                    <h3 className="text-base font-bold text-[var(--theme-text)]">Assigned Servers</h3>
+                    <p className="text-xs text-[#a7aaaa] mt-1">Servers currently allocated to a client workspace.</p>
+                  </div>
+                  <span className="text-xs font-bold text-[var(--theme-text)] bg-[var(--theme-surface-raised)] border border-[#313131] px-2.5 py-1.5 rounded shadow-sm flex items-center">
+                    {assignedRows.length} Active
+                  </span>
+                </div>
+                <div className="responsive-table-container">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#313131] bg-[#151515]">
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider w-10"></th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">VMID</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Name & OS</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Client</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Specs</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Load</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-[#0a0a0a]">
+                      {assignedRows.length === 0 ? (
+                        <tr><td colSpan={8} className="text-center py-8 text-[#a7aaaa]">No assigned servers.</td></tr>
+                      ) : assignedRows.map(v => {
+                        const memGb = Math.round((v.maxmem || 8 * 1073741824) / 1073741824);
+                        const diskGb = Math.round((v.maxdisk || 64 * 1073741824) / 1073741824);
+                        const busy = !!actioning[v.vmKey];
+                        const live = v.live;
+                        const memPct = live?.memPct ?? (v.memory ? Math.round((v.memory / Math.max(v.maxmem, 1)) * 100) : 0);
+                        const cpuPct = live?.cpuPct ?? 0;
+                        const selectedRow = selected.has(v.vmKey);
+                        return (
+                          <tr key={v.vmKey} className="border-b border-[#313131] transition-colors hover:bg-[var(--theme-surface-raised)] group">
+                            <td className="px-4 py-4">
+                              <input type="checkbox" checked={selectedRow} onChange={() => { const s = new Set(selected); if (s.has(v.vmKey)) s.delete(v.vmKey); else s.add(v.vmKey); setSelected(s); }} className="accent-[var(--theme-accent)] w-4 h-4 rounded cursor-pointer" />
+                            </td>
+                            <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                <span className="text-[11px] font-medium text-[#a7aaaa]">
+                                  {v.proxmoxConnectionName} • {v.os !== '?' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
+                                  {v.ipAddress ? ` • ${v.ipAddress}` : ''}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-[13px] font-medium text-[var(--theme-text)]">{v.ownerEmail}</td>
+                            <td className="px-4 py-4"><StatusPill status={v.status} isSuspended={v.isSuspended} /></td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-baseline gap-1.5 font-mono text-[12px] text-[var(--theme-text)] whitespace-nowrap font-semibold">
+                                <span>{v.cpus}C</span><span className="text-[#313131]">|</span>
+                                <span>{memGb}G</span><span className="text-[#313131]">|</span>
+                                <span>{diskGb}G</span>
+                              </div>
+                              <div className="text-[11px] text-[#a7aaaa] mt-1 font-medium">{v.type === 'lxc' ? 'LXC' : 'QEMU'} • {v.node}</div>
+                            </td>
+                            <td className="px-4 py-4">
+                              {live ? (
+                                <div className="flex flex-col gap-1.5 w-28">
+                                  <div className="flex items-center gap-2 text-[10px] font-mono font-bold text-[#a7aaaa]"><div className="h-1.5 flex-1 bg-[var(--theme-surface-raised)] rounded-full overflow-hidden"><div className="h-full bg-[var(--theme-accent)]" style={{ width: `${cpuPct}%` }} /></div>{cpuPct}%</div>
+                                  <div className="flex items-center gap-2 text-[10px] font-mono font-bold text-[#a7aaaa]"><div className="h-1.5 flex-1 bg-[var(--theme-surface-raised)] rounded-full overflow-hidden"><div className="h-full bg-[var(--theme-success)]" style={{ width: `${memPct}%` }} /></div>{memPct}%</div>
+                                </div>
+                              ) : <span className="text-[11px] font-medium text-[#a7aaaa]">Offline</span>}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2.5 transition-opacity">
+                                {live && (
+                                  <a href={`/admin/vnc/${v.vmid}?proxmoxConnectionId=${encodeURIComponent(v.proxmoxConnectionId || '')}`} target="_blank" rel="noreferrer" className="btn-secondary py-1 px-3 text-[11px] whitespace-nowrap shadow-sm">VNC</a>
+                                )}
+                                <button className="btn-secondary py-1 px-3 text-[11px] whitespace-nowrap shadow-sm" onClick={() => setEditVM(v)}>Edit</button>
+                                <button className="btn-secondary py-1 px-3 text-[11px] whitespace-nowrap shadow-sm text-[var(--theme-danger)] !border-[var(--theme-danger)]/50 hover:!bg-[var(--theme-danger)]/10" onClick={() => runUnassign(v)}>Unassign</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
-                  return (
-                    <tr key={v.vmid} className="border-b transition-colors last:border-0"
-                      style={{ borderColor: '#313131', backgroundColor: selectedRow ? '#1c1c1c' : 'transparent' }}>
-                      <td className="px-3 py-3">
-                        <input type="checkbox"
-                          checked={selectedRow}
-                          onChange={e => {
-                            const n = new Set(selected);
-                            e.target.checked ? n.add(v.vmid) : n.delete(v.vmid);
-                            setSelected(n);
-                          }}
-                          className="accent-[#5b8def]" />
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-[#a7aaaa]">{v.vmid}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-[#e8e8e8]">{v.name}</span>
-                          <span className="text-[11px] text-[#71717a]">
-                            {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
-                            {v.ipAddress ? ` · ${v.ipAddress}` : ''}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        {isClient ? (
-                          <span className="rounded-full border px-2 py-0.5 text-[11px] text-[#71717a]" style={{ borderColor: '#4a4a4a' }}>
-                            Unassigned — Free pool
-                          </span>
-                        ) : (
-                          <span className="text-[#e8e8e8]">{v.ownerEmail}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3"><StatusPill status={v.status} isSuspended={v.isSuspended} /></td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-baseline gap-1 font-mono text-[11px] text-[#a7aaaa] whitespace-nowrap">
-                          <span>{v.cpus}C</span><span className="text-[#4a4a4a]">·</span>
-                          <span>{memGb}G</span><span className="text-[#4a4a4a]">·</span>
-                          <span>{diskGb}G</span>
-                        </div>
-                        <div className="text-[11px] text-[#71717a]">{v.type === 'lxc' ? 'LXC Container' : 'QEMU VM'} · {v.node}</div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="w-28 space-y-1.5">
-                          <div className="flex justify-between text-[10px] text-[#71717a]">
-                            <span>CPU</span><span className="font-mono">{cpuPct}%</span>
-                          </div>
-                          <BarTrack value={cpuPct} max={100} color="#5b8def" />
-                          <div className="flex justify-between text-[10px] text-[#71717a]">
-                            <span>RAM</span><span className="font-mono">{memPct}%</span>
-                          </div>
-                          <BarTrack value={memPct} max={100} color="#34d399" />
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className="rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap"
-                          style={{ borderColor: 'color-mix(in srgb, ' + toneColor[ex.tone] + ' 45%, transparent)', color: toneColor[ex.tone] }}>
-                          {ex.text}
-                        </span>
-                        {v.uptime > 0 && !v.isSuspended && (
-                          <div className="mt-1 text-[10px] font-mono text-[#71717a]">up {secondsToUptime(v.uptime)}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {(v.isSuspended || v.status.toLowerCase() === 'stopped') ? (
-                            <ActionButton label="Start" disabled={busy} loading={busy}
-                              onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'start')}
-                              tone="success" />
-                          ) : (
-                            <ActionButton label="Stop" disabled={busy} loading={busy}
-                              onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'stop')}
-                              tone="danger" />
-                          )}
-                          <ActionButton label="Reboot" disabled={busy} loading={busy}
-                            onHoverIn="#1c1c1c" onClick={() => runAction(v.vmid, 'reboot')}
-                            tone="neutral" />
-                          <button className="rounded border px-2 py-1 text-[11px] font-medium"
-                            style={{ borderColor: '#313131', color: '#e8e8e8' }}
-                            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
-                            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                            onClick={() => runAction(v.vmid, 'shutdown')}
-                            title="Graceful shutdown">⏻</button>
-                          <button className="rounded border px-2 py-1 text-[11px] font-medium"
-                            style={{ borderColor: '#313131', color: '#5b8def' }}
-                            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
-                            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                            onClick={() => setEditVM(v)}
-                            title="Edit specs">Edit</button>
-                          {!isClient && (
-                            <button className="rounded border px-2 py-1 text-[11px] font-medium"
-                              style={{ borderColor: '#313131', color: '#a7aaaa' }}
-                              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
-                              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                              onClick={() => runUnassign(v.vmid)}
-                              title="Return to free pool">Free</button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+              {/* UNASSIGNED SERVERS (FREE POOL) */}
+              <div className="ink-block-wrapper shadow-sm mb-6 border border-[#313131]">
+                <div className="ink-block-header flex items-center justify-between bg-[var(--theme-surface-muted)]">
+                  <div>
+                    <h3 className="text-base font-bold text-[var(--theme-text)]">Unassigned Servers (Free Pool)</h3>
+                    <p className="text-xs text-[#a7aaaa] mt-1">Servers waiting to be assigned to new clients.</p>
+                  </div>
+                  <span className="text-xs font-bold text-[var(--theme-text)] bg-[var(--theme-surface-raised)] border border-[#313131] px-2.5 py-1.5 rounded shadow-sm flex items-center">
+                    {unassignedRows.length} Free
+                  </span>
+                </div>
+                <div className="responsive-table-container">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#313131] bg-[#151515]">
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider w-10"></th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">VMID</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Name & OS</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Status</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Specs</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider">Load</th>
+                        <th className="px-4 py-3 text-[11px] font-bold text-[#a7aaaa] uppercase tracking-wider text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-[#0a0a0a]">
+                      {unassignedRows.length === 0 ? (
+                        <tr><td colSpan={7} className="text-center py-8 text-[#a7aaaa]">No servers in the free pool.</td></tr>
+                      ) : unassignedRows.map(v => {
+                        const memGb = Math.round((v.maxmem || 8 * 1073741824) / 1073741824);
+                        const diskGb = Math.round((v.maxdisk || 64 * 1073741824) / 1073741824);
+                        const busy = !!actioning[v.vmKey];
+                        const live = v.live;
+                        const memPct = live?.memPct ?? (v.memory ? Math.round((v.memory / Math.max(v.maxmem, 1)) * 100) : 0);
+                        const cpuPct = live?.cpuPct ?? 0;
+                        const selectedRow = selected.has(v.vmKey);
+                        return (
+                          <tr key={v.vmKey} className="border-b border-[#313131] transition-colors hover:bg-[var(--theme-surface-raised)] group">
+                            <td className="px-4 py-4">
+                              <input type="checkbox" checked={selectedRow} onChange={() => { const s = new Set(selected); if (s.has(v.vmKey)) s.delete(v.vmKey); else s.add(v.vmKey); setSelected(s); }} className="accent-[var(--theme-accent)] w-4 h-4 rounded cursor-pointer" />
+                            </td>
+                            <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
+                            <td className="px-4 py-4">
+                              <div className="flex flex-col gap-1">
+                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                <span className="text-[11px] font-medium text-[#a7aaaa]">
+                                  {v.proxmoxConnectionName} • {v.os !== '?' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4"><StatusPill status={v.status} isSuspended={v.isSuspended} /></td>
+                            <td className="px-4 py-4">
+                              <div className="flex items-baseline gap-1.5 font-mono text-[12px] text-[var(--theme-text)] whitespace-nowrap font-semibold">
+                                <span>{v.cpus}C</span><span className="text-[#313131]">|</span>
+                                <span>{memGb}G</span><span className="text-[#313131]">|</span>
+                                <span>{diskGb}G</span>
+                              </div>
+                              <div className="text-[11px] text-[#a7aaaa] mt-1 font-medium">{v.type === 'lxc' ? 'LXC' : 'QEMU'} • {v.node}</div>
+                            </td>
+                            <td className="px-4 py-4">
+                              {live ? (
+                                <div className="flex flex-col gap-1.5 w-28">
+                                  <div className="flex items-center gap-2 text-[10px] font-mono font-bold text-[#a7aaaa]"><div className="h-1.5 flex-1 bg-[var(--theme-surface-raised)] rounded-full overflow-hidden"><div className="h-full bg-[var(--theme-accent)]" style={{ width: `${cpuPct}%` }} /></div>{cpuPct}%</div>
+                                  <div className="flex items-center gap-2 text-[10px] font-mono font-bold text-[#a7aaaa]"><div className="h-1.5 flex-1 bg-[var(--theme-surface-raised)] rounded-full overflow-hidden"><div className="h-full bg-[var(--theme-success)]" style={{ width: `${memPct}%` }} /></div>{memPct}%</div>
+                                </div>
+                              ) : <span className="text-[11px] font-medium text-[#a7aaaa]">Offline</span>}
+                            </td>
+                            <td className="px-4 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2.5 transition-opacity">
+                                {live && (
+                                  <a href={`/admin/vnc/${v.vmid}?proxmoxConnectionId=${encodeURIComponent(v.proxmoxConnectionId || '')}`} target="_blank" rel="noreferrer" className="btn-secondary py-1 px-3 text-[11px] whitespace-nowrap shadow-sm">VNC</a>
+                                )}
+                                <button className="btn-secondary py-1 px-3 text-[11px] whitespace-nowrap shadow-sm" onClick={() => setEditVM(v)}>Edit</button>
+                                <button className="btn-primary py-1 px-4 text-[11px] whitespace-nowrap shadow-md" onClick={() => setAssignVM(v)}>Assign Server</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
           )}
         </div>
         <div className="border-t px-4 py-2.5 text-[11px] text-[#71717a]" style={{ borderColor: '#313131' }}>
@@ -767,13 +850,23 @@ export const AdminVMFleet: React.FC = () => {
       {/* Edit VM modal */}
       {editVM && <EditVMModal vm={editVM} onClose={() => setEditVM(null)} onSaved={async () => { setEditVM(null); await fetchFleet(); flash('Server updated', 'ok'); }} apiHeaders={apiHeaders} base={base} flash={flash} />}
 
-      {/* Assign wizard */}
-      {assignOpen && <AssignWizard
+      
+      {/* Assign existing VM modal */}
+      {assignVM && <AssignModal
+        vm={assignVM}
+        onClose={() => setAssignVM(null)}
+        apiHeaders={apiHeaders}
+        base={base}
+        onAssigned={() => { setAssignVM(null); fetchFleet(); }}
+        flash={flash} />}
+{/* Assign wizard */}
+      {assignOpen && <ProvisionWizard
         onClose={() => setAssignOpen(false)}
         apiHeaders={apiHeaders}
         base={base}
         onAssigned={() => { setAssignOpen(false); fetchFleet(); }}
         flash={flash} />}
+    </div>
     </div>
   );
 };
@@ -785,7 +878,7 @@ const ActionButton: React.FC<{
   label: string; onClick: () => void; disabled?: boolean; loading?: boolean;
   tone: 'danger' | 'success' | 'neutral'; onHoverIn: string;
 }> = ({ label, onClick, disabled, loading, tone, onHoverIn }) => {
-  const color = tone === 'danger' ? '#f87171' : tone === 'success' ? '#34d399' : '#e8e8e8';
+  const color = tone === 'danger' ? '#f87171' : tone === 'success' ? '#34d399' : 'var(--theme-text)';
   return (
     <button
       className="rounded border px-2 py-1 text-[11px] font-medium disabled:opacity-40"
@@ -820,7 +913,7 @@ const EditVMModal: React.FC<{
   const [saving, setSaving] = useState(false);
 
   const inputCls: React.CSSProperties = {
-    backgroundColor: '#1c1c1c', borderColor: '#313131', color: '#e8e8e8',
+    backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)',
   };
 
   const save = async () => {
@@ -837,6 +930,7 @@ const EditVMModal: React.FC<{
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({
+          proxmoxConnectionId: vm.proxmoxConnectionId,
           name: name.trim(), os: os.trim(), ipAddress: ipAddress.trim(),
           cpus: cpusN, memoryGb: memN, diskGb: diskN, expiryDays: Number(expiryDays) || undefined,
         }),
@@ -874,9 +968,9 @@ const EditVMModal: React.FC<{
 
 const modalInputCls: React.CSSProperties = {
   width: '100%',
-  backgroundColor: '#1c1c1c',
+  backgroundColor: '#151515',
   borderColor: '#313131',
-  color: '#e8e8e8',
+  color: 'var(--theme-text)',
   borderRadius: 6,
   borderWidth: 1,
   borderStyle: 'solid',
@@ -896,7 +990,7 @@ const PRESETS = [
 
 const OS_OPTIONS = ['Ubuntu 24.04 LTS', 'Debian 12', 'AlmaLinux 9', 'Windows Server 2022', 'CentOS Stream 9', 'Rocky Linux 9', 'Fedora 40', 'Alpine Linux 3.19'];
 
-const AssignWizard: React.FC<{
+const ProvisionWizard: React.FC<{
   onClose: () => void;
   apiHeaders: () => Record<string, string>;
   base: string;
@@ -949,7 +1043,6 @@ const AssignWizard: React.FC<{
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -988,7 +1081,7 @@ const AssignWizard: React.FC<{
     setSubmitting(true);
     try {
       const chosenNode = nodes[nodeIdx];
-      const res = await fetch('/api/v1/admin/vms/assign', {
+      const res = await fetch('/api/v1/admin/vms/provision', {
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({
@@ -1033,7 +1126,7 @@ const AssignWizard: React.FC<{
               }}>
               {n < step ? '✓' : n}
             </span>
-            <span className="text-[11px]" style={{ color: n === step ? '#e8e8e8' : '#71717a' }}>
+            <span className="text-[11px]" style={{ color: n === step ? 'var(--theme-text)' : '#a7aaaa' }}>
               {n === 1 ? 'Target' : n === 2 ? 'Specs' : 'Client'}
             </span>
           </div>
@@ -1107,7 +1200,7 @@ const AssignWizard: React.FC<{
                 </Field>
                 <p className="mt-2 text-[11px] text-[#71717a]">QEMU runs a full OS (Windows/Linux ISO). LXC containers share the kernel and boot instantly.</p>
               </div>
-              <div className="rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#1c1c1c' }}>
+              <div className="rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#151515' }}>
                 <div style={secLabel}>Review — target</div>
                 <dl className="mt-3 space-y-1.5 text-[13px]">
                   <div className="flex justify-between"><dt className="text-[#a7aaaa]">Node</dt><dd className="font-medium text-[#e8e8e8]">{nodes[nodeIdx]?.name}</dd></div>
@@ -1130,7 +1223,7 @@ const AssignWizard: React.FC<{
                         style={{
                           borderColor: cpus === p.cpus && memoryGb === p.memoryGb && diskGb === p.diskGb ? '#5b8def' : '#313131',
                           backgroundColor: cpus === p.cpus && memoryGb === p.memoryGb && diskGb === p.diskGb ? 'rgba(91,141,239,0.12)' : 'transparent',
-                          color: cpus === p.cpus && memoryGb === p.memoryGb && diskGb === p.diskGb ? '#5b8def' : '#e8e8e8',
+                          color: cpus === p.cpus && memoryGb === p.memoryGb && diskGb === p.diskGb ? '#5b8def' : 'var(--theme-text)',
                         }}
                         onClick={() => applyPreset(p)}>
                         {p.name} <span className="font-mono text-[11px] opacity-60">{p.cpus}C · {p.memoryGb}G · {p.diskGb}G</span>
@@ -1173,7 +1266,7 @@ const AssignWizard: React.FC<{
                   />
                   {clientOpen && (
                     <ul className="absolute z-10 mt-1 max-h-52 w-full overflow-y-auto rounded-md border"
-                      style={{ backgroundColor: '#1c1c1c', borderColor: '#313131' }}>
+                      style={{ backgroundColor: '#151515', borderColor: '#313131' }}>
                       {filteredAccounts.length === 0 && (
                         <li className="px-3 py-2 text-[12px] text-[#71717a]">No accounts match.</li>
                       )}
@@ -1189,7 +1282,7 @@ const AssignWizard: React.FC<{
                   )}
                 </Field>
                 {selectedAccount && (
-                  <div className="mt-3 rounded-md border p-3 text-[12px]" style={{ borderColor: '#4a4a4a', backgroundColor: '#1c1c1c' }}>
+                  <div className="mt-3 rounded-md border p-3 text-[12px]" style={{ borderColor: '#4a4a4a', backgroundColor: '#151515' }}>
                     <span className="text-[#a7aaaa]">Selected: </span>
                     <span className="font-medium text-[#e8e8e8]">{selectedAccount.email}</span>
                     {selectedAccount.name && <span className="text-[#a7aaaa]"> — {selectedAccount.name}</span>}
@@ -1217,7 +1310,7 @@ const AssignWizard: React.FC<{
                   </div>
                 </Field>
               </div>
-              <div className="lg:col-span-2 rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#1c1c1c' }}>
+              <div className="lg:col-span-2 rounded-md border p-4" style={{ borderColor: '#4a4a4a', backgroundColor: '#151515' }}>
                 <div style={secLabel}>Assignment review</div>
                 <dl className="mt-3 grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2">
                   <div className="flex justify-between"><dt className="text-[#a7aaaa]">VMID</dt><dd className="font-mono text-[#e8e8e8]">{effectiveVmid}</dd></div>
@@ -1238,8 +1331,8 @@ const AssignWizard: React.FC<{
           <div className="mt-6 flex items-center justify-between border-t pt-4" style={{ borderColor: '#313131' }}>
             <button
               className="rounded-md border px-4 py-2 text-[13px] font-medium"
-              style={{ borderColor: '#313131', color: '#e8e8e8' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1c1c1c')}
+              style={{ borderColor: '#313131', color: 'var(--theme-text)' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#151515')}
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
               onClick={() => (step > 1 ? setStep(step - 1) : onClose())}>
               {step > 1 ? 'Back' : 'Cancel'}
@@ -1274,10 +1367,10 @@ const ModalShell: React.FC<{
   title: string; subtitle?: string; onClose: () => void; wide?: boolean;
   children: React.ReactNode;
 }> = ({ title, subtitle, onClose, wide, children }) => (
-  <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+  <div className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
     <div className="my-8 w-full rounded-lg border"
       style={{
-        backgroundColor: '#151515',
+        backgroundColor: '#0a0a0a',
         borderColor: '#313131',
         maxWidth: wide ? 860 : 560,
         boxShadow: '0 24px 80px rgba(0,0,0,0.55)',
@@ -1309,13 +1402,13 @@ const ModalButton: React.FC<{
 }> = ({ label, onClick, primary, secondary, disabled }) => {
   const style: React.CSSProperties = primary
     ? { backgroundColor: '#5b8def', color: '#ffffff' }
-    : { borderColor: '#313131', color: '#e8e8e8', backgroundColor: 'transparent' };
+    : { borderColor: '#313131', color: 'var(--theme-text)', backgroundColor: 'transparent' };
   return (
     <button
       className="rounded-md border px-4 py-2 text-[13px] font-medium disabled:opacity-50"
       style={style}
       disabled={disabled}
-      onMouseEnter={e => secondary && (e.currentTarget.style.backgroundColor = '#1c1c1c')}
+      onMouseEnter={e => secondary && (e.currentTarget.style.backgroundColor = '#151515')}
       onMouseLeave={e => secondary && (e.currentTarget.style.backgroundColor = 'transparent')}
       onClick={onClick}>
       {label}
@@ -1331,3 +1424,180 @@ const modalSelectCls: React.CSSProperties = {
   backgroundPosition: 'right 10px center',
   paddingRight: 30,
 };
+
+
+
+const AssignModal: React.FC<{
+  vm: FleetVM;
+  onClose: () => void;
+  apiHeaders: () => Record<string, string>;
+  base: string;
+  onAssigned: () => void;
+  flash: (text: string, tone: 'ok' | 'bad' | 'info') => void;
+}> = ({ vm, onClose, apiHeaders, base, onAssigned, flash }) => {
+  const [client, setClient] = useState('');
+  const [expiryMode, setExpiryMode] = useState<'duration' | 'custom' | 'never'>('duration');
+  const [expiryDays, setExpiryDays] = useState('30');
+  
+  const [customDate, setCustomDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  });
+  
+  const [submitting, setSubmitting] = useState(false);
+  
+  const submit = async () => {
+    if (!client.includes('@')) { flash('Enter a valid client email', 'bad'); return; }
+    
+    let finalExpiryDate: number | undefined;
+    let neverExpire = false;
+    
+    if (expiryMode === 'never') {
+      neverExpire = true;
+    } else if (expiryMode === 'custom') {
+      finalExpiryDate = new Date(customDate).getTime();
+    } else {
+      finalExpiryDate = Date.now() + (Number(expiryDays) * 24 * 60 * 60 * 1000);
+    }
+    
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${base}/vms/assign`, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          vmid: vm.vmid,
+          targetEmail: client.trim(),
+          expiryDate: finalExpiryDate,
+          neverExpire,
+          proxmoxConnectionId: vm.proxmoxConnectionId
+        })
+      });
+      const j = await res.json();
+      if (res.ok) {
+        flash(`VMID ${vm.vmid} successfully assigned to ${client}`, 'ok');
+        onAssigned();
+      } else {
+        flash(`Assignment failed: ${j.error}`, 'bad');
+      }
+    } catch (e: any) {
+      flash('Assignment failed', 'bad');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity p-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-lg bg-[#0a0a0a] border border-[#313131] rounded-xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-[#313131] bg-[#151515] flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-[var(--theme-text)]">Assign Server: VMID {vm.vmid}</h2>
+            <p className="text-sm font-medium text-[#a7aaaa] mt-1">Node: {vm.node} | Specs: {vm.cpus}C / {Math.round((vm.maxmem || 8*1024*1024*1024)/1024/1024/1024)}GB</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-[#a7aaaa] hover:text-[var(--theme-text)] hover:bg-[var(--theme-surface-raised)] rounded-md transition-colors">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-6">
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-[#a7aaaa] uppercase tracking-widest">Client Email Address</label>
+            <input 
+              className="w-full p-3 bg-[var(--theme-surface-muted)] border border-[#313131] rounded-lg text-[var(--theme-text)] text-sm focus:border-[var(--theme-accent)] focus:ring-1 focus:ring-[var(--theme-accent)] outline-none transition-all placeholder-[#a7aaaa]/50 font-medium" 
+              placeholder="client@example.com" 
+              value={client} 
+              onChange={e => setClient(e.target.value)} 
+            />
+          </div>
+          
+          <div className="space-y-4">
+            <label className="block text-xs font-bold text-[#a7aaaa] uppercase tracking-widest">Expiry Configuration</label>
+            
+            <div className="flex bg-[#151515] border border-[#313131] rounded-lg overflow-hidden p-1 gap-1">
+              <button 
+                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${expiryMode === 'duration' ? 'bg-[var(--theme-surface-raised)] text-[var(--theme-accent)] shadow-sm' : 'text-[#a7aaaa] hover:text-[var(--theme-text)]'}`}
+                onClick={() => setExpiryMode('duration')}
+              >
+                Duration
+              </button>
+              <button 
+                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${expiryMode === 'custom' ? 'bg-[var(--theme-surface-raised)] text-[var(--theme-accent)] shadow-sm' : 'text-[#a7aaaa] hover:text-[var(--theme-text)]'}`}
+                onClick={() => setExpiryMode('custom')}
+              >
+                Custom Date
+              </button>
+              <button 
+                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${expiryMode === 'never' ? 'bg-[var(--theme-surface-raised)] text-[var(--theme-accent)] shadow-sm' : 'text-[#a7aaaa] hover:text-[var(--theme-text)]'}`}
+                onClick={() => setExpiryMode('never')}
+              >
+                Never Expire
+              </button>
+            </div>
+
+            {expiryMode === 'duration' && (
+              <div className="flex flex-wrap items-center gap-3 animate-in slide-in-from-top-1 fade-in duration-200">
+                {[7, 30, 90, 365].map(d => (
+                  <button key={d}
+                    className="rounded-lg border px-4 py-2.5 text-sm font-semibold transition-all shadow-sm"
+                    style={{
+                      borderColor: expiryDays === String(d) ? 'var(--theme-accent)' : '#313131',
+                      backgroundColor: expiryDays === String(d) ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : '#151515',
+                      color: expiryDays === String(d) ? 'var(--theme-accent)' : '#a7aaaa',
+                    }}
+                    onClick={() => setExpiryDays(String(d))}>
+                    {d === 365 ? '1 Year' : `${d} Days`}
+                  </button>
+                ))}
+                <input 
+                  className="flex-1 p-3 bg-[var(--theme-surface-muted)] border border-[#313131] rounded-lg text-[var(--theme-text)] text-sm focus:border-[var(--theme-accent)] focus:ring-1 focus:ring-[var(--theme-accent)] outline-none transition-all placeholder-[#a7aaaa]/50 font-medium min-w-[100px]" 
+                  placeholder="Custom Days" 
+                  type="number"
+                  min="1"
+                  value={expiryDays} 
+                  onChange={e => setExpiryDays(e.target.value)} 
+                />
+              </div>
+            )}
+
+            {expiryMode === 'custom' && (
+              <div className="animate-in slide-in-from-top-1 fade-in duration-200">
+                <input 
+                  type="date"
+                  className="w-full p-3 bg-[var(--theme-surface-muted)] border border-[#313131] rounded-lg text-[var(--theme-text)] text-sm focus:border-[var(--theme-accent)] focus:ring-1 focus:ring-[var(--theme-accent)] outline-none transition-all font-medium" 
+                  value={customDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={e => setCustomDate(e.target.value)} 
+                />
+              </div>
+            )}
+
+            {expiryMode === 'never' && (
+              <div className="p-4 bg-[color-mix(in_srgb,var(--theme-success)_10%,transparent)] border border-[var(--theme-success)]/30 rounded-lg animate-in slide-in-from-top-1 fade-in duration-200">
+                <div className="flex items-center gap-3 text-[var(--theme-success)]">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                  <span className="text-sm font-semibold">This server will remain active indefinitely until manually unassigned.</span>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-5 bg-[#151515] border-t border-[#313131] flex items-center justify-between">
+          <button className="btn-secondary px-5 py-2.5 shadow-sm font-semibold" onClick={onClose}>Cancel</button>
+          <button className="btn-primary px-6 py-2.5 shadow-md font-bold text-sm disabled:opacity-50" disabled={submitting} onClick={submit}>
+            {submitting ? 'Assigning...' : 'Confirm Assignment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+

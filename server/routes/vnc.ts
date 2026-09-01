@@ -16,11 +16,11 @@ const adminRoles = new Set(['administrator', 'admin', 'moderator']);
 // 1. POST /api/vnc/init -> acquires VNC ticket and port from Proxmox
 vncRouter.post('/init', async (req, res) => {
   try {
-        const { vmid } = req.body;
+        const { vmid, proxmoxConnectionId } = req.body;
     if (!vmid) {
       return res.status(400).json({ success: false, error: 'vmid is required' });
     }
-    const vm = await dbService.getVMByVMID(Number(vmid));
+    const vm = await dbService.getVMByVMID(Number(vmid), proxmoxConnectionId);
     if (!vm) return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
     const user = (req as any).authUser;
     if (!user || (!adminRoles.has(user.role) && String(vm.ownerEmail).toLowerCase() !== String(user.email).toLowerCase())) {
@@ -41,7 +41,8 @@ vncRouter.post('/init', async (req, res) => {
       return res.status(500).json({ success: false, error: 'No Proxmox connection configured.' });
     }
 
-    const c = conns[0];
+    const targetConnId = vm.proxmoxConnectionId || proxmoxConnectionId;
+    const c = (targetConnId ? conns.find(conn => String(conn.id) === String(targetConnId)) : null) || conns[0];
     const host = c.host_ip.replace(/^https?:\/\//, '').replace(/\/$/, '');
     const port = c.port || 8006;
     const token = `PVEAPIToken=${c.token_id}=${c.token_secret}`;
@@ -87,8 +88,6 @@ vncRouter.post('/init', async (req, res) => {
             ticket: json.data.ticket,
             password: json.data.password || json.data.ticket,
             port: json.data.port,
-            host,
-            apiPort: port,
           },
         });
       }
