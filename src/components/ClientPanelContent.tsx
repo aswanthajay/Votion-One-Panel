@@ -13,9 +13,19 @@ interface ClientPanelContentProps {
   workspaceConnectionId?: string;
   selectedVmid?: number;
   selectedConnectionId?: string;
+  onBackToTable?: () => void;
+  onSelectVm?: (vmid: number, connectionId?: string | null) => void;
 }
 
-export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenModal, filter, workspaceConnectionId, selectedVmid, selectedConnectionId }) => {
+export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ 
+  onOpenModal, 
+  filter, 
+  workspaceConnectionId, 
+  selectedVmid, 
+  selectedConnectionId,
+  onBackToTable,
+  onSelectVm,
+}) => {
   const effectiveConnectionId = selectedConnectionId || workspaceConnectionId;
   const [clientVMs, setClientVMs] = useState<ApiVM[]>([]);
   const [selectedVm, setSelectedVm] = useState<ApiVM | null>(null);
@@ -34,16 +44,49 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
   const [sortConfig, setSortConfig] = useState<{key: keyof ApiVM; direction: 'asc'|'desc'} | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
   
-  // PROMPT 5.4: Use useRef to track if the URL selectedVmid prop changed
-
+  // Track URL selectedVmid prop changes to switch between table and details seamlessly
   const lastSelectedVmidRef = useRef(selectedVmid);
 
   useEffect(() => {
-    if (selectedVmid !== undefined && selectedVmid !== lastSelectedVmidRef.current) {
-      lastSelectedVmidRef.current = selectedVmid;
+    lastSelectedVmidRef.current = selectedVmid;
+    if (selectedVmid) {
       setViewMode('details');
+    } else if (!filter || !['vnc', 'metrics', 'firewall', 'backups'].includes(filter)) {
+      setViewMode('table');
+      setSelectedVm(null);
     }
-  }, [selectedVmid]);
+  }, [selectedVmid, filter]);
+
+  const handleBackToTable = () => {
+    setViewMode('table');
+    setSelectedVm(null);
+    if (onBackToTable) {
+      onBackToTable();
+    } else {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('vmid');
+      params.delete('connectionId');
+      const nextSearch = params.toString();
+      window.history.pushState(null, '', `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  };
+
+  // Allow Escape key to return to instances table when looking at details
+  useEffect(() => {
+    if (viewMode !== 'details') return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const hasOpenOverlay = document.querySelector('.fixed.z-\\[1000\\], .fixed.z-\\[2000\\], .fixed.z-\\[1500\\], .alert-rules-modal');
+        if (!hasOpenOverlay) {
+          e.preventDefault();
+          handleBackToTable();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [viewMode]);
   
   const getVmPrefix = (connName?: string | null) => {
     if (!connName) return 'VM';
@@ -98,6 +141,11 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       setLoadError(null);
       
       setSelectedVm(previous => {
+        // If we are currently viewing the table and have no selectedVmid in URL, do not force-select an instance
+        if (!selectedVmid) {
+          return null;
+        }
+
         // Priority 1: Keep previously selected VM if it still exists in the fleet (match by vmKey or vmid+proxmoxConnectionId)
         if (previous) {
           const stillExists = vms.find(vm => 
@@ -108,17 +156,15 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
         }
 
         // Priority 2: URL Selection (matching BOTH vmid and connectionId if available)
-        if (selectedVmid) {
-          const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
-          const urlVm = vms.find(vm => 
-            String(vm.vmid) === String(selectedVmid) &&
-            (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
-          ) || vms.find(vm => String(vm.vmid) === String(selectedVmid));
-          if (urlVm) return urlVm;
-        }
+        const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
+        const urlVm = vms.find(vm => 
+          String(vm.vmid) === String(selectedVmid) &&
+          (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
+        ) || vms.find(vm => String(vm.vmid) === String(selectedVmid));
+        if (urlVm) return urlVm;
         
         // Priority 3: Fallback
-        return vms[0] || null;
+        return previous || vms[0] || null;
       });
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
@@ -457,12 +503,17 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
                 <tr key={vm.vmKey} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => {
                   setSelectedVm(vm);
                   setViewMode('details');
-                  const params = new URLSearchParams(window.location.search);
-                  params.set('vmid', String(vm.vmid));
-                  if (vm.proxmoxConnectionId) {
-                    params.set('connectionId', vm.proxmoxConnectionId);
+                  if (onSelectVm) {
+                    onSelectVm(vm.vmid, vm.proxmoxConnectionId);
+                  } else {
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('vmid', String(vm.vmid));
+                    if (vm.proxmoxConnectionId) {
+                      params.set('connectionId', vm.proxmoxConnectionId);
+                    }
+                    window.history.pushState(null, '', `${window.location.pathname}?${params.toString()}`);
+                    window.dispatchEvent(new PopStateEvent('popstate'));
                   }
-                  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
                   void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.proxmoxConnectionId || ''}:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined);
                 }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
@@ -522,7 +573,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ onOpenMo
       {/* Back to Table Button */}
       <div className="mb-5 md:mb-8">
         <button 
-          onClick={() => setViewMode('table')}
+          onClick={handleBackToTable}
           className="vm-instance-back-button text-[17px] text-[#2563eb] hover:text-[#1d4ed8] flex items-center gap-2 transition-colors cursor-pointer"
         >
           <span className="text-xl font-light leading-none relative -top-[1px] font-sans">←</span>

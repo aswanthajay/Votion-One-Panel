@@ -60,6 +60,18 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
   };
 
   useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [onClose]);
+
+  useEffect(() => {
     load();
     // Load VM list so VM-scoped rules can pick a target
     apiClient.getClientVMs().then((vms: any) => {
@@ -174,8 +186,16 @@ export const AlertRulesModal: React.FC<AlertRulesModalProps> = ({ onClose }) => 
   const vmName = (vmid?: number) => vms.find(v => v.vmid === vmid)?.name || `VMID ${vmid ?? '-'}`;
 
   return (
-    <div className="alert-rules-modal fixed inset-0 bg-black/60 backdrop-blur-sm z-[1500] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-white border border-[#dedfdf] rounded-xl shadow-2xl flex flex-col max-h-[90vh] my-8">
+    <div 
+      className="alert-rules-modal fixed inset-0 bg-black/60 backdrop-blur-sm z-[1500] flex items-center justify-center p-4 overflow-y-auto cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div 
+        className="w-full max-w-2xl bg-white border border-[#dedfdf] rounded-xl shadow-2xl flex flex-col max-h-[90vh] my-8 cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between border-b border-[#dedfdf] px-6 py-4 shrink-0">
           <div>
             <h3 className="text-base font-bold text-[#1a1a1a]">Alert Rules</h3>

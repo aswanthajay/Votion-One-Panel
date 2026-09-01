@@ -188,15 +188,42 @@ const ClientPanelRoute: React.FC<{
   workspaceConnectionId?: string;
 }> = ({ filter, onOpenModal, workspaceConnectionId }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const searchParams = new URLSearchParams(location.search);
   const requestedVmid = Number(searchParams.get('vmid'));
   const requestedConnectionId = searchParams.get('connectionId') || workspaceConnectionId;
+
+  const handleBackToTable = () => {
+    const sp = new URLSearchParams(location.search);
+    sp.delete('vmid');
+    sp.delete('connectionId');
+    const qs = sp.toString();
+    startTransition(() => {
+      navigate(`${location.pathname}${qs ? `?${qs}` : ''}`);
+    });
+  };
+
+  const handleSelectVm = (vmid: number, connectionId?: string | null) => {
+    const sp = new URLSearchParams(location.search);
+    sp.set('vmid', String(vmid));
+    if (connectionId) {
+      sp.set('connectionId', connectionId);
+    } else {
+      sp.delete('connectionId');
+    }
+    startTransition(() => {
+      navigate(`${location.pathname}?${sp.toString()}`);
+    });
+  };
+
   return <ClientPanelContent
     onOpenModal={onOpenModal}
     filter={filter}
     workspaceConnectionId={workspaceConnectionId}
     selectedVmid={Number.isInteger(requestedVmid) && requestedVmid > 0 ? requestedVmid : undefined}
     selectedConnectionId={requestedConnectionId || undefined}
+    onBackToTable={handleBackToTable}
+    onSelectVm={handleSelectVm}
   />;
 };
 
@@ -269,15 +296,29 @@ const AppShell: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if ((event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === 'k' || event.code === 'KeyK')) {
         event.preventDefault();
         startTransition(() => setIsCmdOpen(previous => !previous));
+      } else if (event.key === 'Escape') {
+        if (isCmdOpen) {
+          event.preventDefault();
+          startTransition(() => setIsCmdOpen(false));
+        } else if (activeModal) {
+          event.preventDefault();
+          startTransition(() => setActiveModal(null));
+        } else if (alertRulesOpen) {
+          event.preventDefault();
+          startTransition(() => setAlertRulesOpen(false));
+        } else if (isMobileSidebarOpen) {
+          event.preventDefault();
+          startTransition(() => setIsMobileSidebarOpen(false));
+        }
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isCmdOpen, activeModal, alertRulesOpen, isMobileSidebarOpen]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });

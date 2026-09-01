@@ -50,6 +50,19 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  useEffect(() => {
+    if (!activeModal) return;
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [activeModal, onClose]);
+
   const loadTickets = async () => {
     setLoading(true);
     setErrorMessage(null);
@@ -248,7 +261,12 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
     : [];
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6">
+    <div 
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-6 cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       
       {/* Toast Notification inside Modal */}
       {toastMessage && (
@@ -258,7 +276,10 @@ export const InteractiveModals: React.FC<InteractiveModalsProps> = ({ activeModa
         </div>
       )}
 
-      <div className="w-full max-w-[660px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4 text-xs">
+      <div 
+        className="w-full max-w-[660px] bg-white border border-[#dedfdf] rounded-xl shadow-2xl overflow-hidden p-6 flex flex-col gap-4 text-xs cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
         
         {/* Header Bar */}
         <div className="flex items-center justify-between border-b border-[#dedfdf] pb-3">

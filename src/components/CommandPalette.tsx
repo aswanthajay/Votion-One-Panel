@@ -54,6 +54,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
   }, [isOpen]);
 
+  // Global Escape keydown listener in capture phase to guarantee closing from anywhere
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [isOpen, onClose]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
@@ -190,7 +204,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[2000] flex items-start justify-center pt-24 p-6">
+    <div 
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[2000] flex items-start justify-center pt-24 p-6 cursor-pointer"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       {/* Toast Notification Banner inside Command Palette */}
       {toastMessage && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 p-3 bg-[#1a1a1a] text-white text-xs font-semibold rounded-lg shadow-2xl flex items-center gap-2 border border-[#333333] z-[2100]">
@@ -199,7 +220,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         </div>
       )}
 
-      <div className="bg-white w-full max-w-[640px] border border-[#1a1a1a] shadow-2xl flex flex-col relative overflow-hidden" onKeyDown={handleKeyDown}>
+      <div 
+        className="bg-white w-full max-w-[640px] border border-[#1a1a1a] shadow-2xl flex flex-col relative overflow-hidden cursor-default" 
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
+      >
         
         {/* Search Header */}
         <div className="flex items-center px-4 border-b border-[#dedfdf] bg-white">
@@ -217,9 +242,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             placeholder="Type a command, jump to VMID, or search node matrix..."
             className="w-full py-4 text-[13px] bg-transparent border-none outline-none text-[#1a1a1a] placeholder-[#888] font-medium"
           />
-          <span className="text-[10px] font-mono font-bold text-[#a7aaaa] uppercase tracking-widest">
-            ESC
-          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[10px] font-mono font-bold text-[#a7aaaa] hover:text-[#1a1a1a] hover:bg-[#f1f1f1] px-2 py-1 rounded border border-[#dedfdf] hover:border-[#1a1a1a] transition-colors uppercase tracking-widest cursor-pointer ml-2 shrink-0 flex items-center gap-1.5"
+            title="Close (Esc)"
+            aria-label="Close Command Palette"
+          >
+            <span>ESC</span>
+            <span className="text-xs">✕</span>
+          </button>
         </div>
 
         {/* Command List */}
