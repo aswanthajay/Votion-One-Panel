@@ -115,17 +115,42 @@ class OvhService {
     return text ? JSON.parse(text) : null;
   }
 
+  async generateConsumerKey(customEndpoint?: string, customAppKey?: string): Promise<{ consumerKey: string; validationUrl: string; state: string }> {
+    const endpoint = customEndpoint || this.config?.endpoint || 'ovh-ca';
+    const appKey = customAppKey || this.config?.applicationKey;
+    if (!appKey) {
+      throw new Error('Application Key is required to generate an OVH Consumer Key');
+    }
+    const baseUrl = ENDPOINTS[endpoint] || ENDPOINTS['ovh-ca'];
+    const res = await fetch(`${baseUrl}/auth/credential`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Ovh-Application': appKey,
+      },
+      body: JSON.stringify({
+        accessRules: [
+          { method: 'GET', path: '/ip*' },
+          { method: 'POST', path: '/ip*' },
+          { method: 'PUT', path: '/ip*' },
+          { method: 'DELETE', path: '/ip*' },
+          { method: 'GET', path: '/dedicated/server*' },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to request credential from OVH: ${errText}`);
+    }
+    return (await res.json()) as { consumerKey: string; validationUrl: string; state: string };
+  }
+
   // --- API Methods ---
 
   // Get all IP blocks owned by account
   async getIps(): Promise<string[]> {
-    try {
-      const data = await this.request('GET', '/ip');
-      return Array.isArray(data) ? data : [];
-    } catch (err: any) {
-      console.error('[OVH] Failed to list account IPs:', err);
-      return [];
-    }
+    const data = await this.request('GET', '/ip');
+    return Array.isArray(data) ? data : [];
   }
 
   // Get Reverse DNS record

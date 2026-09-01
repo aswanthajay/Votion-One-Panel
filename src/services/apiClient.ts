@@ -2295,6 +2295,15 @@ class ApiClient {
     return await res.json();
   }
 
+  async generateOvhConsumerKey(endpoint?: string, applicationKey?: string): Promise<{ success: boolean; consumerKey?: string; validationUrl?: string; error?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/ovh/generate-key`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ endpoint, applicationKey }),
+    });
+    return await res.json();
+  }
+
   // --- OVH Client VM IP controls ---
   async getOvhStatus(vmid: number) {
     const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/ovh/status`, { headers: this.getHeaders() });

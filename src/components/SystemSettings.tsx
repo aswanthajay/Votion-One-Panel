@@ -56,6 +56,7 @@ export const SystemSettings: React.FC = () => {
   const [ovhConsumerKey, setOvhConsumerKey] = useState('');
   const [ovhSaving, setOvhSaving] = useState(false);
   const [ovhTesting, setOvhTesting] = useState(false);
+  const [ovhGeneratingKey, setOvhGeneratingKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -240,6 +241,30 @@ export const SystemSettings: React.FC = () => {
         show('error', 'Network error during connection test.');
       } finally {
         setOvhTesting(false);
+      }
+    };
+
+    const handleGenerateOvhKey = async () => {
+      if (!ovhAppKey) {
+        show('error', 'Please enter your Application Key first.');
+        return;
+      }
+      setOvhGeneratingKey(true);
+      try {
+        const res = await apiClient.generateOvhConsumerKey(ovhEndpoint, ovhAppKey);
+        if (res.success && res.consumerKey) {
+          setOvhConsumerKey(res.consumerKey);
+          show('success', 'Consumer Key generated! Authorization page opened.');
+          if (res.validationUrl) {
+            window.open(res.validationUrl, '_blank', 'noopener,noreferrer');
+          }
+        } else {
+          show('error', res.error || 'Failed to generate Consumer Key from OVH.');
+        }
+      } catch {
+        show('error', 'Network error generating OVH Consumer Key.');
+      } finally {
+        setOvhGeneratingKey(false);
       }
     };
 
@@ -712,6 +737,14 @@ export const SystemSettings: React.FC = () => {
                   placeholder={ovhConsumerKey ? '********' : 'Enter consumer key'}
                   className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
                 />
+                <button
+                  type="button"
+                  onClick={handleGenerateOvhKey}
+                  disabled={ovhGeneratingKey || !ovhAppKey}
+                  className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563eb] hover:text-[#1d4ed8] cursor-pointer disabled:opacity-50"
+                >
+                  {ovhGeneratingKey ? 'Generating token from OVH...' : '🔑 Generate & Authorize Consumer Key in 1 Click →'}
+                </button>
               </div>
             </div>
           </div>

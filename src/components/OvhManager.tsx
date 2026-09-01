@@ -150,7 +150,15 @@ export const OvhManager: React.FC = () => {
     try {
       const [ipsList, vmsList] = await Promise.all([
         apiClient.getAdminOvhIps().catch((err: any) => {
-          if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
+          const msg = String(err.message || '');
+          if (
+            msg.includes('not been granted') ||
+            msg.includes('granted') ||
+            msg.includes('credential') ||
+            msg.includes('NOT_CREDENTIAL') ||
+            msg.includes('INVALID_KEY') ||
+            msg.includes('Forbidden')
+          ) {
             setPermissionError(true);
           }
           return [];
@@ -211,21 +219,42 @@ export const OvhManager: React.FC = () => {
     return result;
   };
 
-  // Discovered flat host list with VM metadata
+  // Discovered flat host list with VM metadata + auto-supplement with live Proxmox VM IPs
   const hostListWithMetadata = useMemo(() => {
     const list: Array<{ ip: string; block: string; boundVm: ApiVM | null }> = [];
+    const seen = new Set<string>();
+
     for (const block of ovhIps) {
       const expanded = expandCidr(block);
       for (const ip of expanded) {
-        list.push({
-          ip,
-          block,
-          boundVm: vmByIp.get(ip) || null,
-        });
+        if (!seen.has(ip)) {
+          seen.add(ip);
+          list.push({
+            ip,
+            block,
+            boundVm: vmByIp.get(ip) || null,
+          });
+        }
       }
     }
+
+    // Automatically supplement with IPs assigned to running Proxmox guest VMs
+    vms.forEach(vm => {
+      if (vm.ipAddress) {
+        const clean = vm.ipAddress.split('/')[0].trim();
+        if (clean && !seen.has(clean)) {
+          seen.add(clean);
+          list.push({
+            ip: clean,
+            block: `${clean}/32`,
+            boundVm: vm,
+          });
+        }
+      }
+    });
+
     return list;
-  }, [ovhIps, vmByIp]);
+  }, [ovhIps, vms, vmByIp]);
 
   // Filtered IP List
   const filteredHostList = useMemo(() => {
@@ -573,10 +602,14 @@ export const OvhManager: React.FC = () => {
       {permissionError && (
         <div className="mb-6 p-4 rounded-xl border border-[#f3d19a] dark:border-[#78350f] bg-[#fffaf0] dark:bg-[#1c1508] text-xs leading-relaxed">
           <div className="flex items-center gap-2 mb-1.5 font-bold text-[#b45309]">
-            <span>🔑</span> OVH API Token Lacks IP Scope Privileges
+            <span>🔑</span> OVH API Authentication Required / Pending Validation
           </div>
           <p className="text-[#656b6b] dark:text-[#a0a0a0] mb-2">
-            Your current OVH Consumer Key cannot access the <code>/ip</code> API tree. Please generate a key with <code>GET/POST/PUT/DELETE /ip/*</code> access on the OVH Token Portal and update <strong>System Settings → OVH API Credentials</strong>.
+            Your OVH Consumer Key has not been validated on your OVH account or lacks access to the <code>/ip</code> API tree.
+            Guest VM IPs from your Proxmox nodes are loaded below, but to discover complete OVH subnets and failover pools:
+          </p>
+          <p className="text-[#1a1a1a] dark:text-white font-medium">
+            Go to <strong>System Settings → OVH Cloud API</strong> and click <strong>"Generate & Authorize Consumer Key in 1 Click"</strong> to activate your token on OVH.
           </p>
         </div>
       )}

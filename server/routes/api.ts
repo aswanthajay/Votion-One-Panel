@@ -1806,15 +1806,46 @@ apiRouter.post('/admin/settings/smtp/test', async (req, res) => {
     }
   });
 
+  apiRouter.post('/admin/settings/ovh/generate-key', async (req, res) => {
+    try {
+      const endpoint = String(req.body?.endpoint || 'ovh-ca');
+      const applicationKey = String(req.body?.applicationKey || '').trim();
+      if (!applicationKey) {
+        return res.status(400).json({ success: false, error: 'Application Key is required' });
+      }
+      const cred = await ovhService.generateConsumerKey(endpoint, applicationKey);
+      
+      const current = await dbService.getSystemSetting('ovh_config');
+      await dbService.updateSystemSetting('ovh_config', {
+        ...(current || {}),
+        endpoint,
+        applicationKey,
+        consumerKey: cred.consumerKey,
+        enabled: true,
+      });
+      if (typeof ovhService.loadConfig === 'function') {
+        await ovhService.loadConfig();
+      }
+      await dbService.logAudit(req.authUser?.email || 'unknown', 'GENERATE_OVH_KEY', 'system', 'Generated OVH consumer key');
+      res.json({ success: true, ...cred });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
   apiRouter.post('/admin/settings/ovh/test', async (req, res) => {
     try {
       if (!ovhService.isEnabled()) {
         return res.status(503).json({ success: false, error: 'OVH is disabled. Save an enabled OVH configuration first.' });
       }
       await ovhService.syncTime();
-      res.json({ success: true, message: 'Test connection to OVH API succeeded!' });
+      const ips = await ovhService.getIps();
+      res.json({ success: true, message: `OVH API authenticated successfully! Discovered ${ips.length} IP block(s).` });
     } catch (err: any) {
-      res.status(502).json({ success: false, error: `OVH API test failed: ${err.message || String(err)}` });
+      const errMsg = err?.message || String(err);
+      const isAuthError = errMsg.includes('credential') || errMsg.includes('NOT_CREDENTIAL') || errMsg.includes('Forbidden') || errMsg.includes('INVALID_KEY');
+      const hint = isAuthError ? ' The Consumer Key does not exist or has not been authorized. Click "Generate & Authorize" to authorize it on OVH.' : '';
+      res.status(502).json({ success: false, error: `OVH API test failed: ${errMsg}.${hint}` });
     }
   });
 
