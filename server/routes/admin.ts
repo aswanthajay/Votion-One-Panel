@@ -237,11 +237,7 @@ adminRouter.post('/settings/smtp/test', async (req, res) => {
     if (!emailService.isReady()) {
       return res.status(503).json({ success: false, error: 'SMTP is disabled or has not initialized. Save an enabled SMTP configuration first.' });
     }
-    const result = await emailService.sendEmail(
-      targetEmail,
-      'Votion One SMTP Test',
-      '<div style="font-family: sans-serif; color: #1a1a1a;"><h2>Votion One SMTP Test</h2><p>Your SMTP configuration is working correctly.</p><p>Best regards,<br/>Votion One</p></div>'
-    );
+    const result = await emailService.sendTestEmail(targetEmail);
     if (result) {
       res.json({ success: true, message: `Test email dispatched to ${targetEmail}` });
     } else {

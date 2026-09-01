@@ -122,10 +122,16 @@ class EmailService {
     try {
       const info = await this.transporter.sendMail({
         from: `"Votion One™" <${this.fromEmail}>`,
+        replyTo: this.fromEmail,
         to,
         subject,
         html,
         text,
+        headers: {
+          'X-Mailer': 'Votion One Cloud Platform',
+          'X-Entity-Ref-ID': `votion-${Date.now()}`,
+          'X-Auto-Response-Suppress': 'OOF, AutoReply',
+        },
       });
       console.log(`[SMTP] Email sent successfully to ${to}: ${info.messageId}`);
       return true;
@@ -266,6 +272,22 @@ class EmailService {
       preheader: 'Use the one-time code to complete your Votion One™ registration.',
       code: otp,
       securityNote: 'This code expires after 15 minutes and can be used once. Votion One™ personnel will never ask you to share it.',
+    });
+  }
+
+  async sendTestEmail(to: string) {
+    const portalUrl = getPortalUrl();
+    return this.sendBrandedTemplate({
+      to,
+      templateKey: 'connection_test',
+      fallbackSubject: 'Votion One™ SMTP Configuration Verification',
+      fallbackBody: '<p style="margin: 0 0 16px;">This message confirms that outbound mail delivery is properly configured and functional for your Votion One™ cloud workspace.</p><p style="margin: 0;">If you received this message, your SMTP transport and DNS authentication records are active.</p>',
+      variables: { email: to, portalUrl },
+      eyebrow: 'System Diagnostics',
+      title: 'SMTP Mail Delivery Verified',
+      preheader: 'Your Votion One™ mail delivery subsystem is active and operating normally.',
+      action: { label: 'Open Workspace Console', url: portalUrl },
+      securityNote: 'This is an administrative test notification. No user account modifications have occurred.',
     });
   }
 
