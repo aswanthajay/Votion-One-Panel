@@ -1966,7 +1966,8 @@ apiRouter.get('/billing/vm-profiles', async (req, res) => {
 apiRouter.put('/billing/vms/:vmid/profile', async (req, res) => {
   if (!isBillingAdmin(req)) return res.status(403).json({ success: false, error: 'Administrator access required.' });
   try {
-    const data = await dbService.upsertVmBillingProfile(Number(req.params.vmid), req.body || {}, billingActor(req));
+    const connId = req.body?.proxmoxConnectionId || (req.query?.connectionId as string) || (req.headers['x-proxmox-connection-id'] as string) || undefined;
+    const data = await dbService.upsertVmBillingProfile(Number(req.params.vmid), req.body || {}, billingActor(req), connId);
     if (!data) return res.status(404).json({ success: false, error: 'VM not found.' });
     res.json({ success: true, data });
   } catch (err: any) {

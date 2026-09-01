@@ -61,7 +61,7 @@ export class BillingLifecycleWorker {
       const profiles = await dbService.getBillableVmBillingProfiles();
       for (const profile of profiles) {
         try {
-          await dbService.createInvoiceForVm(profile.vmid);
+          await dbService.createInvoiceForVm(profile.vmid, undefined, profile.proxmoxConnectionId);
         } catch (error: any) {
           console.error(`[BILLING WORKER] Invoice generation failed for VMID ${profile.vmid}:`, error?.message || error);
         }
@@ -124,7 +124,7 @@ export class BillingLifecycleWorker {
     const eligibleAt = invoice.suspensionEligibleAt ? new Date(invoice.suspensionEligibleAt).getTime() : Number.POSITIVE_INFINITY;
     if (invoice.status === 'overdue' && now >= eligibleAt) {
       const reason = `Invoice ${invoice.id} remains unpaid after the configured grace period.`;
-      const action = await dbService.createBillingSuspensionAction(invoice.id, invoice.vmid, reason);
+      const action = await dbService.createBillingSuspensionAction(invoice.id, invoice.vmid, reason, invoice.proxmoxConnectionId);
       if (!action) return;
 
       if (await dbService.recordBillingEvent({
@@ -146,7 +146,7 @@ export class BillingLifecycleWorker {
 
       if (config.suspensionExecutionEnabled === true && action.status === 'pending') {
         try {
-          const vm = await dbService.getVMByVMID(invoice.vmid);
+          const vm = await dbService.getVMByVMID(invoice.vmid, invoice.proxmoxConnectionId);
           if (!vm) throw new Error('VM record not found.');
           if (!vm.isSuspended) {
             await proxmoxApi.executePowerAction(vm.node, vm.vmid, 'stop', 'billing-worker@votioncloud.org');
@@ -154,7 +154,7 @@ export class BillingLifecycleWorker {
           }
           await dbService.updateBillingSuspensionAction(action.id, 'executed', 'billing-worker@votioncloud.org');
           await dbService.setBillingInvoiceStatus(invoice.id, 'suspended');
-          await dbService.setVmBillingStatus(vm.vmid, 'suspended');
+          await dbService.setVmBillingStatus(vm.vmid, 'suspended', invoice.proxmoxConnectionId);
           await dbService.logAudit('billing-worker@votioncloud.org', 'AUTO_BILLING_SUSPEND', `VMID ${vm.vmid}`, `Reversibly suspended after unpaid invoice ${invoice.id}; VM and disks retained.`);
         } catch (error: any) {
           await dbService.updateBillingSuspensionAction(action.id, 'failed', 'billing-worker@votioncloud.org', String(error?.message || error).slice(0, 500));

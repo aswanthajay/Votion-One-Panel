@@ -313,6 +313,8 @@ export interface ApiVmBillingProfile {
   vmid: number;
   vmName?: string;
   ownerEmail?: string;
+  proxmoxConnectionId?: string | null;
+  connectionName?: string | null;
   planId?: string;
   planName?: string;
   customMonthlyPriceCents: number | null;
@@ -954,8 +956,15 @@ class ApiClient {
     return data.data || [];
   }
 
-  async updateVmBillingProfile(vmid: number, profile: Partial<ApiVmBillingProfile>): Promise<ApiVmBillingProfile> {
-    const res = await this.apiFetch(`${API_BASE_URL}/billing/vms/${vmid}/profile`, { method: 'PUT', headers: this.getHeaders(), body: JSON.stringify(profile) });
+  async updateVmBillingProfile(vmid: number, profile: Partial<ApiVmBillingProfile>, proxmoxConnectionId?: string | null): Promise<ApiVmBillingProfile> {
+    const connId = proxmoxConnectionId || profile.proxmoxConnectionId;
+    const query = connId ? `?connectionId=${encodeURIComponent(connId)}` : '';
+    const headers = { ...this.getHeaders(), ...(connId ? { 'x-proxmox-connection-id': connId } : {}) };
+    const res = await this.apiFetch(`${API_BASE_URL}/billing/vms/${vmid}/profile${query}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...profile, ...(connId ? { proxmoxConnectionId: connId } : {}) }),
+    });
     const data = await this.readApiResponse(res, 'Unable to save VM billing profile.');
     return data.data;
   }

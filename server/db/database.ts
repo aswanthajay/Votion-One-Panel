@@ -2608,14 +2608,14 @@ export class DatabaseService {
                COALESCE(SUM(COALESCE(v.maxmem, v.memory, v.ram_mb * 1048576, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_ram_bytes,
                COALESCE(SUM(COALESCE(v.maxdisk, v.disk, 0)) FILTER (WHERE LOWER(TRIM(COALESCE(v.status, ''))) IN ('running', 'online', 'up')), 0)::numeric AS running_disk_bytes
         FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id
-        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid AND p.proxmox_connection_id = v.proxmox_connection_id
         GROUP BY v.proxmox_connection_id, pc.name`),
       pgPool.query(`SELECT v.proxmox_connection_id,
                COUNT(i.id) FILTER (WHERE i.currency = 'INR')::int AS invoice_count,
                COALESCE(SUM(i.total_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS billed_paise,
                COALESCE(SUM(i.paid_cents) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS collected_paise,
                COALESCE(SUM(GREATEST(i.total_cents - i.paid_cents, 0)) FILTER (WHERE i.currency = 'INR'), 0)::bigint AS outstanding_paise
-        FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid
+        FROM vms v LEFT JOIN billing_invoices i ON i.vmid = v.vmid AND (i.proxmox_connection_id IS NULL OR i.proxmox_connection_id = v.proxmox_connection_id)
         GROUP BY v.proxmox_connection_id`),
       pgPool.query(`WITH billing_currency AS (
           SELECT COALESCE(MAX(setting_value->>'currency'), 'INR') AS currency
@@ -2629,7 +2629,7 @@ export class DatabaseService {
                COUNT(*)::int AS assignment_count,
                COALESCE(SUM(COALESCE(p.custom_monthly_price_cents, pl.monthly_price_cents, 0)), 0)::bigint AS projected_revenue_cents
         FROM vms v
-        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+        LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid AND p.proxmox_connection_id = v.proxmox_connection_id
         LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
         CROSS JOIN billing_currency
         WHERE v.owner_email NOT LIKE '%unassigned@%'
@@ -2743,7 +2743,7 @@ export class DatabaseService {
     return res.rows[0] || null;
   }
 
-  async getVmBillingProfiles(vmid?: number, ownerEmail?: string) {
+  async getVmBillingProfiles(vmid?: number, ownerEmail?: string, proxmoxConnectionId?: string) {
     const params: any[] = [];
     const conditions = ["v.owner_email NOT LIKE 'unassigned@%'"];
     if (vmid !== undefined) {
@@ -2754,30 +2754,51 @@ export class DatabaseService {
       params.push(ownerEmail.toLowerCase().trim());
       conditions.push(`v.owner_email = $${params.length}`);
     }
+    if (proxmoxConnectionId) {
+      params.push(proxmoxConnectionId);
+      conditions.push(`v.proxmox_connection_id = $${params.length}`);
+    }
     const res = await pgPool.query(
-      `SELECT v.vmid, v.vm_name, v.owner_email, v.expiry_date,
+      `SELECT v.vmid, v.vm_name, v.owner_email, v.expiry_date, v.proxmox_connection_id,
+              pc.name AS connection_name,
               p.plan_id, p.custom_monthly_price_cents, p.billing_status,
               p.billing_cycle_day, p.grace_period_days, p.next_due_at, p.ip_count, p.updated_at,
               pl.name AS plan_name,
               CASE WHEN p.custom_monthly_price_cents IS NOT NULL THEN COALESCE((SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') ELSE COALESCE(pl.currency, (SELECT setting_value->>'currency' FROM system_settings WHERE setting_key = 'billing_config'), 'INR') END AS effective_currency,
               pl.monthly_price_cents
        FROM vms v
-       LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid
+       LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id
+       LEFT JOIN vm_billing_profiles p ON p.vmid = v.vmid AND p.proxmox_connection_id = v.proxmox_connection_id
        LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
        WHERE ${conditions.join(' AND ')}
-       ORDER BY v.vmid ASC`,
+       ORDER BY v.proxmox_connection_id ASC, v.vmid ASC`,
       params
     );
-    return res.rows.map(row => ({ vmid: Number(row.vmid), vmName: row.vm_name, ownerEmail: row.owner_email, planId: row.plan_id, planName: row.plan_name,       customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents), monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents), currency: row.effective_currency || 'INR', billingStatus: row.billing_status || 'active',
-
+    return res.rows.map(row => ({
+      vmid: Number(row.vmid),
+      vmName: row.vm_name,
+      ownerEmail: row.owner_email,
+      proxmoxConnectionId: row.proxmox_connection_id,
+      connectionName: row.connection_name || null,
+      planId: row.plan_id,
+      planName: row.plan_name,
+      customMonthlyPriceCents: row.custom_monthly_price_cents === null ? null : Number(row.custom_monthly_price_cents),
+      monthlyPriceCents: row.custom_monthly_price_cents === null ? Number(row.monthly_price_cents || 0) : Number(row.custom_monthly_price_cents),
+      currency: row.effective_currency || 'INR',
+      billingStatus: row.billing_status || 'active',
       billingCycleDay: Number(row.billing_cycle_day || 1),
       gracePeriodDays: row.grace_period_days === null || row.grace_period_days === undefined ? null : Number(row.grace_period_days),
-      nextDueAt: row.next_due_at || row.expiry_date, ipCount: Number(row.ip_count || 1), updatedAt: row.updated_at }));
+      nextDueAt: row.next_due_at || row.expiry_date,
+      ipCount: Number(row.ip_count || 1),
+      updatedAt: row.updated_at
+    }));
   }
 
-  async upsertVmBillingProfile(vmid: number, profile: any, actorEmail: string) {
-    const vm = await this.getVMByVMID(vmid);
+  async upsertVmBillingProfile(vmid: number, profile: any, actorEmail: string, proxmoxConnectionId?: string) {
+    const vm = await this.getVMByVMID(vmid, proxmoxConnectionId);
     if (!vm) return null;
+    const connectionId = proxmoxConnectionId || vm.proxmoxConnectionId;
+    if (!connectionId) throw new Error('Proxmox connection ID is required for VM billing profile.');
     const planId = profile.planId ? String(profile.planId) : null;
     if (planId) {
       const plan = await pgPool.query('SELECT id FROM pricing_plans WHERE id = $1', [planId]);
@@ -2791,14 +2812,14 @@ export class DatabaseService {
     const nextDueAt = profile.nextDueAt || vm.expiryDate || null;
     const ipCount = Math.min(256, Math.max(1, Math.round(Number(profile.ipCount) || 1)));
     const res = await pgPool.query(
-      `INSERT INTO vm_billing_profiles (vmid, plan_id, custom_monthly_price_cents, billing_status, billing_cycle_day, grace_period_days, next_due_at, ip_count, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-       ON CONFLICT (vmid) DO UPDATE SET plan_id = $2, custom_monthly_price_cents = $3, billing_status = $4, billing_cycle_day = $5, grace_period_days = $6, next_due_at = $7, ip_count = $8, updated_at = NOW()
+      `INSERT INTO vm_billing_profiles (proxmox_connection_id, vmid, plan_id, custom_monthly_price_cents, billing_status, billing_cycle_day, grace_period_days, next_due_at, ip_count, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+       ON CONFLICT (proxmox_connection_id, vmid) DO UPDATE SET plan_id = $3, custom_monthly_price_cents = $4, billing_status = $5, billing_cycle_day = $6, grace_period_days = $7, next_due_at = $8, ip_count = $9, updated_at = NOW()
        RETURNING *`,
-      [vmid, planId, customPrice, billingStatus, cycleDay, grace, nextDueAt, ipCount]
+      [connectionId, vmid, planId, customPrice, billingStatus, cycleDay, grace, nextDueAt, ipCount]
     );
-    await this.logAudit(actorEmail, 'UPDATE_VM_BILLING_PROFILE', `VMID ${vmid}`, `Updated plan ${planId || 'custom'} and billing status ${billingStatus}`);
-    return (await this.getVmBillingProfiles(vmid))[0] || res.rows[0];
+    await this.logAudit(actorEmail, 'UPDATE_VM_BILLING_PROFILE', `VMID ${vmid} (${connectionId})`, `Updated plan ${planId || 'custom'} and billing status ${billingStatus}`);
+    return (await this.getVmBillingProfiles(vmid, undefined, connectionId))[0] || res.rows[0];
   }
 
   async getBillingInvoices(accountEmail?: string, status?: string, limit = 100) {
@@ -2809,7 +2830,7 @@ export class DatabaseService {
     params.push(Math.min(500, Math.max(1, limit)));
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const res = await pgPool.query(
-      `SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i JOIN vms v ON v.vmid = i.vmid LEFT JOIN pricing_plans p ON p.id = i.plan_id ${where} ORDER BY i.due_at ASC, i.created_at DESC LIMIT $${params.length}`,
+      `SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i LEFT JOIN vms v ON v.vmid = i.vmid AND (i.proxmox_connection_id IS NULL OR v.proxmox_connection_id = i.proxmox_connection_id) LEFT JOIN pricing_plans p ON p.id = i.plan_id ${where} ORDER BY i.due_at ASC, i.created_at DESC LIMIT $${params.length}`,
       params
     );
     return res.rows.map(row => this.mapBillingInvoice(row));
@@ -2889,8 +2910,8 @@ export class DatabaseService {
     };
   }
 
-  async createInvoiceForVm(vmid: number, issuedAt = new Date()) {
-    const profiles = await this.getVmBillingProfiles(vmid);
+  async createInvoiceForVm(vmid: number, issuedAt = new Date(), proxmoxConnectionId?: string) {
+    const profiles = await this.getVmBillingProfiles(vmid, undefined, proxmoxConnectionId);
     const profile = profiles[0];
     if (!profile || profile.billingStatus === 'closed' || profile.billingStatus === 'waived') return null;
     const periodStart = new Date(issuedAt.getFullYear(), issuedAt.getMonth(), 1);
@@ -2900,14 +2921,15 @@ export class DatabaseService {
     const tax = Math.round(subtotal * (Number(config.taxRatePercent) / 100));
     const dueAt = profile.nextDueAt ? new Date(profile.nextDueAt) : new Date(issuedAt.getTime() + Number(config.daysBeforeDue || 7) * 86400000);
     const invoiceId = `inv-${issuedAt.getTime()}-${vmid}-${crypto.randomBytes(3).toString('hex')}`;
+    const connId = profile.proxmoxConnectionId || proxmoxConnectionId || null;
     const res = await pgPool.query(
-      `INSERT INTO billing_invoices (id, account_email, vmid, plan_id, period_start, period_end, issued_at, due_at, subtotal_cents, tax_cents, total_cents, paid_cents, currency, status, suspension_eligible_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'open', $13)
-       ON CONFLICT (vmid, period_start, period_end) DO UPDATE SET due_at = EXCLUDED.due_at, suspension_eligible_at = EXCLUDED.suspension_eligible_at
+      `INSERT INTO billing_invoices (id, account_email, vmid, proxmox_connection_id, plan_id, period_start, period_end, issued_at, due_at, subtotal_cents, tax_cents, total_cents, paid_cents, currency, status, suspension_eligible_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, $13, 'open', $14)
+       ON CONFLICT (proxmox_connection_id, vmid, period_start, period_end) DO UPDATE SET due_at = EXCLUDED.due_at, suspension_eligible_at = EXCLUDED.suspension_eligible_at
        RETURNING *`,
-      [invoiceId, profile.ownerEmail, vmid, profile.planId, periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), issuedAt, dueAt, subtotal, tax, subtotal + tax, profile.currency || config.currency || 'INR', new Date(dueAt.getTime() + Number(profile.gracePeriodDays ?? config.gracePeriodDays ?? 7) * 86400000)]
+      [invoiceId, profile.ownerEmail, vmid, connId, profile.planId, periodStart.toISOString().slice(0, 10), periodEnd.toISOString().slice(0, 10), issuedAt, dueAt, subtotal, tax, subtotal + tax, profile.currency || config.currency || 'INR', new Date(dueAt.getTime() + Number(profile.gracePeriodDays ?? config.gracePeriodDays ?? 7) * 86400000)]
     );
-    return this.mapBillingInvoice((await pgPool.query('SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i JOIN vms v ON v.vmid = i.vmid LEFT JOIN pricing_plans p ON p.id = i.plan_id WHERE i.id = $1', [res.rows[0].id])).rows[0]);
+    return this.mapBillingInvoice((await pgPool.query('SELECT i.*, v.vm_name, p.name AS plan_name FROM billing_invoices i LEFT JOIN vms v ON v.vmid = i.vmid AND (i.proxmox_connection_id IS NULL OR v.proxmox_connection_id = i.proxmox_connection_id) LEFT JOIN pricing_plans p ON p.id = i.plan_id WHERE i.id = $1', [res.rows[0].id])).rows[0]);
   }
 
   async markOverdueInvoices() {
@@ -2956,14 +2978,15 @@ export class DatabaseService {
       `SELECT p.*, v.vm_name, v.owner_email, v.expiry_date, v.node, v.type,
               pl.name AS plan_name, pl.currency, pl.monthly_price_cents
        FROM vm_billing_profiles p
-       JOIN vms v ON v.vmid = p.vmid
+       JOIN vms v ON v.vmid = p.vmid AND v.proxmox_connection_id = p.proxmox_connection_id
        LEFT JOIN pricing_plans pl ON pl.id = p.plan_id
        WHERE v.owner_email NOT LIKE 'unassigned@%'
          AND p.billing_status NOT IN ('closed', 'waived')
-       ORDER BY p.vmid ASC`
+       ORDER BY p.proxmox_connection_id ASC, p.vmid ASC`
     );
     return res.rows.map(row => ({
       vmid: Number(row.vmid),
+      proxmoxConnectionId: row.proxmox_connection_id,
       vmName: row.vm_name,
       ownerEmail: row.owner_email,
       node: row.node,
@@ -2982,17 +3005,18 @@ export class DatabaseService {
     return rows.find(invoice => invoice.id === invoiceId) || null;
   }
 
-  async createBillingSuspensionAction(invoiceId: string, vmid: number, reason: string) {
+  async createBillingSuspensionAction(invoiceId: string, vmid: number, reason: string, proxmoxConnectionId?: string) {
     const id = `susp-${Date.now()}-${vmid}-${crypto.randomBytes(3).toString('hex')}`;
+    const connId = proxmoxConnectionId || null;
     const res = await pgPool.query(
-      `INSERT INTO billing_suspension_actions (id, invoice_id, vmid, status, reason)
-       VALUES ($1, $2, $3, 'pending', $4)
-       ON CONFLICT (vmid, invoice_id, status) DO NOTHING
+      `INSERT INTO billing_suspension_actions (id, invoice_id, vmid, proxmox_connection_id, status, reason)
+       VALUES ($1, $2, $3, $4, 'pending', $5)
+       ON CONFLICT (proxmox_connection_id, vmid, invoice_id, status) DO NOTHING
        RETURNING *`,
-      [id, invoiceId, vmid, reason.slice(0, 1000)]
+      [id, invoiceId, vmid, connId, reason.slice(0, 1000)]
     );
     if (res.rows[0]) return res.rows[0];
-    const existing = await pgPool.query('SELECT * FROM billing_suspension_actions WHERE vmid = $1 AND invoice_id = $2 AND status = \'pending\' LIMIT 1', [vmid, invoiceId]);
+    const existing = await pgPool.query('SELECT * FROM billing_suspension_actions WHERE vmid = $1 AND invoice_id = $2 AND status = \'pending\' AND (proxmox_connection_id IS NULL OR proxmox_connection_id = $3) LIMIT 1', [vmid, invoiceId, connId]);
     return existing.rows[0] || null;
   }
 
@@ -3016,8 +3040,11 @@ export class DatabaseService {
     return res.rows[0] || null;
   }
 
-  async setVmBillingStatus(vmid: number, billingStatus: 'active' | 'grace' | 'suspended' | 'waived' | 'closed') {
-    const res = await pgPool.query('UPDATE vm_billing_profiles SET billing_status = $1, updated_at = NOW() WHERE vmid = $2 RETURNING vmid, billing_status', [billingStatus, vmid]);
+  async setVmBillingStatus(vmid: number, billingStatus: 'active' | 'grace' | 'suspended' | 'waived' | 'closed', proxmoxConnectionId?: string) {
+    const where = proxmoxConnectionId ? 'WHERE vmid = $2 AND proxmox_connection_id = $3' : 'WHERE vmid = $2';
+    const params: any[] = [billingStatus, vmid];
+    if (proxmoxConnectionId) params.push(proxmoxConnectionId);
+    const res = await pgPool.query(`UPDATE vm_billing_profiles SET billing_status = $1, updated_at = NOW() ${where} RETURNING vmid, billing_status`, params);
     return res.rows[0] || null;
   }
 
@@ -3034,7 +3061,7 @@ export class DatabaseService {
       `SELECT a.*, i.account_email, i.total_cents, i.paid_cents, v.vm_name
        FROM billing_suspension_actions a
        LEFT JOIN billing_invoices i ON i.id = a.invoice_id
-       JOIN vms v ON v.vmid = a.vmid
+       LEFT JOIN vms v ON v.vmid = a.vmid AND (a.proxmox_connection_id IS NULL OR v.proxmox_connection_id = a.proxmox_connection_id)
        ${where}
        ORDER BY a.requested_at DESC LIMIT 500`,
       params
