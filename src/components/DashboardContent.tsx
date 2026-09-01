@@ -135,26 +135,8 @@ export const DashboardContent: React.FC<{
   const [pendingReimageRequests, setPendingReimageRequests] = useState<ApiReimageRequest[]>([]);
   const [activeNotifications, setActiveNotifications] = useState<ApiNotification[]>([]);
 
-  // Filter & Search States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'stopped' | 'suspended' | 'expiring'>('all');
-  const [locationFilter, setLocationFilter] = useState('all');
-
-  // Interactive Action & Modal States
-  const [modalType, setModalType] = useState<
-    | 'provision-vm'
-    | 'assign-vm'
-    | 'extend-expiry'
-    | 'reinstall-os'
-    | null
-  >(null);
-  const [selectedVmForAction, setSelectedVmForAction] = useState<ApiVM | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<ApiVM | null>(null);
-  const [targetAccountEmail, setTargetAccountEmail] = useState('');
-  const [assignExpiryMode, setAssignExpiryMode] = useState<'keep' | 'never' | 'custom'>('keep');
-  const [assignExpiryDate, setAssignExpiryDate] = useState('');
-  const [extendDays, setExtendDays] = useState(30);
-  const [selectedTargetOS, setSelectedTargetOS] = useState('Ubuntu 24.04 LTS');
+  // Modal State
+  const [modalType, setModalType] = useState<'provision-vm' | null>(null);
 
   // Provision Form State
   const [newVmid, setNewVmid] = useState(105);
@@ -236,9 +218,6 @@ export const DashboardContent: React.FC<{
       setLoadError(null);
 
       // Set fallback defaults for forms if not already set
-      if (apiAccounts.length > 0 && !targetAccountEmail) {
-        setTargetAccountEmail(apiAccounts[0].email);
-      }
       if (mappedNodes.length > 0 && !newVmNode) {
         setNewVmNode(mappedNodes[0].name);
       }
@@ -248,7 +227,7 @@ export const DashboardContent: React.FC<{
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [workspaceConnectionId, targetAccountEmail, newVmNode]);
+  }, [workspaceConnectionId, newVmNode]);
 
   useEffect(() => {
     loadData();
@@ -285,107 +264,6 @@ export const DashboardContent: React.FC<{
 
     return { total, running, suspended, stopped, qemuCount, lxcCount, expiringSoon, expired };
   }, [vms, clusterOverview]);
-
-  // Filtered VMs for the Interactive Grid
-  const visibleVms = useMemo(() => {
-    let list = typeFilter ? vms.filter(vm => vm.type === typeFilter) : vms;
-
-    if (locationFilter !== 'all') {
-      list = list.filter(vm => (vm.proxmoxConnectionName || 'Unassigned location') === locationFilter);
-    }
-
-    if (statusFilter === 'running') {
-      list = list.filter(vm => vm.status === 'running' && !vm.isSuspended);
-    } else if (statusFilter === 'suspended') {
-      list = list.filter(vm => vm.isSuspended);
-    } else if (statusFilter === 'stopped') {
-      list = list.filter(vm => vm.status === 'stopped' && !vm.isSuspended);
-    } else if (statusFilter === 'expiring') {
-      const now = Date.now();
-      list = list.filter(vm => {
-        if (!vm.expiryDate) return false;
-        const diff = (new Date(vm.expiryDate).getTime() - now) / (1000 * 3600 * 24);
-        return diff <= 7;
-      });
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      list = list.filter(
-        vm =>
-          String(vm.vmid).includes(q) ||
-          (vm.name || '').toLowerCase().includes(q) ||
-          (vm.ownerEmail || '').toLowerCase().includes(q) ||
-          (vm.node || '').toLowerCase().includes(q) ||
-          (vm.ipAddress || '').toLowerCase().includes(q) ||
-          (vm.os || '').toLowerCase().includes(q)
-      );
-    }
-
-    return list.sort((a, b) => {
-      const connA = a.proxmoxConnectionName || '';
-      const connB = b.proxmoxConnectionName || '';
-      if (connA !== connB) return connA.localeCompare(connB);
-      return a.vmid - b.vmid;
-    });
-  }, [vms, typeFilter, locationFilter, statusFilter, searchQuery]);
-
-  // Action Handlers
-  const handleToggleSuspend = async (vmid: number, isSuspended: boolean, proxmoxConnectionId?: string | null) => {
-    try {
-      await apiClient.suspendVM(vmid, !isSuspended, proxmoxConnectionId || undefined);
-      showToast(`Instance ${vmid} ${!isSuspended ? 'suspended' : 'unsuspended'} successfully.`);
-      loadData(false);
-    } catch {
-      showToast('Failed to update suspension status.');
-    }
-  };
-
-  const handleExtendExpirySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedVmForAction) return;
-    try {
-      await apiClient.extendVMExpiry(selectedVmForAction.vmid, extendDays);
-      showToast(`Instance ${selectedVmForAction.vmid} extended by ${extendDays} days.`);
-      setModalType(null);
-      loadData(false);
-    } catch {
-      showToast('Failed to extend expiration.');
-    }
-  };
-
-  const handleReinstallOSSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedVmForAction) return;
-    try {
-      await apiClient.createVmReimageRequest(
-        selectedVmForAction.vmid,
-        selectedTargetOS,
-        'Submitted by administrator via Executive Overview.'
-      );
-      showToast(`OS reimage request queued for instance ${selectedVmForAction.vmid}.`);
-      setModalType(null);
-      loadData(false);
-    } catch {
-      showToast('Failed to submit OS reimage request.');
-    }
-  };
-
-  const handleAssignSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedVmForAction) return;
-    try {
-      await apiClient.assignVM(selectedVmForAction.vmid, targetAccountEmail, {
-        mode: assignExpiryMode,
-        date: assignExpiryMode === 'custom' ? new Date(`${assignExpiryDate}T23:59:59`).toISOString() : undefined,
-      });
-      showToast(`Instance ${selectedVmForAction.vmid} reassigned to ${targetAccountEmail}.`);
-      setModalType(null);
-      loadData(false);
-    } catch {
-      showToast('Failed to reassign instance.');
-    }
-  };
 
   const handleProvisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -640,22 +518,31 @@ export const DashboardContent: React.FC<{
             </div>
           </div>
 
-          <div className="pt-3 border-t border-[#f1f1f1] dark:border-[#1f1f1f] flex items-center justify-between text-xs font-mono">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
-              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.running}</span>
-              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Running</span>
+          <div className="pt-3 border-t border-[#f1f1f1] dark:border-[#1f1f1f] flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2.5 sm:gap-3 font-mono">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
+                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.running}</span>
+                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Running</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#d97706]" />
+                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.suspended}</span>
+                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Suspended</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#8a9090]" />
+                <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.stopped}</span>
+                <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Stopped</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#d97706]" />
-              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.suspended}</span>
-              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Suspended</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#8a9090]" />
-              <span className="text-[#1a1a1a] dark:text-white font-semibold">{fleetStats.stopped}</span>
-              <span className="text-[#656b6b] dark:text-[#a0a0a0] text-[11px]">Stopped</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => navigate('/admin/vms')}
+              className="text-xs font-semibold text-[#2563eb] dark:text-[#60a5fa] hover:underline cursor-pointer"
+            >
+              Manage →
+            </button>
           </div>
         </div>
 
@@ -854,274 +741,7 @@ export const DashboardContent: React.FC<{
       </section>
 
       {/* =========================================================================
-          4. UNIFIED FLEET OPERATIONS & GUEST ALLOCATION MANAGER
-         ========================================================================= */}
-      <section className="ink-block-wrapper mb-8 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs overflow-hidden">
-        
-        {/* Fleet Header with Interactive Controls */}
-        <div className="px-5 py-4 border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="font-serif font-medium text-base text-[#1a1a1a] dark:text-white tracking-tight">
-              Fleet Operations & Guest Allocations
-            </h2>
-            <p className="text-xs text-[#656b6b] dark:text-[#a0a0a0] mt-0.5">
-              Live power states, assigned owners, billing renewal schedules, and emergency controls.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            {/* Search Input */}
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search ID, name, owner, IP…"
-                className="w-48 sm:w-60 px-3 py-1.5 text-xs bg-white dark:bg-[#141414] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white font-sans placeholder-[#8a9090]"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1.5 text-xs text-[#888] hover:text-[#1a1a1a]"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            {/* Quick Status Filter Tabs */}
-            <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-white dark:bg-[#141414] text-xs font-medium text-[#656b6b] dark:text-[#a0a0a0]">
-              {(['all', 'running', 'suspended', 'stopped', 'expiring'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setStatusFilter(tab)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wider font-semibold transition-colors ${
-                    statusFilter === tab
-                      ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black shadow-xs'
-                      : 'hover:text-[#1a1a1a] dark:hover:text-white'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Location Sub-Tabs */}
-        {locationList.length > 1 && (
-          <div className="flex gap-2 px-5 py-2.5 border-b border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#141414] overflow-x-auto text-xs">
-            <span className="text-[#888] text-[11px] uppercase font-mono py-1">Location:</span>
-            <button
-              type="button"
-              onClick={() => setLocationFilter('all')}
-              className={`px-3 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                locationFilter === 'all'
-                  ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black font-semibold'
-                  : 'text-[#656b6b] hover:text-[#1a1a1a]'
-              }`}
-            >
-              All Clusters
-            </button>
-            {locationList.map(loc => (
-              <button
-                key={loc}
-                type="button"
-                onClick={() => setLocationFilter(loc)}
-                className={`px-3 py-0.5 rounded-full text-xs font-medium transition-colors whitespace-nowrap ${
-                  locationFilter === loc
-                    ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black font-semibold'
-                    : 'text-[#656b6b] hover:text-[#1a1a1a]'
-                }`}
-              >
-                {loc}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Fleet Table */}
-        <div className="responsive-table-container overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="border-b border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#141414] text-[#656b6b] dark:text-[#a0a0a0] font-mono text-[11px] uppercase tracking-wider">
-                <th className="px-5 py-3 font-semibold w-[28%]">Instance & Host</th>
-                <th className="px-5 py-3 font-semibold w-[12%]">Status</th>
-                <th className="px-5 py-3 font-semibold w-[22%]">Assigned Client</th>
-                <th className="px-5 py-3 font-semibold w-[14%]">Specs & OS</th>
-                <th className="px-5 py-3 font-semibold w-[12%]">Expiry Schedule</th>
-                <th className="px-5 py-3 font-semibold text-right w-[12%]">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#f1f1f1] dark:divide-[#1f1f1f]">
-              {isLoading && vms.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-[#656b6b] font-mono">
-                    Loading instance fleet…
-                  </td>
-                </tr>
-              ) : visibleVms.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-[#656b6b]">
-                    No guest allocations match the selected criteria.
-                  </td>
-                </tr>
-              ) : (
-                visibleVms.map(vm => {
-                  const isExpiringSoon =
-                    vm.expiryDate &&
-                    !vm.isSuspended &&
-                    (new Date(vm.expiryDate).getTime() - Date.now()) / (1000 * 3600 * 24) <= 7;
-                  const isExpired = vm.expiryDate && new Date(vm.expiryDate).getTime() < Date.now();
-
-                  return (
-                    <tr
-                      key={`${vm.proxmoxConnectionId || 'conn'}-${vm.vmid}`}
-                      className={`hover:bg-[#fbfaf9] dark:hover:bg-[#191919] transition-colors ${
-                        vm.isSuspended ? 'bg-[#fcfaf7] dark:bg-[#171410]' : ''
-                      }`}
-                    >
-                      {/* Instance Name & ID */}
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#dedfdf] dark:border-[#333] bg-white dark:bg-[#1f1f1f] text-[#656b6b] dark:text-[#a0a0a0] shrink-0">
-                            {vm.type === 'qemu' ? 'VM' : 'CT'} {vm.vmid}
-                          </span>
-                          <span className="font-semibold text-sm text-[#1a1a1a] dark:text-white truncate" title={vm.name}>
-                            {vm.name}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-[#656b6b] dark:text-[#888] font-mono mt-1 flex items-center gap-2">
-                          <span>{vm.node || 'pve'}</span>
-                          <span className="text-[#dedfdf] dark:text-[#333]">·</span>
-                          <span>{vm.ipAddress || 'DHCP'}</span>
-                        </div>
-                      </td>
-
-                      {/* Power / Status Pill */}
-                      <td className="px-5 py-3.5">
-                        {vm.isSuspended ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#fffaf0] dark:bg-[#2a1c07] text-[#b45309] border border-[#fde68a] dark:border-[#78350f]">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#b45309]" />
-                            Suspended
-                          </span>
-                        ) : (
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                              vm.status === 'running'
-                                ? 'bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0] dark:bg-[#052e16] dark:border-[#14532d]'
-                                : 'bg-[#f9f8f6] text-[#656b6b] border-[#dedfdf] dark:bg-[#1a1a1a] dark:border-[#333]'
-                            }`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                vm.status === 'running' ? 'bg-[#16a34a]' : 'bg-[#8a9090]'
-                              }`}
-                            />
-                            {vm.status}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Client Account */}
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-[#f1f1f1] dark:bg-[#262626] border border-[#dedfdf] dark:border-[#333] flex items-center justify-center text-[10px] font-bold text-[#1a1a1a] dark:text-white shrink-0">
-                            {vm.ownerEmail ? vm.ownerEmail.charAt(0).toUpperCase() : '?'}
-                          </div>
-                          <span className="text-xs font-mono text-[#1a1a1a] dark:text-[#e5e5e5] truncate" title={vm.ownerEmail}>
-                            {vm.ownerEmail || 'Unassigned'}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Hardware Specs & OS */}
-                      <td className="px-5 py-3.5 font-mono text-xs">
-                        <div className="text-[#1a1a1a] dark:text-white font-medium">
-                          {vm.cpus || 1} vCPU · {Math.round((vm.memory || 0) / 1073741824) || 2} GB RAM
-                        </div>
-                        <div className="text-[11px] text-[#656b6b] dark:text-[#888] truncate mt-0.5">
-                          {vm.os || 'Ubuntu 24.04'}
-                        </div>
-                      </td>
-
-                      {/* Expiration Date */}
-                      <td className="px-5 py-3.5 whitespace-nowrap font-mono text-xs">
-                        <span
-                          className={`font-medium ${
-                            isExpired
-                              ? 'text-[#dc2626] font-bold'
-                              : isExpiringSoon
-                              ? 'text-[#d97706] font-semibold'
-                              : 'text-[#1a1a1a] dark:text-white'
-                          }`}
-                        >
-                          {vm.expiryDate ? formatDate(vm.expiryDate) : 'Never Expires'}
-                        </span>
-                      </td>
-
-                      {/* Action Buttons */}
-                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSuspend(vm.vmid, vm.isSuspended || false, vm.proxmoxConnectionId)}
-                            className={`px-2 py-1 text-[11px] font-semibold rounded border transition-colors cursor-pointer ${
-                              vm.isSuspended
-                                ? 'bg-white dark:bg-[#181818] text-[#16a34a] border-[#bbf7d0] hover:bg-[#f0fdf4]'
-                                : 'bg-white dark:bg-[#181818] text-[#d97706] border-[#fde68a] hover:bg-[#fffaf0]'
-                            }`}
-                          >
-                            {vm.isSuspended ? 'Unsuspend' : 'Suspend'}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedVmForAction(vm);
-                              setModalType('extend-expiry');
-                            }}
-                            className="btn-secondary px-2 py-1 text-[11px] cursor-pointer"
-                          >
-                            Extend
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedVmForAction(vm);
-                              setTargetAccountEmail(vm.ownerEmail);
-                              setAssignExpiryMode('keep');
-                              setAssignExpiryDate(vm.expiryDate ? vm.expiryDate.slice(0, 10) : '');
-                              setModalType('assign-vm');
-                            }}
-                            className="btn-secondary px-2 py-1 text-[11px] cursor-pointer"
-                          >
-                            Assign
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setConfirmTarget(vm)}
-                            className="btn-secondary px-2 py-1 text-[11px] !text-[#dc2626] !border-[#fecaca] hover:!bg-[#fef2f2] dark:hover:!bg-[#350d0d] cursor-pointer"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* =========================================================================
-          5. LOWER SPLIT DECK: PENDING APPROVAL QUEUE & RECENT AUDIT TRAIL
+          4. LOWER SPLIT DECK: PENDING APPROVAL QUEUE & RECENT AUDIT TRAIL
          ========================================================================= */}
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         
@@ -1270,166 +890,6 @@ export const DashboardContent: React.FC<{
       {/* =========================================================================
           6. MODALS SUITE (Carta Ink Styled)
          ========================================================================= */}
-
-      {/* VM Remove Confirmation Modal */}
-      {confirmTarget !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-6">
-          <div className="w-full max-w-[400px] bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in-95">
-            <h3 className="font-serif text-lg font-bold text-[#dc2626]">
-              Permanently Remove Instance {confirmTarget.vmid}?
-            </h3>
-            <p className="text-xs text-[#656b6b] dark:text-[#a0a0a0] leading-relaxed">
-              This action terminates the guest on the hypervisor and purges all allocation records. The assigned user will lose access immediately.
-            </p>
-            <div className="flex items-center gap-3 mt-2">
-              <button
-                type="button"
-                onClick={() => setConfirmTarget(null)}
-                className="btn-secondary flex-1 py-2 text-xs cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  const vmid = confirmTarget.vmid;
-                  const connectionId = confirmTarget.proxmoxConnectionId || undefined;
-                  setConfirmTarget(null);
-                  try {
-                    await apiClient.deleteVM(vmid, connectionId);
-                    showToast(`Instance ${vmid} successfully removed.`);
-                    loadData(false);
-                  } catch {
-                    showToast(`Failed to remove instance ${vmid}.`);
-                  }
-                }}
-                className="btn-primary !bg-[#dc2626] hover:!bg-[#b91c1c] flex-1 py-2 text-xs font-semibold cursor-pointer"
-              >
-                Delete Instance
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Extend Expiry Modal */}
-      {modalType === 'extend-expiry' && selectedVmForAction && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-6">
-          <div className="w-full max-w-[440px] bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-[#dedfdf] dark:border-[#313131] pb-3">
-              <h3 className="font-serif text-base font-semibold text-[#1a1a1a] dark:text-white">
-                Extend Expiration Schedule (ID {selectedVmForAction.vmid})
-              </h3>
-              <button
-                type="button"
-                onClick={() => setModalType(null)}
-                className="text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleExtendExpirySubmit} className="flex flex-col gap-3 text-xs">
-              <div>
-                <label className="block font-semibold mb-1 text-[#1a1a1a] dark:text-white">Current Expiration Date</label>
-                <input
-                  type="text"
-                  value={formatDate(selectedVmForAction.expiryDate || Date.now())}
-                  disabled
-                  className="w-full p-2.5 bg-[#f1f1f1] dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg text-[#656b6b] font-mono"
-                />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1 text-[#1a1a1a] dark:text-white">Extension Period</label>
-                <select
-                  value={extendDays}
-                  onChange={e => setExtendDays(Number(e.target.value))}
-                  className="w-full p-2.5 bg-white dark:bg-[#1c1c1c] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
-                >
-                  <option value={15}>+15 Days (Bi-weekly)</option>
-                  <option value={30}>+30 Days (1 Month)</option>
-                  <option value={90}>+90 Days (Quarterly)</option>
-                  <option value={365}>+365 Days (1 Year)</option>
-                </select>
-              </div>
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] dark:border-[#313131] mt-2">
-                <button type="button" onClick={() => setModalType(null)} className="btn-secondary py-2 px-4 cursor-pointer">
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary py-2 px-4 cursor-pointer">
-                  Extend Schedule
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Assign Client Modal */}
-      {modalType === 'assign-vm' && selectedVmForAction && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-6">
-          <div className="w-full max-w-[460px] bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-2xl shadow-2xl p-6 flex flex-col gap-4 animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-[#dedfdf] dark:border-[#313131] pb-3">
-              <h3 className="font-serif text-base font-semibold text-[#1a1a1a] dark:text-white">
-                Reassign Instance Ownership (ID {selectedVmForAction.vmid})
-              </h3>
-              <button
-                type="button"
-                onClick={() => setModalType(null)}
-                className="text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-            <form onSubmit={handleAssignSubmit} className="flex flex-col gap-3 text-xs">
-              <div>
-                <label className="block font-semibold mb-1 text-[#1a1a1a] dark:text-white">Target Client Account</label>
-                <select
-                  value={targetAccountEmail}
-                  onChange={e => setTargetAccountEmail(e.target.value)}
-                  className="w-full p-2.5 bg-white dark:bg-[#1c1c1c] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-medium"
-                >
-                  {accounts.map(acc => (
-                    <option key={acc.id} value={acc.email}>
-                      {acc.name ? `${acc.name} (${acc.email})` : acc.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block font-semibold mb-1 text-[#1a1a1a] dark:text-white">Expiration Policy</label>
-                <select
-                  value={assignExpiryMode}
-                  onChange={e => setAssignExpiryMode(e.target.value as any)}
-                  className="w-full p-2.5 bg-white dark:bg-[#1c1c1c] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-medium"
-                >
-                  <option value="keep">Keep Current Expiration Schedule</option>
-                  <option value="never">Never Expire</option>
-                  <option value="custom">Custom Date</option>
-                </select>
-              </div>
-              {assignExpiryMode === 'custom' && (
-                <div>
-                  <label className="block font-semibold mb-1 text-[#1a1a1a] dark:text-white">Select Date</label>
-                  <input
-                    type="date"
-                    value={assignExpiryDate}
-                    onChange={e => setAssignExpiryDate(e.target.value)}
-                    className="w-full p-2.5 bg-white dark:bg-[#1c1c1c] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-mono"
-                  />
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#dedfdf] dark:border-[#313131] mt-2">
-                <button type="button" onClick={() => setModalType(null)} className="btn-secondary py-2 px-4 cursor-pointer">
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary py-2 px-4 cursor-pointer">
-                  Confirm Assignment
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Provision VM Modal */}
       {modalType === 'provision-vm' && (
