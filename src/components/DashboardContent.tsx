@@ -442,17 +442,11 @@ export const DashboardContent: React.FC<{
          ========================================================================= */}
       <header className="mb-6 flex flex-col gap-4 border-b border-[#dedfdf] dark:border-[#262626] pb-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3">
-            <h1 className="page-heading font-serif font-medium text-2xl sm:text-3xl text-[#1a1a1a] dark:text-white tracking-tight !mb-0 !leading-none">
-              {pageTitle}
-            </h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-[#f1f1f1] dark:bg-[#1c1c1c] text-[#656b6b] dark:text-[#a0a0a0] border border-[#dedfdf] dark:border-[#313131]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-ping" />
-              Live Telemetry
-            </span>
-          </div>
+          <h1 className="page-heading font-serif font-medium text-2xl sm:text-3xl text-[#1a1a1a] dark:text-white tracking-tight !mb-0 !leading-none">
+            {pageTitle}
+          </h1>
           <p className="mt-1.5 text-xs text-[#656b6b] dark:text-[#a0a0a0] max-w-2xl leading-relaxed">
-            High-density infrastructure command hub, real-time hypervisor matrix, and guest vitality monitor for <span className="font-semibold text-[#1a1a1a] dark:text-white">{workspaceName}</span>.
+            Fleet of {vms.length} managed instance{vms.length === 1 ? '' : 's'} across {nodes.length} hypervisor{nodes.length === 1 ? '' : 's'} · {workspaceName === 'Global' ? 'All service locations' : workspaceName}
           </p>
         </div>
 
