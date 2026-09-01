@@ -175,10 +175,10 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, prox
     setSessionStartedAt(null);
     clearRetryTimer();
 
-    const scheduleRetry = () => {
+    const scheduleRetry = (delayMs?: number) => {
       if (disposed || manualDisconnectRef.current) return;
       if (attempt >= 3) {
-        setError('The console relay could not reconnect after several attempts.');
+        setError('The console relay could not authenticate or reconnect after several attempts.');
         setStatus('Connection failed');
         return;
       }
@@ -186,9 +186,10 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, prox
       attempt = nextAttempt;
       setRetryCount(nextAttempt);
       setStatus(`Reconnecting console… attempt ${nextAttempt} of 3`);
+      clearRetryTimer();
       retryTimerRef.current = setTimeout(() => {
         void connect();
-      }, Math.min(1000 * 2 ** (nextAttempt - 1), 6000));
+      }, delayMs || Math.min(1500 * nextAttempt, 6000));
     };
 
     const connect = async () => {
@@ -212,13 +213,32 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, prox
         }
 
         const { ticket, password, port } = payload.data;
-        const vncPassword = password || ticket;
+        // In Proxmox QEMU, the DES VNC password is up to 8 chars (or the portion before the colon in ticket)
+        let vncPassword = password;
+        if (!vncPassword && ticket) {
+          const colonIdx = ticket.indexOf(':');
+          vncPassword = colonIdx > 0 ? ticket.slice(0, colonIdx) : ticket;
+        }
+        if (vncPassword && vncPassword.length > 8 && !vncPassword.startsWith('PVEVNC:')) {
+          vncPassword = vncPassword.slice(0, 8);
+        }
+
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsBase = new URL(apiHost || '/', window.location.origin);
         const wsPath = `${wsBase.pathname.replace(/\/$/, '')}/api/vnc/ws`;
         const wsUrl = `${wsProtocol}://${wsBase.host}${wsPath}?node=${encodeURIComponent(node)}&vmid=${vmid}&type=${type}&port=${port}&ticket=${encodeURIComponent(ticket)}${proxmoxConnectionId ? `&proxmoxConnectionId=${encodeURIComponent(proxmoxConnectionId)}` : ''}`;
 
         if (disposed || !containerRef.current) return;
+
+        // Disconnect previous active instance before binding a new one
+        if (activeRfbRef.current) {
+          try { activeRfbRef.current.disconnect(); } catch {}
+          activeRfbRef.current = null;
+        }
+        if (containerRef.current) {
+          containerRef.current.innerHTML = '';
+        }
+
         setStatus('Connecting to console relay…');
         activeRfb = new RFB(containerRef.current, wsUrl, {
           credentials: { password: vncPassword },
@@ -245,10 +265,15 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, prox
           if (disposed) return;
           const clean = Boolean(event?.detail?.clean);
           setStatus(clean || manualDisconnectRef.current ? 'Disconnected' : 'Disconnected unexpectedly');
-          if (!clean && !manualDisconnectRef.current) scheduleRetry();
+          if (!clean && !manualDisconnectRef.current) {
+            // Delay retry slightly to allow Proxmox QEMU VNC task to gracefully reset
+            scheduleRetry(1200 * Math.max(1, attempt));
+          }
         });
         activeRfb.addEventListener('credentialsrequired', () => {
-          activeRfb?.sendCredentials({ password: vncPassword });
+          if (vncPassword) {
+            activeRfb?.sendCredentials({ password: vncPassword });
+          }
         });
         activeRfb.addEventListener('clipboard', (event: any) => {
           const text = String(event?.detail?.text || '');
@@ -260,7 +285,7 @@ export const VncTerminal: React.FC<VncTerminalProps> = ({ vmid, node, type, prox
         const message = caught?.message || 'Failed to initialize the VNC console.';
         if (attempt < 3) {
           setStatus(message);
-          scheduleRetry();
+          scheduleRetry(1500 * (attempt + 1));
         } else {
           setError(message);
           setStatus('Connection failed');

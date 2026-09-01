@@ -48,13 +48,28 @@ vncRouter.post('/init', async (req, res) => {
     const token = `PVEAPIToken=${c.token_id}=${c.token_secret}`;
 
     // Use the node and type stored for the authorized VM; never trust caller-supplied routing fields.
-    const nodePath = node;
+    let nodePath = node;
+    if (!nodePath || /^(info|cluster|pve-votion-cluster)$/i.test(nodePath)) {
+      try {
+        const resInfo = await proxmoxFetch(`https://${host}:${port}/api2/json/cluster/resources?type=vm`, {
+          method: 'GET',
+          headers: { Authorization: token },
+          sslFingerprint: c.ssl_fingerprint,
+        });
+        if (resInfo.ok) {
+          const payload = await resInfo.json() as any;
+          const match = (payload?.data || []).find((v: any) => Number(v.vmid) === Number(vmid));
+          if (match?.node) nodePath = match.node;
+        }
+      } catch (_e) {}
+    }
+    if (!nodePath) nodePath = 'info';
 
     // Ask Proxmox to prepare a websocket-capable VNC proxy. Without both
     // parameters, PVE may open a plain VNC listener that cannot complete the
     // later vncwebsocket upgrade used by noVNC.
     const proxyBody = 'websocket=1&generate-password=1';
-    const proxyResponse = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${nodePath.replace(/ /g, '%20')}/${type}/${vmid}/vncproxy`, {
+    const proxyResponse = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${encodeURIComponent(nodePath)}/${type}/${vmid}/vncproxy`, {
       method: 'POST',
       headers: {
         Authorization: token,
@@ -82,11 +97,14 @@ vncRouter.post('/init', async (req, res) => {
     try {
       const json = JSON.parse(proxyData);
       if (json.data && json.data.ticket) {
+        const rawTicket = String(json.data.ticket);
+        const ticketColonIndex = rawTicket.indexOf(':');
+        const extractedPassword = json.data.password || (ticketColonIndex > 0 ? rawTicket.slice(0, ticketColonIndex) : rawTicket);
         return res.json({
           success: true,
           data: {
-            ticket: json.data.ticket,
-            password: json.data.password || json.data.ticket,
+            ticket: rawTicket,
+            password: extractedPassword,
             port: json.data.port,
           },
         });

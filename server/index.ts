@@ -461,11 +461,12 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
       const pvePort = proxmoxConn.port || 8006;
       req.proxmoxAuth = `PVEAPIToken=${proxmoxConn.token_id}=${proxmoxConn.token_secret}`;
 
-      // Normalize pseudo-node names. PVE's special 'info' node (the current host)
-      // is valid for node-scoped API calls, so keep it. Only resolve the cluster
-      // name to the real hosting node via the selected connection.
-      let node = url.searchParams.get('node');
-      if (node && /pve-votion-cluster/i.test(node)) {
+      // Resolve the real hosting node for this VM (prefer DB record to avoid 'info' proxy mismatch)
+      let node = requestedVm.node;
+      if (!node || /^(info|cluster|pve-votion-cluster)$/i.test(node)) {
+        node = url.searchParams.get('node') || '';
+      }
+      if (!node || /^(info|cluster|pve-votion-cluster)$/i.test(node)) {
         try {
           const resInfo = await proxmoxFetch(`https://${cleanHost}:${pvePort}/api2/json/cluster/resources?type=vm`, {
             method: 'GET',
@@ -481,7 +482,6 @@ server.on('upgrade', async (req: any, socket: any, head: any) => {
             if (match && match.node) node = match.node;
           }
         } catch (_e) {}
-        if (!node || /pve-votion-cluster/i.test(node)) node = 'info';
       }
       if (!node) node = 'info';
       const vncport = url.searchParams.get('port');

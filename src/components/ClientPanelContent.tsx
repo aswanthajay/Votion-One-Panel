@@ -134,10 +134,31 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   // PROMPT 5.1: Fetch ONLY assigned servers for logged-in client via GET /api/client/vms
-  const loadClientVMs = async () => {
+  const loadClientVMs = async (isBackground = false) => {
     try {
       const vms = await apiClient.getClientVMs(workspaceConnectionId);
-      setClientVMs(vms);
+      
+      // Prevent unnecessary state updates if VM list has not changed (prevents re-render loops)
+      setClientVMs(prev => {
+        if (
+          prev.length === vms.length &&
+          prev.every((p, i) => {
+            const n = vms[i];
+            return (
+              p.vmid === n?.vmid &&
+              p.proxmoxConnectionId === n?.proxmoxConnectionId &&
+              p.status === n?.status &&
+              p.name === n?.name &&
+              p.ipAddress === n?.ipAddress &&
+              p.cpuUsagePct === n?.cpuUsagePct &&
+              p.ramUsageBytes === n?.ramUsageBytes
+            );
+          })
+        ) {
+          return prev;
+        }
+        return vms;
+      });
       setLoadError(null);
       
       setSelectedVm(previous => {
@@ -152,7 +173,17 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
             (vm.vmKey && previous.vmKey && vm.vmKey === previous.vmKey) ||
             (String(vm.vmid) === String(previous.vmid) && vm.proxmoxConnectionId === previous.proxmoxConnectionId)
           );
-          if (stillExists) return stillExists;
+          if (stillExists) {
+            // Only update reference if meaningful properties changed
+            const isUnchanged =
+              previous.status === stillExists.status &&
+              previous.name === stillExists.name &&
+              previous.ipAddress === stillExists.ipAddress &&
+              previous.cpuUsagePct === stillExists.cpuUsagePct &&
+              previous.ramUsageBytes === stillExists.ramUsageBytes &&
+              previous.node === stillExists.node;
+            return isUnchanged ? previous : stillExists;
+          }
         }
 
         // Priority 2: URL Selection (matching BOTH vmid and connectionId if available)
@@ -169,10 +200,12 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
 
-      setIsLoading(false);
+      if (!isBackground) setIsLoading(false);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Unable to load assigned instances.');
-      setIsLoading(false);
+      if (!isBackground) {
+        setLoadError(err instanceof Error ? err.message : 'Unable to load assigned instances.');
+        setIsLoading(false);
+      }
     }
   };
 
@@ -201,13 +234,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
     if (clientVMs.length === 0) {
       setIsLoading(true);
     }
-    loadClientVMs();
+    void loadClientVMs(false);
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      loadClientVMs();
-    }, 5000);
+      void loadClientVMs(true);
+    }, 15000);
     const onVisible = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') loadClientVMs();
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') void loadClientVMs(true);
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -224,24 +257,29 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       return;
     }
 
-    const loadMetadata = async () => {
-      setIsMetadataLoading(true);
+    const loadMetadata = async (isBackground = false) => {
+      if (!isBackground) {
+        setIsMetadataLoading(true);
+      }
       setMetadataError(null);
       try {
         const metadata = await apiClient.getVMMetadata(selectedVm.vmid, selectedVm.proxmoxConnectionId);
         if (!cancelled) setVmMetadata(metadata);
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && !isBackground) {
           setVmMetadata(null);
           setMetadataError(err instanceof Error ? err.message : 'Server details are currently unavailable.');
         }
       } finally {
-        if (!cancelled) setIsMetadataLoading(false);
+        if (!cancelled && !isBackground) setIsMetadataLoading(false);
       }
     };
 
-    void loadMetadata();
-    const interval = setInterval(loadMetadata, 30000);
+    void loadMetadata(false);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void loadMetadata(true);
+    }, 30000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -756,9 +794,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                   ) : null}
                   {!selectedVm.isSuspended && (
                     <div className="w-full h-full bg-black overflow-hidden relative">
-                      <Suspense fallback={<div className="h-full w-full animate-pulse bg-[#111111]" aria-busy="true" />}>
-                        <VncTerminal vmid={selectedVm.vmid} proxmoxConnectionId={selectedVm.proxmoxConnectionId} node={selectedVm.node && !/^(info|cluster)$/i.test(selectedVm.node) ? selectedVm.node : 'info'} type={selectedVm.type} />
-                      </Suspense>
+                        <VncTerminal
+                          key={`vnc-${selectedVm.proxmoxConnectionId || 'local'}-${selectedVm.vmid}`}
+                          vmid={selectedVm.vmid}
+                          proxmoxConnectionId={selectedVm.proxmoxConnectionId}
+                          node={selectedVm.node && !/^(info|cluster)$/i.test(selectedVm.node) ? selectedVm.node : 'info'}
+                          type={selectedVm.type}
+                        />
                     </div>
                   )}
                 </div>

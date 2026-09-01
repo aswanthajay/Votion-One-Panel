@@ -310,9 +310,11 @@ export const AdminVMFleet: React.FC = () => {
 
   const base = '/api/v1/admin';
 
-  const fetchFleet = async () => {
+  const fetchFleet = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) {
+        setLoading(true);
+      }
       const [vmsRes, sumRes, nodesRes] = await Promise.all([
         fetch(`${base}/vms`, { headers: apiHeaders() }),
         fetch(`${base}/summary`, { headers: apiHeaders() }),
@@ -345,22 +347,25 @@ export const AdminVMFleet: React.FC = () => {
         }));
         setVms(rows);
       } else {
-        flash('Failed to load fleet (auth expired?)', 'bad');
+        if (!isBackground) flash('Failed to load fleet (auth expired?)', 'bad');
       }
       if (sumRes.ok) { const j = await sumRes.json(); const d = j.data || {}; setSummary(d); setCapacity(d.nodeCapacity || []); }
       if (nodesRes.ok) { const j = await nodesRes.json(); setNodes(j.data || []); }
     } catch (e: any) {
-      flash('Network error loading fleet', 'bad');
+      if (!isBackground) flash('Network error loading fleet', 'bad');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchFleet(); }, []);
+  useEffect(() => { fetchFleet(false); }, []);
 
-  // Auto-refresh live data every 30s
+  // Auto-refresh live data silently every 30s without resetting the UI
   useEffect(() => {
-    const t = window.setInterval(fetchFleet, 30000);
+    const t = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void fetchFleet(true);
+    }, 30000);
     return () => window.clearInterval(t);
   }, []);
 
@@ -653,13 +658,13 @@ export const AdminVMFleet: React.FC = () => {
               onClick={() => bulkAction('stop')}>■ Stop</button>
             <button className="rounded-md px-3 py-2 text-sm font-medium"
               style={{ backgroundColor: '#5b8def', color: '#ffffff' }}
-              onClick={fetchFleet}>↻ Refresh</button>
+              onClick={() => fetchFleet(false)}>↻ Refresh</button>
           </div>
         </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
-          {loading ? (
+          {loading && vms.length === 0 ? (
             <div className="px-6 py-14 text-center text-sm text-[#71717a]">Loading fleet…</div>
           ) : filtered.length === 0 ? (
             <div className="px-6 py-14 text-center text-sm text-[#71717a]">
