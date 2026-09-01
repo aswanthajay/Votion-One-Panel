@@ -1334,10 +1334,26 @@ class ApiClient {
     if (ownerEmail) params.set('ownerEmail', ownerEmail);
     if (connectionId) params.set('connectionId', connectionId);
     const query = params.toString();
-    const url = query ? `${API_BASE_URL}/vms?${query}` : `${API_BASE_URL}/vms`;
-    const res = await this.swrFetch(url, { headers: this.getHeaders() });
-    const data = await this.readApiResponse(res, 'Unable to load virtual machines.');
-    return data.data || [];
+
+    // Check admin endpoint first (if admin session), then general /vms
+    const endpoints = [
+      query ? `${API_BASE_URL}/admin/vms?${query}` : `${API_BASE_URL}/admin/vms`,
+      query ? `${API_BASE_URL}/vms?${query}` : `${API_BASE_URL}/vms`,
+    ];
+
+    for (const url of endpoints) {
+      try {
+        const res = await this.swrFetch(url, { headers: this.getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.data)) return data.data;
+          if (data && Array.isArray(data.vms)) return data.vms;
+        }
+      } catch {
+        // Try next candidate endpoint
+      }
+    }
+    return [];
   }
 
   /**

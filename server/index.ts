@@ -194,6 +194,8 @@ app.use('/api/automation', automationRouter);
 app.use('/api/v1/automation', automationRouter);
 app.use('/api/vnc', vncRouter);
 app.use('/api/v1/vnc', vncRouter);
+app.use('/api/vms', vmRouter);
+app.use('/api/v1/vms', vmRouter);
 
 // Core API Router (Mounted after specific prefixes)
 app.use('/api/v1', apiRouter);

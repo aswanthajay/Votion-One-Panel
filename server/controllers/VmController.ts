@@ -4,13 +4,15 @@ import { dbService } from '../db/database.js';
 
 export class VmController {
   static async listVMs(req: Request, res: Response) {
+    const user = (req as any).authUser;
     const { ownerEmail, vmid, connectionId } = req.query;
     const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
-    const parsedEmail = ownerEmail ? String(ownerEmail) : undefined;
+    const isAdmin = ['admin', 'administrator', 'moderator'].includes(user?.role);
+    const targetEmail = isAdmin ? (ownerEmail ? String(ownerEmail) : undefined) : user?.email;
     const parsedConnectionId = typeof connectionId === 'string' && connectionId.trim() ? connectionId.trim() : undefined;
   
     try {
-      const vms = await VmRepository.getVMs(parsedEmail, parsedVmid, parsedConnectionId);
+      const vms = await dbService.getVMs(targetEmail, parsedVmid, parsedConnectionId);
       return res.json({ success: true, count: vms.length, data: vms });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Unable to read VMs from the local database' });

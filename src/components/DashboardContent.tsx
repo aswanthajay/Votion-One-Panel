@@ -258,12 +258,18 @@ export const DashboardContent: React.FC<{
 
   // Derived Fleet Metrics for "At a Glance" Engine
   const fleetStats = useMemo(() => {
-    const total = vms.length;
-    const running = vms.filter(v => v.status === 'running' && !v.isSuspended).length;
-    const suspended = vms.filter(v => v.isSuspended).length;
-    const stopped = vms.filter(v => v.status === 'stopped' && !v.isSuspended).length;
-    const qemuCount = vms.filter(v => v.type === 'qemu').length;
-    const lxcCount = vms.filter(v => v.type === 'lxc').length;
+    const rawTotal = vms.length;
+    const rawRunning = vms.filter(v => (v.status || '').toLowerCase() === 'running' && !v.isSuspended).length;
+    const rawSuspended = vms.filter(v => Boolean(v.isSuspended)).length;
+    const rawStopped = vms.filter(v => (v.status || '').toLowerCase() !== 'running' && !v.isSuspended).length;
+    const qemuCount = vms.filter(v => (v.type || '').toLowerCase() === 'qemu').length;
+    const lxcCount = vms.filter(v => (v.type || '').toLowerCase() === 'lxc').length;
+
+    // Use VM array counts with fallback to clusterOverview aggregated count
+    const total = rawTotal || clusterOverview?.totalVMsCount || 0;
+    const running = rawTotal > 0 ? rawRunning : (clusterOverview?.runningVMsCount ?? 0);
+    const suspended = rawTotal > 0 ? rawSuspended : (clusterOverview?.suspendedVMsCount ?? 0);
+    const stopped = rawTotal > 0 ? rawStopped : Math.max(0, total - running - suspended);
 
     const now = Date.now();
     const expiringSoon = vms.filter(v => {
@@ -278,7 +284,7 @@ export const DashboardContent: React.FC<{
     }).length;
 
     return { total, running, suspended, stopped, qemuCount, lxcCount, expiringSoon, expired };
-  }, [vms]);
+  }, [vms, clusterOverview]);
 
   // Filtered VMs for the Interactive Grid
   const visibleVms = useMemo(() => {
