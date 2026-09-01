@@ -210,8 +210,15 @@ const handleAdminNodes = async (req: any, res: any) => {
   const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
     ? req.query.connectionId.trim()
     : undefined;
-  const nodes = await proxmoxApi.getNodeMetrics(undefined, connectionId);
-  res.json({ success: true, count: nodes.length, data: nodes });
+  console.log('[DEBUG handleAdminNodes] Query connectionId:', connectionId);
+  try {
+    const nodes = await proxmoxApi.getNodeMetrics(undefined, connectionId);
+    console.log('[DEBUG handleAdminNodes] Nodes returned from proxmoxApi:', nodes.length);
+    res.json({ success: true, count: nodes.length, data: nodes });
+  } catch (err: any) {
+    console.error('[DEBUG handleAdminNodes] Error in proxmoxApi.getNodeMetrics:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch nodes' });
+  }
 };
 
 apiRouter.get('/admin/nodes', handleAdminNodes);

@@ -201,7 +201,10 @@ export const DashboardContent: React.FC<{
         storageUsageGb: (n as any).storageUsageGb || 0,
         storageTotalGb: (n as any).storageTotalGb || 0,
         zfsHealth: n.zfsHealth || 'ONLINE',
-        vmsCount: (apiVMs || []).filter(v => v.node === (n.nodeName || n.node)).length,
+        vmsCount: (apiVMs || []).filter(v => 
+          (v.node && (v.node === n.node || v.node === n.nodeName)) ||
+          ((v as any).proxmox_connection_name && (v as any).proxmox_connection_name === n.nodeName)
+        ).length,
         platformVersion: n.platformVersion || '8.2.4',
         uptimeDays: Math.floor(((n.uptimeSeconds || 2419200) / 86400)),
       }));
@@ -724,7 +727,7 @@ export const DashboardContent: React.FC<{
                     <td className="px-5 py-3.5 text-right font-mono text-xs">
                       <span
                         className={`font-semibold ${
-                          (node.zfsHealth || '').toUpperCase().includes('ONLINE')
+                          (node.zfsHealth || '').toUpperCase().includes('ONLINE') || (node.zfsHealth || '').toLowerCase().includes('active')
                             ? 'text-[#16a34a]'
                             : 'text-[#dc2626]'
                         }`}

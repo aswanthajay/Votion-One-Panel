@@ -12,6 +12,7 @@
 import { Router, Request, Response } from 'express';
 import { dbService } from './db/database.js';
 import { proxmoxFetch } from './services/proxmoxHttp.js';
+import { proxmoxApi } from './services/proxmox.js';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from './middleware.js';
 
 export const adminVmFleetRouter = Router();
@@ -109,50 +110,12 @@ async function getLiveVMSnapshot(vmid: number) {
 // ---------------------------------------------------------------------------
 // 1. GET /api/admin/nodes — live node inventory
 // ---------------------------------------------------------------------------
-adminVmFleetRouter.get('/nodes', requireAuth, requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+adminVmFleetRouter.get('/nodes', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Reuse the proven node-metrics path from the Proxmox service (no direct re-import
-    // of the class internals needed — it's the same logic as getNodeMetrics).
-    const conns = await getConns();
-    const nodes: any[] = [];
-    for (const conn of conns) {
-      const host = cleanHost(conn);
-      const port = conn.port || 8006;
-      try {
-        const nodesRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes`, { headers: authHeaders(conn) });
-        if (!nodesRes.ok) continue;
-        const nodesJson = await readPveJson<PveEnvelope<PveNode[]>>(nodesRes);
-        for (const n of (nodesJson.data || [])) {
-          let cpus = 0;
-          let memUsed = 0;
-          let memTotal = 0;
-          let diskUsed = 0;
-          let diskTotal = 0;
-          try {
-            const stRes = await proxmoxFetch(`https://${host}:${port}/api2/json/nodes/${n.node}/status`, { headers: authHeaders(conn) });
-            if (stRes.ok) {
-              const st = (await readPveJson<PveEnvelope<PveStatus>>(stRes)).data || {};
-              cpus = st.cpus || 0;
-              memUsed = (st.mem as number) || (st.memory && (st.memory.used as number)) || 0;
-              memTotal = (st.maxmem as number) || (st.memory && (st.memory.total as number)) || 0;
-              if (st.rootfs) { diskUsed = st.rootfs.used || 0; diskTotal = st.rootfs.total || 0; }
-            }
-          } catch (e) { /* best effort */ }
-          nodes.push({
-            node: n.node,
-            name: conn.name || n.node,
-            status: n.status || 'online',
-            cpuUsagePct: Math.round((n.cpu || 0) * 100),
-            cpuCores: cpus || n.maxcpu || 0,
-            ramUsedGb: Math.round(memUsed / 1073741824),
-            ramTotalGb: Math.round(memTotal / 1073741824),
-            diskUsedGb: Math.round(diskUsed / 1073741824),
-            diskTotalGb: Math.round(diskTotal / 1073741824),
-            uptimeSeconds: n.uptime || 0,
-          });
-        }
-      } catch (e) { /* connection unreachable */ }
-    }
+    const connectionId = typeof req.query.connectionId === 'string' && req.query.connectionId.trim()
+      ? req.query.connectionId.trim()
+      : undefined;
+    const nodes = await proxmoxApi.getNodeMetrics(undefined, connectionId);
     res.json({ success: true, count: nodes.length, data: nodes });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
