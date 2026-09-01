@@ -308,9 +308,30 @@ export const OvhManager: React.FC = () => {
     setError(null);
     try {
       const res = await apiClient.getAdminOvhStatus(targetIp);
+      const boundFromList = vmByIp.get(targetIp);
+      const effectiveVmMac = res.vmMac || boundFromList?.macAddress || null;
+      const effectiveVirtualMac = res.virtualMac || null;
+      const effectiveMac = res.macAddress || effectiveVirtualMac || effectiveVmMac || null;
+      const isMatched = res.macMatched !== undefined ? res.macMatched : Boolean(
+        effectiveVirtualMac &&
+        effectiveVmMac &&
+        effectiveVirtualMac.toLowerCase() === effectiveVmMac.toLowerCase()
+      );
+
       setStatus({
         ip: targetIp,
         reverse: res.reverse,
+        virtualMac: effectiveVirtualMac,
+        vmMac: effectiveVmMac,
+        macAddress: effectiveMac,
+        macMatched: isMatched,
+        serviceName: res.serviceName,
+        boundVm: res.boundVm || (boundFromList ? {
+          vmid: boundFromList.vmid,
+          name: boundFromList.name,
+          node: boundFromList.node,
+          status: boundFromList.status,
+        } : null),
         ddos: res.ddos || { state: 'unknown', mode: 'automatic' },
         firewall: res.firewall || { enabled: false, state: 'unknown' },
         mitigationProfile: res.mitigationProfile,
@@ -917,15 +938,17 @@ export const OvhManager: React.FC = () => {
                     <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white px-2.5 py-0.5 rounded bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131]">
                       {status.ip}
                     </span>
-                    {status.macAddress ? (
+                    {status.macAddress || activeVm?.macAddress ? (
                       <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#f3f4f6] dark:bg-[#262626] border border-[#e5e7eb] dark:border-[#333] text-[#1a1a1a] dark:text-white flex items-center gap-1.5" title="Hardware / Virtual MAC Address">
                         <span className="text-[#8a9090]">MAC:</span>
-                        <span>{status.macAddress}</span>
+                        <span>{status.macAddress || activeVm?.macAddress}</span>
                         {status.macMatched ? (
                           <span className="text-[10px] text-[#16a34a] font-sans font-bold" title="Synced with Proxmox net0">● Synced</span>
-                        ) : status.virtualMac && status.vmMac ? (
+                        ) : status.virtualMac && (status.vmMac || activeVm?.macAddress) ? (
                           <span className="text-[10px] text-[#d97706] font-sans font-bold" title="vMAC differs from Proxmox VM net0">⚠️ Mismatch</span>
-                        ) : null}
+                        ) : (
+                          <span className="text-[10px] text-[#2563eb] font-sans font-bold" title="Hardware net0 MAC detected on guest">● VM net0</span>
+                        )}
                       </span>
                     ) : (
                       <span className="text-xs font-mono text-[#8a9090] px-2 py-0.5 rounded bg-[#f9fafb] dark:bg-[#222] border border-[#e5e7eb] dark:border-[#333]">
@@ -962,7 +985,7 @@ export const OvhManager: React.FC = () => {
               <div className="flex border-b border-[#dedfdf] dark:border-[#262626] px-6 bg-white dark:bg-[#121212] overflow-x-auto text-xs">
                 {[
                   { key: 'general', label: 'General & rDNS' },
-                  { key: 'vmac', label: `Virtual MAC (${status.macAddress ? status.macAddress.slice(0, 8) + '…' : 'None'})` },
+                  { key: 'vmac', label: `Virtual MAC (${(status.macAddress || activeVm?.macAddress) ? (status.macAddress || activeVm?.macAddress)!.slice(0, 8) + '…' : 'None'})` },
                   { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
                   { key: 'game', label: `Game DDoS (${gameRules.length})` },
                   { key: 'antihack', label: `Anti-Hack ${status.antiHack ? '(!)' : ''}` },
@@ -1104,10 +1127,10 @@ export const OvhManager: React.FC = () => {
                         Effective MAC ID
                       </p>
                       <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
-                        {status.macAddress || 'None'}
+                        {status.macAddress || activeVm?.macAddress || 'None'}
                       </p>
                       <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
-                        {status.macMatched ? 'Synchronized across OVH & Proxmox' : status.macAddress ? 'Active Interface Address' : 'No MAC allocated'}
+                        {status.macMatched ? 'Synchronized across OVH & Proxmox' : (status.macAddress || activeVm?.macAddress) ? 'Active Interface Address' : 'No MAC allocated'}
                       </span>
                     </div>
 
@@ -1128,10 +1151,10 @@ export const OvhManager: React.FC = () => {
                         Proxmox VM net0 MAC
                       </p>
                       <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
-                        {status.vmMac || 'No Bound VM'}
+                        {status.vmMac || activeVm?.macAddress || 'No Bound VM'}
                       </p>
                       <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
-                        {status.boundVm ? `VM ${status.boundVm.vmid} (${status.boundVm.name})` : 'Unassigned pool IP'}
+                        {(status.boundVm || activeVm) ? `VM ${(status.boundVm || activeVm)?.vmid} (${(status.boundVm || activeVm)?.name})` : 'Unassigned pool IP'}
                       </span>
                     </div>
                   </div>
@@ -1143,17 +1166,17 @@ export const OvhManager: React.FC = () => {
                         <span className="text-base">✓</span>
                         <div>
                           <p className="font-bold text-xs">Virtual MAC Fully Synchronized</p>
-                          <p className="text-[11px] opacity-90">OVH router and Proxmox VM net0 interface share the exact same hardware address ({status.macAddress}). Network traffic is fully optimized.</p>
+                          <p className="text-[11px] opacity-90">OVH router and Proxmox VM net0 interface share the exact same hardware address ({status.macAddress || activeVm?.macAddress}). Network traffic is fully optimized.</p>
                         </div>
                       </div>
                     </div>
-                  ) : status.virtualMac && status.vmMac && !status.macMatched ? (
+                  ) : status.virtualMac && (status.vmMac || activeVm?.macAddress) && !status.macMatched ? (
                     <div className="p-4 rounded-xl border border-[#fed7aa] dark:border-[#9a3412] bg-[#fff7ed] dark:bg-[#2c1206] text-[#9a3412] dark:text-[#fdba74] flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-base">⚠️</span>
                         <div>
                           <p className="font-bold text-xs">MAC Mismatch Detected</p>
-                          <p className="text-[11px] opacity-90">OVH vMAC is {status.virtualMac}, but Proxmox VM net0 has {status.vmMac}. Packets may be dropped by OVH border security.</p>
+                          <p className="text-[11px] opacity-90">OVH vMAC is {status.virtualMac}, but Proxmox VM net0 has {status.vmMac || activeVm?.macAddress}. Packets may be dropped by OVH border security.</p>
                         </div>
                       </div>
                       <button
@@ -1163,6 +1186,24 @@ export const OvhManager: React.FC = () => {
                         className="px-3 py-1.5 bg-[#9a3412] text-white text-xs font-semibold rounded-lg hover:bg-[#7c2d12] cursor-pointer shrink-0"
                       >
                         {macSubmitting ? 'Syncing...' : 'Sync to VM net0 →'}
+                      </button>
+                    </div>
+                  ) : !status.virtualMac && (status.vmMac || activeVm?.macAddress) ? (
+                    <div className="p-4 rounded-xl border border-[#bae6fd] dark:border-[#0369a1] bg-[#f0f9ff] dark:bg-[#082f49] text-[#0369a1] dark:text-[#7dd3fc] flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">ℹ️</span>
+                        <div>
+                          <p className="font-bold text-xs">vMAC Registration Recommended</p>
+                          <p className="text-[11px] opacity-90">Guest VM has interface MAC ({status.vmMac || activeVm?.macAddress}), but no Virtual MAC is registered on OVH for {status.ip}. Register it on OVH to ensure border router authorization.</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCreateMac(false)}
+                        disabled={macSubmitting}
+                        className="px-3 py-1.5 bg-[#0284c7] text-white text-xs font-semibold rounded-lg hover:bg-[#0369a1] cursor-pointer shrink-0"
+                      >
+                        {macSubmitting ? 'Registering...' : 'Register on OVH →'}
                       </button>
                     </div>
                   ) : null}

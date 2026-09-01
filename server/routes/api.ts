@@ -2298,9 +2298,10 @@ apiRouter.get('/admin/ovh/status', requireOvhEnabledAdmin, async (req, res) => {
     const ip = validateIpAdmin(String(req.query.ip || ''));
 
     // Look up bound VM in database for this IP
+    const cleanIp = ip.split('/')[0].trim();
     const vmRes = await pgPool.query(
-      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address, status FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
-      [ip, `${ip}/%`]
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address, status FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 OR split_part(trim(ip_address), \'/\', 1) = $1 LIMIT 1',
+      [cleanIp, `${cleanIp}/%`]
     );
     const boundVm = vmRes.rows[0] || null;
 
@@ -2366,10 +2367,11 @@ apiRouter.post('/admin/ovh/mac/create', requireOvhEnabledAdmin, async (req, res)
     const customMac = req.body.mac ? String(req.body.mac).trim().toUpperCase() : undefined;
     const syncToVm = req.body.syncToVm !== false;
 
+    const cleanIp = ip.split('/')[0].trim();
     // Look up bound VM
     const vmRes = await pgPool.query(
-      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
-      [ip, `${ip}/%`]
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 OR split_part(trim(ip_address), \'/\', 1) = $1 LIMIT 1',
+      [cleanIp, `${cleanIp}/%`]
     );
     const boundVm = vmRes.rows[0] || null;
 
@@ -2428,11 +2430,12 @@ apiRouter.post('/admin/ovh/mac/reset', requireOvhEnabledAdmin, async (req, res) 
   try {
     const ip = validateIpAdmin(req.body.ip);
     const syncToVm = req.body.syncToVm !== false;
+    const cleanIp = ip.split('/')[0].trim();
 
     // Look up bound VM
     const vmRes = await pgPool.query(
-      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 LIMIT 1',
-      [ip, `${ip}/%`]
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 OR split_part(trim(ip_address), \'/\', 1) = $1 LIMIT 1',
+      [cleanIp, `${cleanIp}/%`]
     );
     const boundVm = vmRes.rows[0] || null;
 
