@@ -60,6 +60,8 @@ clientRouter.get('/navigation-usage', async (req: any, res) => {
 
 clientRouter.post('/navigation-usage', async (req: any, res) => {
   const email = String(req.authUser?.email || '').toLowerCase();
+  const role = String(req.authUser?.role || '').toLowerCase();
+  const isAdmin = ['admin', 'administrator', 'moderator'].includes(role);
   const itemType = req.body?.itemType;
   const itemKey = String(req.body?.itemKey || '').trim();
   if (!email || !['destination', 'vm'].includes(itemType)) {
@@ -76,12 +78,13 @@ clientRouter.post('/navigation-usage', async (req: any, res) => {
     const connId = typeof req.body?.connectionId === 'string' && req.body.connectionId.trim()
       ? req.body.connectionId.trim()
       : (itemKey.startsWith('vm:') && itemKey.split(':').length === 3 ? itemKey.split(':')[1] : undefined);
-    const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid, connId, email) : null;
+    const vm = Number.isInteger(vmid) ? await dbService.getVMByVMID(vmid, connId, isAdmin ? undefined : email) : null;
     const delegatedAccess = vm ? await dbService.getSubUserAccess(vmid, email) : null;
-    if (!vm || (String(vm.ownerEmail || '').toLowerCase() !== email && !delegatedAccess)) {
-      return res.status(403).json({ success: false, error: 'You do not have access to this service.' });
+    if (!isAdmin && (!vm || (String(vm.ownerEmail || '').toLowerCase() !== email && !delegatedAccess))) {
+      // Gracefully ignore unauthorized navigation telemetry without generating noisy 403 console errors
+      return res.status(204).end();
     }
-    const finalKey = vm.proxmoxConnectionId ? `vm:${vm.proxmoxConnectionId}:${vmid}` : `vm:${vmid}`;
+    const finalKey = vm?.proxmoxConnectionId ? `vm:${vm.proxmoxConnectionId}:${vmid}` : (connId ? `vm:${connId}:${vmid}` : `vm:${vmid}`);
     await dbService.recordNavigationUsage(email, { key: finalKey, type: 'vm', vmid });
   }
 

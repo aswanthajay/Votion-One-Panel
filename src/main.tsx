@@ -5,6 +5,20 @@ import { initTheme } from './theme';
 import '../styles.css';
 import './index.css';
 
+// Guard against third-party / browser DevTools Soft Navigation bug (reading 'startTime')
+window.addEventListener('error', (event) => {
+  const msg = event?.message || (event?.error && event?.error?.message) || '';
+  const stack = event?.error?.stack || '';
+  if (
+    msg.includes("Cannot read properties of undefined (reading 'startTime')") ||
+    msg.includes("reading 'startTime'") ||
+    stack.includes('reportAllChanges')
+  ) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+
 initTheme();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

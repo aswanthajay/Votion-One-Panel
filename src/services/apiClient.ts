@@ -1141,16 +1141,19 @@ class ApiClient {
   }
 
   async recordNavigationUsage(item: { itemKey: string; itemType: 'destination' | 'vm'; vmid?: number }) {
-    const res = await this.apiFetch(`${API_BASE_URL}/client/navigation-usage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.getHeaders() },
-      body: JSON.stringify(item),
-    });
-    if (!res.ok && res.status !== 204) {
-      await this.readApiResponse(res, 'Unable to record navigation usage.');
-      return;
+    try {
+      const res = await this.apiFetch(`${API_BASE_URL}/client/navigation-usage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.getHeaders() },
+        body: JSON.stringify(item),
+      });
+      if (!res.ok && res.status !== 204) {
+        return;
+      }
+      window.dispatchEvent(new Event('votion-navigation-usage'));
+    } catch {
+      // Telemetry should never disrupt navigation or pollute the console
     }
-    window.dispatchEvent(new Event('votion-navigation-usage'));
   }
 
   /**

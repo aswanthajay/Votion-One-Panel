@@ -4,6 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VOTION ONE Platform</title>
+
+    <script>
+      /* Suppress third-party / browser extension / Cloudflare Web Analytics soft-navigation bug:
+         "Cannot read properties of undefined (reading 'startTime') at reportAllChanges" */
+      window.addEventListener('error', function (event) {
+        var msg = (event && (event.message || (event.error && event.error.message))) || '';
+        var stack = (event && event.error && event.error.stack) || '';
+        if (
+          msg.indexOf("Cannot read properties of undefined (reading 'startTime')") !== -1 ||
+          msg.indexOf("reading 'startTime'") !== -1 ||
+          stack.indexOf('reportAllChanges') !== -1 ||
+          (event.filename && event.filename.indexOf('beacon') !== -1)
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return true;
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function (event) {
+        var msg = (event && event.reason && (event.reason.message || String(event.reason))) || '';
+        var stack = (event && event.reason && event.reason.stack) || '';
+        if (
+          msg.indexOf("Cannot read properties of undefined (reading 'startTime')") !== -1 ||
+          msg.indexOf("reading 'startTime'") !== -1 ||
+          stack.indexOf('reportAllChanges') !== -1
+        ) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+    </script>
     
     <!-- Preconnect & Signature Fonts (Newsreader, Inter, JetBrains Mono, Playfair Display) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
