@@ -471,7 +471,7 @@ apiRouter.post('/auth/forgot-password', rateLimit({ windowMs: 15 * 60 * 1000, ma
     const token = await dbService.createPasswordResetToken(email);
     await dbService.logAudit(email, 'PASSWORD_RESET_REQUEST', 'auth', 'Password reset requested');
     if (token) {
-      const appUrl = process.env.PUBLIC_APP_URL || 'http://localhost:3000';
+      const appUrl = process.env.PUBLIC_APP_URL || 'http://localhost:5000';
       const resetUrl = `${appUrl.replace(/\/$/, '')}/reset-password?token=${encodeURIComponent(token)}`;
       await emailService.sendPasswordReset(email, resetUrl);
     }
