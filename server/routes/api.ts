@@ -2242,7 +2242,7 @@ const validateIpAdmin = (ip: string) => {
   return clean;
 };
 
-apiRouter.get('/admin/ovh/ips', requireOvhEnabledAdmin, async (req, res) => {
+apiRouter.get(['/admin/ovh/ips', '/admin/ovh/ip'], requireOvhEnabledAdmin, async (req, res) => {
   try {
     const ips = await ovhService.getIps();
     res.json({ success: true, data: ips });
@@ -2254,13 +2254,24 @@ apiRouter.get('/admin/ovh/ips', requireOvhEnabledAdmin, async (req, res) => {
 apiRouter.get('/admin/ovh/status', requireOvhEnabledAdmin, async (req, res) => {
   try {
     const ip = validateIpAdmin(String(req.query.ip || ''));
-    const [reverse, ddos, firewall, mitigationProfile] = await Promise.all([
+    const [reverse, ddos, firewall, mitigationProfile, antiHack] = await Promise.all([
       ovhService.getReverse(ip).catch(() => null),
       ovhService.getDdosState(ip).catch(() => ({ state: 'unknown', mode: 'automatic' as const })),
       ovhService.getFirewallState(ip).catch(() => ({ enabled: false, state: 'unknown' })),
       ovhService.getMitigationProfile(ip).catch(() => null),
+      ovhService.getAntiHackStatus(ip).catch(() => null),
     ]);
-    res.json({ success: true, data: { ip, reverse, ddos, firewall, mitigationProfile } });
+    res.json({ success: true, data: { ip, reverse, ddos, firewall, mitigationProfile, antiHack } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/ovh/antihack/unblock', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    await ovhService.unblockAntiHack(ip);
+    res.json({ success: true, message: 'Unblock request submitted to OVH Anti-Hack successfully' });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }

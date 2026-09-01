@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { apiClient } from '../services/apiClient';
+import { apiClient, ApiVM } from '../services/apiClient';
 
 interface OvhStatus {
   ip: string;
@@ -15,6 +15,12 @@ interface OvhStatus {
   mitigationProfile?: {
     autoMitigationTimeOut: number;
     state: string;
+  } | null;
+  antiHack?: {
+    blockedSince: string;
+    logs: string;
+    state: string;
+    timeToUnblock: number;
   } | null;
 }
 
@@ -36,19 +42,33 @@ interface GameRule {
   l4Protocol?: string;
 }
 
+const GAME_PRESETS = [
+  { label: 'Minecraft (Java)', game: 'minecraft', port: 25565 },
+  { label: 'FiveM / GTA V', game: 'gtav', port: 30120 },
+  { label: 'CS2 / Source', game: 'valve', port: 27015 },
+  { label: 'Rust Dedicated', game: 'rust', port: 28015 },
+  { label: 'Palworld', game: 'palworld', port: 8211 },
+  { label: 'ARK: Survival', game: 'ark', port: 7777 },
+  { label: 'TeamSpeak 3', game: 'teamspeak', port: 9987 },
+  { label: 'Custom UDP Filter', game: 'other', port: 0 },
+];
+
 export const OvhManager: React.FC = () => {
   const [ipInput, setIpInput] = useState('');
   const [activeIp, setActiveIp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // OVH Account IPs list
+  // OVH Account IPs and VM correlation
   const [ovhIps, setOvhIps] = useState<string[]>([]);
+  const [vms, setVms] = useState<ApiVM[]>([]);
   const [loadingIps, setLoadingIps] = useState(false);
+  const [ipFilterMode, setIpFilterMode] = useState<'all' | 'assigned' | 'free'>('all');
+  const [ipSearchQuery, setIpSearchQuery] = useState('');
 
   // Status & Tab state
   const [status, setStatus] = useState<OvhStatus | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'firewall' | 'game'>('general');
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'firewall' | 'game' | 'antihack'>('general');
 
   // rDNS state
   const [rdnsValue, setRdnsValue] = useState('');
@@ -60,13 +80,12 @@ export const OvhManager: React.FC = () => {
   // VAC Auto Mitigation Timeout state
   const [mitigationTimeout, setMitigationTimeout] = useState<number>(15);
   const [mitigationUpdating, setMitigationUpdating] = useState(false);
-  const [mitigationProfileNotProvisioned, setMitigationProfileNotProvisioned] = useState(false);
 
   // Edge Firewall state
   const [fwToggling, setFwToggling] = useState(false);
   const [fwRules, setFwRules] = useState<FirewallRule[]>([]);
   const [loadingFwRules, setLoadingFwRules] = useState(false);
-  const [fwRulesSupported, setFwRulesSupported] = useState(true);
+  const [ruleSearchQuery, setRuleSearchQuery] = useState('');
 
   // Edge Firewall form
   const [newSeq, setNewSeq] = useState<number>(0);
@@ -76,18 +95,19 @@ export const OvhManager: React.FC = () => {
   const [newDstPort, setNewDstPort] = useState('');
   const [newSrcIp, setNewSrcIp] = useState('');
   const [ruleSubmitting, setRuleSubmitting] = useState(false);
+  const [showAddRuleForm, setShowAddRuleForm] = useState(false);
 
   // Game DDoS state
   const [gameRules, setGameRules] = useState<GameRule[]>([]);
   const [loadingGameRules, setLoadingGameRules] = useState(false);
-  const [gameDdosSupported, setGameDdosSupported] = useState(true);
-
-  // Game DDoS form
   const [gameFromPort, setGameFromPort] = useState<number | ''>('');
   const [gameToPort, setGameToPort] = useState<number>(25565);
   const [gameProto, setGameProto] = useState<'tcp' | 'udp'>('udp');
   const [gameProfile, setGameProfile] = useState('minecraft');
   const [gameSubmitting, setGameSubmitting] = useState(false);
+
+  // Anti-Hack state
+  const [unblockingAntiHack, setUnblockingAntiHack] = useState(false);
 
   // Permission error state
   const [permissionError, setPermissionError] = useState(false);
@@ -100,92 +120,84 @@ export const OvhManager: React.FC = () => {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // Helper to format Game Profile name nicely (with safe null/undefined check)
+  // Helper to format Game Profile name
   const formatGameProfile = (profile?: string | null): string => {
     if (!profile) return 'Standard UDP Filter';
     const mapping: Record<string, string> = {
-      // Exact OVH API-returned strings (already lowercased + stripped)
-      'minecraft': 'Minecraft Pocket / Java',
-      'minecraftpocketedition': 'Minecraft Pocket Edition',
-      'minecraftjava': 'Minecraft Java Edition',
-      'minecraftquery': 'Minecraft Query',
-      'rust': 'Rust Server',
-      'gta5': 'GTA V / FiveM / RageMP',
-      'gtav': 'GTA V / FiveM',
-      'valve': 'Valve Source Engine (CS, GMod, TF2)',
-      'teamspeak': 'Teamspeak Voice Server',
-      'teamspeak2': 'Teamspeak 2',
-      'teamspeak3': 'Teamspeak 3',
-      'ark': 'ARK: Survival Evolved',
-      'arma': 'Arma / DayZ',
-      'dayz': 'DayZ Standalone',
-      'other': 'Other (Standard UDP Filter)',
-      'none': 'No Game Profile',
-      // OVH legacy GTA SA strings
-      'gtamultitheftautosanandreas': 'GTA Multi Theft Auto: San Andreas',
-      'gtasanandreasmultiplayermod': 'GTA: SA-MP (San Andreas Multiplayer)',
-      'gtamultitheftauto': 'GTA Multi Theft Auto',
-      // Generic fallback patterns
-      'fivem': 'FiveM / GTA V',
-      'ragemp': 'RageMP / GTA V',
-      'csgo': 'CS:GO / Counter-Strike',
-      'cs2': 'Counter-Strike 2',
-      'tf2': 'Team Fortress 2',
-      'gmod': 'Garry\'s Mod',
-      'satisfactory': 'Satisfactory',
-      'palworld': 'Palworld',
-      'enshrouded': 'Enshrouded',
-      'vrising': 'V Rising',
+      minecraft: 'Minecraft Pocket / Java',
+      minecraftpocketedition: 'Minecraft Pocket Edition',
+      minecraftjava: 'Minecraft Java Edition',
+      minecraftquery: 'Minecraft Query',
+      rust: 'Rust Server',
+      gta5: 'GTA V / FiveM / RageMP',
+      gtav: 'GTA V / FiveM',
+      valve: 'Valve Source Engine (CS, GMod, TF2)',
+      teamspeak: 'Teamspeak Voice Server',
+      ark: 'ARK: Survival Evolved',
+      arma: 'Arma / DayZ',
+      dayz: 'DayZ Standalone',
+      other: 'Other (Standard UDP Filter)',
+      palworld: 'Palworld',
     };
     const key = profile.toLowerCase().replace(/[^a-z0-9]/g, '');
     return mapping[key] || profile;
   };
 
-
-  // Load IPs owned by OVH account
-  const fetchOvhIps = async () => {
+  // Initial load: fetch OVH IPs and VM allocations
+  const loadInitialData = async () => {
     setLoadingIps(true);
     setPermissionError(false);
     try {
-      const list = await apiClient.getAdminOvhIps();
-      setOvhIps(list || []);
+      const [ipsList, vmsList] = await Promise.all([
+        apiClient.getAdminOvhIps().catch((err: any) => {
+          if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
+            setPermissionError(true);
+          }
+          return [];
+        }),
+        apiClient.getVMs().catch(() => []),
+      ]);
+      setOvhIps(ipsList || []);
+      setVms(vmsList || []);
     } catch (err: any) {
-      console.error('Failed to load OVH account IPs:', err);
-      if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
-        setPermissionError(true);
-      }
+      console.error('Failed to load initial data:', err);
     } finally {
       setLoadingIps(false);
     }
   };
 
   useEffect(() => {
-    void fetchOvhIps();
+    void loadInitialData();
   }, []);
+
+  // Map IP to registered VM entity
+  const vmByIp = useMemo(() => {
+    const map = new Map<string, ApiVM>();
+    vms.forEach(vm => {
+      if (vm.ipAddress) {
+        const clean = vm.ipAddress.split('/')[0].trim();
+        map.set(clean, vm);
+      }
+    });
+    return map;
+  }, [vms]);
 
   // Helper to expand CIDR block into individual IPs
   const expandCidr = (cidr: string): string[] => {
     const [ip, prefixStr] = cidr.split('/');
     if (!ip) return [];
     const prefix = prefixStr ? parseInt(prefixStr, 10) : 32;
-    
-    if (isNaN(prefix) || prefix < 0 || prefix > 32) {
-      return [ip];
-    }
-    
-    if (prefix === 32) {
-      return [ip];
-    }
-    
+
+    if (isNaN(prefix) || prefix < 0 || prefix > 32) return [ip];
+    if (prefix === 32) return [ip];
+
     const parts = ip.split('.').map(Number);
-    if (parts.length !== 4 || parts.some(isNaN)) {
-      return [ip];
-    }
-    
+    if (parts.length !== 4 || parts.some(isNaN)) return [ip];
+
     const ipInt = parts[0] * 16777216 + parts[1] * 65536 + parts[2] * 256 + parts[3];
     const count = Math.pow(2, 32 - prefix);
-    const limit = Math.min(count, 256); // Limit expansion to 256 IPs
-    
+    const limit = Math.min(count, 256);
+
     const result: string[] = [];
     for (let i = 0; i < limit; i++) {
       const currentInt = ipInt + i;
@@ -195,34 +207,59 @@ export const OvhManager: React.FC = () => {
       const p4 = currentInt % 256;
       result.push(`${p1}.${p2}.${p3}.${p4}`);
     }
-    
+
     return result;
   };
 
-  // Format and group list of IPs
-  const discoveredIpList = useMemo(() => {
-    return ovhIps.map(block => {
-      return {
-        block,
-        ips: expandCidr(block)
-      };
-    }).sort((a, b) => a.block.localeCompare(b.block));
-  }, [ovhIps]);
-
-  const handleQueryIp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanIp = ipInput.trim();
-    const targetIp = cleanIp.split('/')[0] || cleanIp;
-    if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(targetIp)) {
-      setError('Please enter a valid IPv4 address.');
-      setStatus(null);
-      return;
+  // Discovered flat host list with VM metadata
+  const hostListWithMetadata = useMemo(() => {
+    const list: Array<{ ip: string; block: string; boundVm: ApiVM | null }> = [];
+    for (const block of ovhIps) {
+      const expanded = expandCidr(block);
+      for (const ip of expanded) {
+        list.push({
+          ip,
+          block,
+          boundVm: vmByIp.get(ip) || null,
+        });
+      }
     }
+    return list;
+  }, [ovhIps, vmByIp]);
 
+  // Filtered IP List
+  const filteredHostList = useMemo(() => {
+    return hostListWithMetadata.filter(item => {
+      // 1. Assignment Filter
+      if (ipFilterMode === 'assigned' && !item.boundVm) return false;
+      if (ipFilterMode === 'free' && item.boundVm) return false;
+
+      // 2. Search Filter
+      if (ipSearchQuery.trim()) {
+        const q = ipSearchQuery.toLowerCase().trim();
+        const matchesIp = item.ip.includes(q);
+        const matchesVmId = item.boundVm ? String(item.boundVm.vmid).includes(q) : false;
+        const matchesVmName = item.boundVm ? (item.boundVm.name || '').toLowerCase().includes(q) : false;
+        const matchesOwner = item.boundVm ? (item.boundVm.ownerEmail || '').toLowerCase().includes(q) : false;
+        if (!matchesIp && !matchesVmId && !matchesVmName && !matchesOwner) return false;
+      }
+      return true;
+    });
+  }, [hostListWithMetadata, ipFilterMode, ipSearchQuery]);
+
+  // Aggregate Metrics for At a Glance Top Strip
+  const fleetMetrics = useMemo(() => {
+    const totalHosts = hostListWithMetadata.length;
+    const boundCount = hostListWithMetadata.filter(h => h.boundVm !== null).length;
+    const freeCount = totalHosts - boundCount;
+    const subnetsCount = ovhIps.length;
+    return { totalHosts, boundCount, freeCount, subnetsCount };
+  }, [hostListWithMetadata, ovhIps]);
+
+  // Fetch status for a targeted IP
+  const fetchStatusForIp = async (targetIp: string) => {
     setLoading(true);
     setError(null);
-    setFwRulesSupported(true);
-    setGameDdosSupported(true);
     try {
       const res = await apiClient.getAdminOvhStatus(targetIp);
       setStatus({
@@ -231,10 +268,10 @@ export const OvhManager: React.FC = () => {
         ddos: res.ddos || { state: 'unknown', mode: 'automatic' },
         firewall: res.firewall || { enabled: false, state: 'unknown' },
         mitigationProfile: res.mitigationProfile,
+        antiHack: res.antiHack || null,
       });
       setRdnsValue(res.reverse || '');
       setMitigationTimeout(res.mitigationProfile?.autoMitigationTimeOut ?? 15);
-      setMitigationProfileNotProvisioned(false);
       setActiveIp(targetIp);
 
       if (res.firewall?.enabled) {
@@ -245,7 +282,7 @@ export const OvhManager: React.FC = () => {
 
       void fetchGameRules(targetIp);
     } catch (err: any) {
-      setError(err.message || 'Failed to query OVH router status. Make sure OVH integration is enabled and credentials are correct.');
+      setError(err.message || 'Failed to query OVH router status.');
       setStatus(null);
       if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
         setPermissionError(true);
@@ -255,69 +292,27 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  const handleQuickSelect = async (ip: string) => {
+  const handleQueryIpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanIp = ipInput.trim().split('/')[0] || ipInput.trim();
+    if (!/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(cleanIp)) {
+      setError('Please enter a valid IPv4 address.');
+      setStatus(null);
+      return;
+    }
+    await fetchStatusForIp(cleanIp);
+  };
+
+  const handleSelectIp = async (ip: string) => {
     setIpInput(ip);
-    setLoading(true);
-    setError(null);
-    setFwRulesSupported(true);
-    setGameDdosSupported(true);
-    try {
-      const res = await apiClient.getAdminOvhStatus(ip);
-      setStatus({
-        ip,
-        reverse: res.reverse,
-        ddos: res.ddos || { state: 'unknown', mode: 'automatic' },
-        firewall: res.firewall || { enabled: false, state: 'unknown' },
-        mitigationProfile: res.mitigationProfile,
-      });
-      setRdnsValue(res.reverse || '');
-      setMitigationTimeout(res.mitigationProfile?.autoMitigationTimeOut ?? 15);
-      setActiveIp(ip);
-
-      if (res.firewall?.enabled) {
-        void fetchFirewallRules(ip);
-      } else {
-        setFwRules([]);
-      }
-
-      void fetchGameRules(ip);
-    } catch (err: any) {
-      setError(err.message || 'Failed to query OVH router status. Make sure OVH integration is enabled and credentials are correct.');
-      setStatus(null);
-      if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
-        setPermissionError(true);
-      }
-    } finally {
-      setLoading(false);
-    }
+    await fetchStatusForIp(ip);
   };
 
-  const refreshStatus = async () => {
-    if (!activeIp) return;
-    try {
-      const res = await apiClient.getAdminOvhStatus(activeIp);
-      setStatus({
-        ip: activeIp,
-        reverse: res.reverse,
-        ddos: res.ddos || { state: 'unknown', mode: 'automatic' },
-        firewall: res.firewall || { enabled: false, state: 'unknown' },
-        mitigationProfile: res.mitigationProfile,
-      });
-      setRdnsValue(res.reverse || '');
-      setMitigationTimeout(res.mitigationProfile?.autoMitigationTimeOut ?? 15);
-
-      if (res.firewall?.enabled) {
-        void fetchFirewallRules(activeIp);
-      } else {
-        setFwRules([]);
-      }
-      void fetchGameRules(activeIp);
-    } catch (err: any) {
-      showToast('error', 'Status refresh failed: ' + err.message);
-    }
+  const refreshCurrentStatus = () => {
+    if (activeIp) void fetchStatusForIp(activeIp);
   };
 
-  // rDNS Updates
+  // rDNS update
   const handleUpdateRdns = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeIp) return;
@@ -325,8 +320,8 @@ export const OvhManager: React.FC = () => {
     try {
       const res = await apiClient.setAdminOvhRdns(activeIp, rdnsValue);
       if (res.success) {
-        showToast('success', res.message || 'rDNS record update queued at OVH.');
-        await refreshStatus();
+        showToast('success', rdnsValue ? `rDNS updated to ${rdnsValue}` : 'rDNS PTR record cleared.');
+        setStatus(prev => prev ? { ...prev, reverse: rdnsValue || null } : null);
       } else {
         showToast('error', res.error || 'Failed to update rDNS.');
       }
@@ -337,18 +332,18 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  // DDoS Toggling
+  // DDoS mode toggle
   const handleToggleDdos = async () => {
     if (!activeIp || !status) return;
+    const nextMode = status.ddos.mode === 'permanent' ? 'automatic' : 'permanent';
     setDdosUpdating(true);
-    const targetMode = status.ddos.mode === 'permanent' ? 'automatic' : 'permanent';
     try {
-      const res = await apiClient.setAdminOvhDdos(activeIp, targetMode);
+      const res = await apiClient.setAdminOvhDdos(activeIp, nextMode);
       if (res.success) {
-        showToast('success', res.message || `DDoS mode set to ${targetMode}.`);
-        await refreshStatus();
+        showToast('success', `DDoS mitigation set to ${nextMode.toUpperCase()}.`);
+        setStatus(prev => prev ? { ...prev, ddos: { ...prev.ddos, mode: nextMode } } : null);
       } else {
-        showToast('error', res.error || 'Failed to update DDoS mode.');
+        showToast('error', res.error || 'Failed to toggle DDoS mode.');
       }
     } catch (err: any) {
       showToast('error', err.message);
@@ -357,46 +352,36 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  // Mitigation Profile Timeout Updates
-  const handleUpdateMitigationTimeout = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // VAC mitigation profile timeout
+  const handleUpdateMitigationTimeout = async (timeout: number) => {
     if (!activeIp) return;
     setMitigationUpdating(true);
     try {
-      const res = await apiClient.setAdminOvhMitigationProfile(activeIp, mitigationTimeout);
+      const res = await apiClient.setAdminOvhMitigationProfile(activeIp, timeout);
       if (res.success) {
-        showToast('success', res.message || 'VAC auto mitigation timeout updated.');
-        await refreshStatus();
-      } else if (res.error?.includes('OVH_PROFILE_NOT_PROVISIONED') || res.error?.includes('not been created')) {
-        setMitigationProfileNotProvisioned(true);
+        showToast('success', `VAC scrubbing timeout updated to ${timeout} min.`);
+        setMitigationTimeout(timeout);
       } else {
-        showToast('error', res.error || 'Failed to update mitigation profile.');
+        showToast('error', res.error || 'Failed to update timeout.');
       }
     } catch (err: any) {
-      if (err.message?.includes('OVH_PROFILE_NOT_PROVISIONED')) {
-        setMitigationProfileNotProvisioned(true);
-      } else {
-        showToast('error', err.message);
-      }
+      showToast('error', err.message);
     } finally {
       setMitigationUpdating(false);
     }
   };
 
-  // Edge Firewall
+  // Edge Firewall rules
   const fetchFirewallRules = async (ip: string) => {
     setLoadingFwRules(true);
-    setFwRulesSupported(true);
     try {
       const rules = await apiClient.getAdminOvhFirewallRules(ip);
-      setFwRules(rules);
+      setFwRules(rules || []);
+      // Calculate next available sequence
+      const maxSeq = rules.length > 0 ? Math.max(...rules.map((r: any) => r.sequence)) : -1;
+      setNewSeq(maxSeq + 1);
     } catch (err: any) {
-      console.warn('Failed to load firewall rules:', err.message || err);
-      setFwRules([]);
-      setFwRulesSupported(false);
-      if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
-        setPermissionError(true);
-      }
+      console.error('Failed to load FW rules:', err);
     } finally {
       setLoadingFwRules(false);
     }
@@ -404,20 +389,16 @@ export const OvhManager: React.FC = () => {
 
   const handleToggleFirewall = async () => {
     if (!activeIp || !status) return;
+    const nextEnabled = !status.firewall.enabled;
     setFwToggling(true);
-    const nextState = !status.firewall.enabled;
     try {
-      const res = await apiClient.toggleAdminOvhFirewall(activeIp, nextState);
+      const res = await apiClient.toggleAdminOvhFirewall(activeIp, nextEnabled);
       if (res.success) {
-        showToast('success', res.message || `Edge Firewall ${nextState ? 'enabled' : 'disabled'}.`);
-        await refreshStatus();
-        if (nextState) {
-          void fetchFirewallRules(activeIp);
-        } else {
-          setFwRules([]);
-        }
+        showToast('success', `Edge Firewall ${nextEnabled ? 'enabled' : 'disabled'}.`);
+        setStatus(prev => prev ? { ...prev, firewall: { ...prev.firewall, enabled: nextEnabled } } : null);
+        if (nextEnabled) void fetchFirewallRules(activeIp);
       } else {
-        showToast('error', res.error || 'Failed to toggle Edge Firewall.');
+        showToast('error', res.error || 'Failed to toggle firewall.');
       }
     } catch (err: any) {
       showToast('error', err.message);
@@ -426,7 +407,7 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  const handleAddFwRule = async (e: React.FormEvent) => {
+  const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeIp) return;
     setRuleSubmitting(true);
@@ -435,20 +416,20 @@ export const OvhManager: React.FC = () => {
         sequence: newSeq,
         action: newAction,
         protocol: newProto,
-        sourcePort: newSrcPort || undefined,
-        destinationPort: newDstPort || undefined,
-        source: newSrcIp || undefined,
+        sourcePort: newSrcPort.trim() || undefined,
+        destinationPort: newDstPort.trim() || undefined,
+        source: newSrcIp.trim() || undefined,
       };
       const res = await apiClient.addAdminOvhFirewallRule(activeIp, rule);
       if (res.success) {
-        showToast('success', 'Firewall rule created.');
+        showToast('success', `Rule #${newSeq} added successfully.`);
         await fetchFirewallRules(activeIp);
-        setNewSeq(prev => (prev < 99 ? prev + 1 : 0));
+        setShowAddRuleForm(false);
         setNewSrcPort('');
         setNewDstPort('');
         setNewSrcIp('');
       } else {
-        showToast('error', res.error || 'Failed to create firewall rule.');
+        showToast('error', res.error || 'Failed to add firewall rule.');
       }
     } catch (err: any) {
       showToast('error', err.message);
@@ -457,42 +438,36 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  const handleDeleteFwRule = async (sequence: number) => {
+  const handleDeleteRule = async (sequence: number) => {
     if (!activeIp) return;
-    if (!window.confirm(`Are you sure you want to delete Edge Firewall rule sequence ${sequence}?`)) return;
+    if (!window.confirm(`Are you sure you want to remove rule #${sequence}?`)) return;
     try {
       const res = await apiClient.deleteAdminOvhFirewallRule(activeIp, sequence);
       if (res.success) {
-        showToast('success', 'Firewall rule deleted.');
+        showToast('success', `Rule #${sequence} deleted.`);
         await fetchFirewallRules(activeIp);
       } else {
-        showToast('error', res.error || 'Failed to delete firewall rule.');
+        showToast('error', res.error || 'Failed to delete rule.');
       }
     } catch (err: any) {
       showToast('error', err.message);
     }
   };
 
-  // Game DDoS
+  // Game DDoS Rules
   const fetchGameRules = async (ip: string) => {
     setLoadingGameRules(true);
-    setGameDdosSupported(true);
     try {
       const rules = await apiClient.getAdminOvhGameRules(ip);
-      setGameRules(rules);
+      setGameRules(rules || []);
     } catch (err: any) {
-      console.warn('Failed to load game rules:', err.message || err);
-      setGameRules([]);
-      setGameDdosSupported(false);
-      if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
-        setPermissionError(true);
-      }
+      console.error('Failed to load Game rules:', err);
     } finally {
       setLoadingGameRules(false);
     }
   };
 
-  const handleAddGameRule = async (e: React.FormEvent) => {
+  const handleCreateGameRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeIp) return;
     setGameSubmitting(true);
@@ -505,12 +480,11 @@ export const OvhManager: React.FC = () => {
       };
       const res = await apiClient.addAdminOvhGameRule(activeIp, rule);
       if (res.success) {
-        showToast('success', 'Game protection rule added.');
+        showToast('success', 'Hardware Game DDoS protection rule added.');
         await fetchGameRules(activeIp);
         setGameFromPort('');
-        setGameToPort(25565);
       } else {
-        showToast('error', res.error || 'Failed to add game rule.');
+        showToast('error', res.error || 'Failed to add game protection rule.');
       }
     } catch (err: any) {
       showToast('error', err.message);
@@ -521,11 +495,11 @@ export const OvhManager: React.FC = () => {
 
   const handleDeleteGameRule = async (ruleId: number) => {
     if (!activeIp) return;
-    if (!window.confirm('Are you sure you want to remove this Game DDoS filter?')) return;
+    if (!window.confirm('Remove this Game DDoS hardware rule?')) return;
     try {
       const res = await apiClient.deleteAdminOvhGameRule(activeIp, ruleId);
       if (res.success) {
-        showToast('success', 'Game protection rule deleted.');
+        showToast('success', 'Game protection rule removed.');
         await fetchGameRules(activeIp);
       } else {
         showToast('error', res.error || 'Failed to delete game rule.');
@@ -535,606 +509,900 @@ export const OvhManager: React.FC = () => {
     }
   };
 
-  return (
-    <div className="p-8 max-w-[1280px]">
-      <div className="mb-8">
-        <h1 className="page-heading font-bold text-2xl text-inherit">OVH Router Manager</h1>
-        <p className="text-sm text-[var(--theme-text-muted)] mt-1 ">Manage Hardware Firewalls, DDoS Mitigation profiles, and rDNS entries for any OVH IP address.</p>
-      </div>
+  // Anti-Hack Unblock
+  const handleUnblockAntiHack = async () => {
+    if (!activeIp) return;
+    if (!window.confirm(`Request immediate unblock for ${activeIp} from OVH Anti-Hack?`)) return;
+    setUnblockingAntiHack(true);
+    try {
+      const res = await apiClient.unblockAdminOvhAntiHack(activeIp);
+      if (res.success) {
+        showToast('success', 'Anti-Hack unblock request submitted successfully to OVH.');
+        await fetchStatusForIp(activeIp);
+      } else {
+        showToast('error', res.error || 'Failed to submit unblock request.');
+      }
+    } catch (err: any) {
+      showToast('error', err.message);
+    } finally {
+      setUnblockingAntiHack(false);
+    }
+  };
 
+  // Filtered Firewall Rules
+  const filteredFwRules = useMemo(() => {
+    if (!ruleSearchQuery.trim()) return fwRules;
+    const q = ruleSearchQuery.toLowerCase().trim();
+    return fwRules.filter(r =>
+      String(r.sequence).includes(q) ||
+      r.action.includes(q) ||
+      r.protocol.includes(q) ||
+      (r.destinationPort && r.destinationPort.includes(q)) ||
+      (r.source && r.source.includes(q))
+    );
+  }, [fwRules, ruleSearchQuery]);
+
+  const activeVm = activeIp ? vmByIp.get(activeIp) : null;
+
+  return (
+    <div className="p-6 lg:p-8 max-w-[1340px] mx-auto">
+      {/* 1. HEADER */}
+      <header className="mb-6 flex flex-col gap-4 border-b border-[#dedfdf] dark:border-[#262626] pb-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="page-heading font-serif font-medium text-2xl sm:text-3xl text-[#1a1a1a] dark:text-white tracking-tight !mb-0 !leading-none">
+            OVH Cloud Router Manager
+          </h1>
+          <p className="mt-1.5 text-xs text-[#656b6b] dark:text-[#a0a0a0] max-w-2xl leading-relaxed">
+            Hardware border firewalls, VAC Anti-DDoS mitigation policies, and Anti-Hack quarantine controls for all OVH subnets.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={loadInitialData}
+            disabled={loadingIps}
+            className="btn-secondary px-3 py-1.5 text-xs font-semibold rounded-lg cursor-pointer flex items-center gap-1.5"
+          >
+            <span>{loadingIps ? '↻' : '⟳'}</span> Sync IP Pool
+          </button>
+        </div>
+      </header>
+
+      {/* 2. PERMISSION ALERT */}
       {permissionError && (
-        <div className="bg-[color-mix(in_srgb,var(--theme-warning)_10%,transparent)] border border-[var(--theme-warning)]/30 text-[var(--theme-warning)] rounded-xl p-5 text-xs font-semibold leading-relaxed mb-6 max-w-[1200px]">
-          <h4 className="font-bold text-sm mb-1 text-[var(--theme-warning)]">🔑 OVH API Permissions Incomplete</h4>
-          <p className="mb-2">Your current OVH API Consumer Key does not have permissions to query or modify IP address features. To resolve this:</p>
-          <ol className="list-decimal pl-5 flex flex-col gap-1.5 font-medium text-amber-800 ">
-            <li>
-              Go to the{' '}
-              <a
-                href="https://ca.api.ovh.com/createToken/?GET=/ip&GET=/ip/*&POST=/ip/*&PUT=/ip/*&DELETE=/ip/*"
-                target="_blank"
-                rel="noreferrer"
-                className="underline font-bold text-[var(--theme-warning)] hover:text-[var(--theme-warning)] "
-              >
-                OVH Canada API Token Generator
-              </a>{' '}
-              (or{' '}
-              <a
-                href="https://eu.api.ovh.com/createToken/?GET=/ip&GET=/ip/*&POST=/ip/*&PUT=/ip/*&DELETE=/ip/*"
-                target="_blank"
-                rel="noreferrer"
-                className="underline font-bold text-[var(--theme-warning)] hover:text-[var(--theme-warning)] "
-              >
-                OVH Europe API Token Generator
-              </a>
-              ).
-            </li>
-            <li>Login to your OVH account and create a key with these exact rules:</li>
-            <ul className="list-disc pl-5 mt-1 font-mono text-[10px] text-[var(--theme-warning)] flex flex-col gap-0.5">
-              <li>GET /ip</li>
-              <li>GET /ip/*</li>
-              <li>POST /ip/*</li>
-              <li>PUT /ip/*</li>
-              <li>DELETE /ip/*</li>
-            </ul>
-            <li>Save, copy the keys, and update them inside <strong>Admin Panel → System Settings → OVH API Credentials</strong>.</li>
-          </ol>
+        <div className="mb-6 p-4 rounded-xl border border-[#f3d19a] dark:border-[#78350f] bg-[#fffaf0] dark:bg-[#1c1508] text-xs leading-relaxed">
+          <div className="flex items-center gap-2 mb-1.5 font-bold text-[#b45309]">
+            <span>🔑</span> OVH API Token Lacks IP Scope Privileges
+          </div>
+          <p className="text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+            Your current OVH Consumer Key cannot access the <code>/ip</code> API tree. Please generate a key with <code>GET/POST/PUT/DELETE /ip/*</code> access on the OVH Token Portal and update <strong>System Settings → OVH API Credentials</strong>.
+          </p>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Main Content Area */}
-        <div className="lg:col-span-3 flex flex-col gap-6">
-          {/* Query Form */}
-          <form onSubmit={handleQueryIp} className="flex gap-3">
+      {/* 3. EXECUTIVE FLEET TELEMETRY STRIP */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {/* TILE 1: SUBNET DENSITY */}
+        <div className="p-4 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+            <span>Discovered IP Pool</span>
+            <span className="font-mono text-[#1a1a1a] dark:text-white px-2 py-0.5 rounded bg-[#f1f1f1] dark:bg-[#1c1c1c]">
+              {fleetMetrics.subnetsCount} Subnet{fleetMetrics.subnetsCount === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-serif text-3xl font-medium text-[#1a1a1a] dark:text-white leading-none">
+              {fleetMetrics.totalHosts}
+            </span>
+            <span className="text-xs text-[#656b6b] dark:text-[#a0a0a0]">Host Addresses</span>
+          </div>
+          <p className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-2 font-mono truncate">
+            {ovhIps.slice(0, 2).join(', ') || 'No subnets loaded'}
+          </p>
+        </div>
+
+        {/* TILE 2: GUEST VM BINDINGS */}
+        <div className="p-4 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+            <span>Guest Allocations</span>
+            <span className="font-mono text-[#16a34a] px-2 py-0.5 rounded bg-[#f0fdf4] dark:bg-[#052e16]">
+              {fleetMetrics.boundCount} Assigned
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-serif text-3xl font-medium text-[#1a1a1a] dark:text-white leading-none">
+              {fleetMetrics.freeCount}
+            </span>
+            <span className="text-xs text-[#656b6b] dark:text-[#a0a0a0]">Unassigned Pool</span>
+          </div>
+          <div className="mt-2.5 h-1.5 w-full bg-[#f1f1f1] dark:bg-[#262626] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[#16a34a] rounded-full transition-all"
+              style={{ width: `${fleetMetrics.totalHosts > 0 ? (fleetMetrics.boundCount / fleetMetrics.totalHosts) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+
+        {/* TILE 3: HARDWARE DEFENSE */}
+        <div className="p-4 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+            <span>Active Edge Shield</span>
+            <span className="font-mono text-[#2563eb] px-2 py-0.5 rounded bg-[#eff6ff] dark:bg-[#172554]">
+              VAC 2026
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-serif text-3xl font-medium text-[#1a1a1a] dark:text-white leading-none">
+              {status?.firewall.enabled ? 'Active' : 'Standby'}
+            </span>
+            <span className="text-xs text-[#656b6b] dark:text-[#a0a0a0]">Inspection Layer</span>
+          </div>
+          <p className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-2 font-mono">
+            Mode: {status?.ddos.mode === 'permanent' ? 'Permanent Scrubbing' : 'Automatic Detection'}
+          </p>
+        </div>
+
+        {/* TILE 4: ANTI-HACK WATCHDOG */}
+        <div className="p-4 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+            <span>Abuse Watchdog</span>
+            <span className={`font-mono text-[10px] px-2 py-0.5 rounded ${status?.antiHack ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]' : 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]'}`}>
+              {status?.antiHack ? 'QUARANTINED' : 'CLEAN'}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`font-serif text-3xl font-medium leading-none ${status?.antiHack ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
+              {status?.antiHack ? '1 Alert' : '0 Alerts'}
+            </span>
+            <span className="text-xs text-[#656b6b] dark:text-[#a0a0a0]">Quarantines</span>
+          </div>
+          <p className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-2 truncate">
+            {status?.antiHack ? 'Traffic blocked by OVH security' : 'All probed addresses unrestricted'}
+          </p>
+        </div>
+      </section>
+
+      {/* 4. MAIN WORKSPACE: IP EXPLORER + TARGET INSPECTOR */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* LEFT COLUMN: SMART IP EXPLORER */}
+        <div className="lg:col-span-4 flex flex-col gap-4">
+          <div className="p-4 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-serif font-medium text-base text-[#1a1a1a] dark:text-white">
+                Subnet IP Explorer
+              </h2>
+              <span className="text-xs font-mono text-[#656b6b] dark:text-[#a0a0a0]">
+                {filteredHostList.length} IPs
+              </span>
+            </div>
+
+            {/* Direct Query Form */}
+            <form onSubmit={handleQueryIpSubmit} className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={ipInput}
+                onChange={e => setIpInput(e.target.value)}
+                placeholder="Enter IP (e.g. 15.235.169.62)"
+                className="flex-1 px-3 py-1.5 text-xs font-mono bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary px-3 py-1.5 text-xs font-semibold cursor-pointer shrink-0"
+              >
+                {loading ? '…' : 'Inspect'}
+              </button>
+            </form>
+
+            {/* Quick Search */}
             <input
               type="text"
-              value={ipInput}
-              onChange={(e) => setIpInput(e.target.value)}
-              placeholder="e.g. 15.235.169.62"
-              className="w-full max-w-[320px] p-3 bg-[var(--theme-surface-muted)] border border-[var(--theme-border)] rounded-lg text-[var(--theme-text)] text-sm focus:border-[var(--theme-accent)] focus:ring-1 focus:ring-[var(--theme-accent)] outline-none transition-all font-mono font-medium placeholder-[var(--theme-text-muted)]/50"
+              value={ipSearchQuery}
+              onChange={e => setIpSearchQuery(e.target.value)}
+              placeholder="Filter list by IP, VM ID, or owner…"
+              className="w-full px-3 py-1.5 text-xs bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white mb-3"
             />
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary py-1.5 px-4 text-xs"
-            >
-              {loading ? 'Querying...' : 'Query IP Status'}
-            </button>
-          </form>
 
-          {/* Toast Alert */}
-          {toast && (
-            <div className={`p-4 text-xs font-semibold border rounded-lg ${toast.type === 'success' ? 'bg-[color-mix(in_srgb,var(--theme-success)_10%,transparent)] text-[var(--theme-success)] border-[var(--theme-border)] ' : 'bg-[color-mix(in_srgb,var(--theme-danger)_10%,transparent)] text-[var(--theme-danger)] border-[var(--theme-border)] '}`}>
-              {toast.type === 'success' ? '✓ ' : '⚠ '}{toast.text}
+            {/* Filter Tabs */}
+            <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-3">
+              {(['all', 'assigned', 'free'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setIpFilterMode(tab)}
+                  className={`flex-1 py-1 rounded-md text-center capitalize transition-colors cursor-pointer ${
+                    ipFilterMode === tab
+                      ? 'bg-white dark:bg-[#262626] text-[#1a1a1a] dark:text-white shadow-xs font-bold'
+                      : 'hover:text-[#1a1a1a] dark:hover:text-white'
+                  }`}
+                >
+                  {tab === 'all' ? 'All' : tab === 'assigned' ? 'Bound VMs' : 'Free Pool'}
+                </button>
+              ))}
             </div>
-          )}
 
-          {/* Error state */}
-          {error && (
-            <div className="bg-[color-mix(in_srgb,var(--theme-danger)_10%,transparent)] border border-[var(--theme-danger)]/30 text-[var(--theme-danger)] rounded-xl p-4 text-xs font-medium leading-5">
-              ⚠ {error}
-            </div>
-          )}
-
-          {/* Loading indicator */}
-          {loading && (
-            <div className="h-48 w-full animate-pulse rounded-xl bg-[var(--theme-surface-muted)] flex items-center justify-center text-xs font-bold text-[var(--theme-text-muted)] ">
-              Querying OVH Router API...
-            </div>
-          )}
-
-          {/* Panel Body */}
-          {status && !loading && (
-            <div className="ink-block-wrapper shadow-sm border border-[var(--theme-border)] overflow-hidden">
-              {/* Header */}
-              <div className="px-6 py-5 ink-block-header bg-[var(--theme-surface-muted)] flex items-center justify-between flex-wrap gap-4 border-b border-[var(--theme-border)]">
-                <div>
-                  <span className="text-[10px] font-bold text-[#2563eb] bg-[#dbeafe] px-2 py-0.5 rounded uppercase font-mono">{status.ip}</span>
-                  <h2 className="text-base font-bold text-inherit mt-1.5">OVH Cloud Routing Protection</h2>
+            {/* Scrollable IP List */}
+            <div className="max-h-[520px] overflow-y-auto divide-y divide-[#f1f1f1] dark:divide-[#1f1f1f] border border-[#f1f1f1] dark:border-[#1f1f1f] rounded-lg">
+              {filteredHostList.length === 0 ? (
+                <div className="p-6 text-center text-xs text-[#656b6b] dark:text-[#a0a0a0]">
+                  No matching IP addresses discovered.
                 </div>
+              ) : (
+                filteredHostList.map(item => {
+                  const isSelected = activeIp === item.ip;
+                  return (
+                    <button
+                      key={item.ip}
+                      type="button"
+                      onClick={() => handleSelectIp(item.ip)}
+                      className={`w-full text-left p-2.5 transition-colors flex items-center justify-between text-xs cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#f5f5f5] dark:bg-[#1f1f1f] font-semibold'
+                          : 'hover:bg-[#fafafa] dark:hover:bg-[#181818]'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="font-mono text-[12px] text-[#1a1a1a] dark:text-white flex items-center gap-1.5">
+                          <span>{item.ip}</span>
+                          {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" />}
+                        </div>
+                        {item.boundVm ? (
+                          <p className="text-[11px] text-[#2563eb] dark:text-[#60a5fa] truncate mt-0.5">
+                            VM {item.boundVm.vmid} · {item.boundVm.name}
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-[#8a9090] truncate mt-0.5">
+                            Unassigned Pool
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        {item.boundVm ? (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#eff6ff] text-[#2563eb] dark:bg-[#1e293b] dark:text-[#93c5fd]">
+                            Bound
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#f1f1f1] text-[#656b6b] dark:bg-[#222] dark:text-[#888]">
+                            Free
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: INSPECTOR & CONTROLS DECK */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* Toast Notification */}
+          {toast && (
+            <div
+              className={`p-3 rounded-lg text-xs font-semibold border flex items-center justify-between ${
+                toast.type === 'success'
+                  ? 'bg-[#f0fdf4] text-[#16a34a] border-[#bbf7d0] dark:bg-[#052e16] dark:border-[#166534]'
+                  : 'bg-[#fef2f2] text-[#dc2626] border-[#fecaca] dark:bg-[#450a0a] dark:border-[#991b1b]'
+              }`}
+            >
+              <span>{toast.text}</span>
+              <button type="button" onClick={() => setToast(null)} className="font-bold cursor-pointer">✕</button>
+            </div>
+          )}
+
+          {error && (
+            <div className="p-4 rounded-xl border border-[#fecaca] dark:border-[#7f1d1d] bg-[#fef2f2] dark:bg-[#2b0c0c] text-xs text-[#dc2626] dark:text-[#f87171] leading-relaxed">
+              <strong>Error:</strong> {error}
+            </div>
+          )}
+
+          {loading && (
+            <div className="p-12 bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs text-center text-xs text-[#656b6b] dark:text-[#a0a0a0] animate-pulse">
+              Querying live OVH edge router telemetry…
+            </div>
+          )}
+
+          {/* INSPECTOR PANEL */}
+          {!loading && status && (
+            <div className="bg-white dark:bg-[#121212] border border-[#dedfdf] dark:border-[#262626] rounded-xl shadow-xs overflow-hidden">
+              
+              {/* INSPECTOR HEADER */}
+              <div className="px-6 py-4 border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white px-2.5 py-0.5 rounded bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131]">
+                      {status.ip}
+                    </span>
+                    {activeVm ? (
+                      <span className="text-xs font-semibold text-[#2563eb] dark:text-[#60a5fa] px-2 py-0.5 rounded bg-[#eff6ff] dark:bg-[#172554]">
+                        VM {activeVm.vmid} ({activeVm.name})
+                      </span>
+                    ) : (
+                      <span className="text-xs font-semibold text-[#656b6b] dark:text-[#888] px-2 py-0.5 rounded bg-[#f1f1f1] dark:bg-[#222]">
+                        Unassigned Pool
+                      </span>
+                    )}
+                  </div>
+                  {activeVm && (
+                    <p className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-1">
+                      Assigned to: <span className="font-semibold text-[#1a1a1a] dark:text-white">{activeVm.ownerEmail}</span> · Hypervisor Node: {activeVm.node}
+                    </p>
+                  )}
+                </div>
+
                 <button
                   type="button"
-                  onClick={refreshStatus}
-                  className="text-xs font-semibold text-[var(--theme-text-muted)] hover:text-inherit underline cursor-pointer"
+                  onClick={refreshCurrentStatus}
+                  className="text-xs font-semibold text-[#2563eb] dark:text-[#60a5fa] hover:underline cursor-pointer flex items-center gap-1"
                 >
-                  Refresh Status
+                  <span>⟳</span> Refresh Status
                 </button>
               </div>
 
-              {/* Sub-tab selection */}
-              <div className="flex ovh-tabs-bar px-6">
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('general')}
-                  className={`py-3 text-xs font-bold tracking-wide border-b-2 -mb-px mr-6 transition-all cursor-pointer ${activeSubTab === 'general' ? 'border-[var(--theme-border)] text-[#2563eb] ' : 'border-transparent text-[var(--theme-text-muted)] hover:text-inherit'}`}
-                >
-                  General & rDNS
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('firewall')}
-                  className={`py-3 text-xs font-bold tracking-wide border-b-2 -mb-px mr-6 transition-all cursor-pointer ${activeSubTab === 'firewall' ? 'border-[var(--theme-border)] text-[#2563eb] ' : 'border-transparent text-[var(--theme-text-muted)] hover:text-inherit'}`}
-                >
-                  Edge Firewall
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('game')}
-                  className={`py-3 text-xs font-bold tracking-wide border-b-2 -mb-px transition-all cursor-pointer ${activeSubTab === 'game' ? 'border-[var(--theme-border)] text-[#2563eb] ' : 'border-transparent text-[var(--theme-text-muted)] hover:text-inherit'}`}
-                >
-                  Game DDoS Controls
-                </button>
+              {/* SUB-TABS */}
+              <div className="flex border-b border-[#dedfdf] dark:border-[#262626] px-6 bg-white dark:bg-[#121212] overflow-x-auto text-xs">
+                {[
+                  { key: 'general', label: 'General & rDNS' },
+                  { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
+                  { key: 'game', label: `Game DDoS (${gameRules.length})` },
+                  { key: 'antihack', label: `Anti-Hack ${status.antiHack ? '(!)' : ''}` },
+                ].map(t => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setActiveSubTab(t.key as any)}
+                    className={`py-3 px-4 text-xs font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap cursor-pointer ${
+                      activeSubTab === t.key
+                        ? 'border-[#1a1a1a] text-[#1a1a1a] dark:border-white dark:text-white font-bold'
+                        : 'border-transparent text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
 
-              {/* SUBTAB 1: GENERAL & RDNS */}
+              {/* TAB 1: GENERAL & RDNS */}
               {activeSubTab === 'general' && (
                 <div className="p-6 text-xs flex flex-col gap-6">
-                  {/* DDoS Permanent Mitigation Toggle */}
-                  <div className="flex items-center justify-between border-b border-[var(--theme-border)] pb-5 flex-wrap gap-4">
+                  {/* Permanent DDoS Mitigation */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
                     <div>
-                      <h4 className="text-sm font-bold text-inherit">Permanent DDoS Mitigation</h4>
-                      <p className="text-[var(--theme-text-muted)] mt-1 text-[11px] leading-relaxed">Force traffic scrubbing on the OVH routers at all times. Toggling this bypasses the standard automatic detection delay.</p>
+                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                        Permanent VAC DDoS Mitigation
+                      </h3>
+                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
+                        Forces constant traffic scrubbing at the OVH border. Bypasses the 3-second automatic attack detection threshold.
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${status.ddos.mode === 'permanent' ? 'bg-[#fee2e2] text-[var(--theme-danger)] ' : 'bg-[#e2e8f0] text-[var(--theme-text-muted)] '}`}>
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                        status.ddos.mode === 'permanent'
+                          ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]'
+                          : 'bg-[#f1f1f1] text-[#656b6b] dark:bg-[#262626] dark:text-[#a0a0a0]'
+                      }`}>
                         {status.ddos.mode === 'permanent' ? 'PERMANENT ACTIVE' : 'AUTOMATIC'}
                       </span>
                       <button
                         type="button"
                         onClick={handleToggleDdos}
                         disabled={ddosUpdating}
-                        className={`py-2 px-5 font-bold rounded-lg text-xs border transition-all cursor-pointer whitespace-nowrap ${
-                          status.ddos.mode === 'permanent'
-                            ? 'bg-[color-mix(in_srgb,var(--theme-danger)_10%,transparent)] border-[var(--theme-danger)]/30 text-[var(--theme-danger)] hover:bg-[#fee2e2] '
-                            : 'ovh-card-inner-btn'
+                        className={`btn-secondary py-1.5 px-3 text-xs font-semibold cursor-pointer ${
+                          status.ddos.mode === 'permanent' ? '!text-[#dc2626]' : ''
                         }`}
                       >
-                        {ddosUpdating ? 'Toggling...' : status.ddos.mode === 'permanent' ? 'Disable Permanent' : 'Enable Permanent'}
+                        {ddosUpdating ? 'Toggling…' : status.ddos.mode === 'permanent' ? 'Disable Permanent' : 'Enable Permanent'}
                       </button>
                     </div>
                   </div>
 
-                  {/* Reverse DNS (PTR) Record Management */}
-                  <div className="border-b border-[var(--theme-border)] pb-5">
-                    <h4 className="text-sm font-bold text-inherit">Reverse DNS (PTR Record)</h4>
-                    <p className="text-[var(--theme-text-muted)] mt-1 mb-3 text-[11px] leading-relaxed">Update the reverse DNS lookup record. Set to blank to clear and delete the PTR record.</p>
-                    <form onSubmit={handleUpdateRdns} className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        placeholder="e.g. mail.yourdomain.com"
-                        value={rdnsValue}
-                        onChange={e => setRdnsValue(e.target.value)}
-                        className="flex-1 max-w-[320px] ovh-field-input rounded-lg px-3 py-2 text-xs outline-none font-mono"
-                      />
-                      <button
-                        type="submit"
-                        disabled={rdnsUpdating}
-                        className="btn-primary py-1.5 px-4 text-xs"
-                      >
-                        {rdnsUpdating ? 'Updating...' : 'Update rDNS'}
-                      </button>
-                    </form>
-                  </div>
-
-                  {/* Auto Mitigation Timeout */}
-                  <div>
-                    <h4 className="text-sm font-bold text-inherit">VAC Auto Mitigation Timeout</h4>
-                    <p className="text-[var(--theme-text-muted)] mt-1 mb-3 text-[11px] leading-relaxed">
-                      Choose how long the IP address remains protected inside the VAC scrubbing centers after an attack ends.
-                      If you experience lag spikes during frequent attack cycles, setting this to a larger value (like 360 or 1560) is highly recommended.
-                    </p>
-
-                    {mitigationProfileNotProvisioned ? (
-                      <div className="bg-[color-mix(in_srgb,var(--theme-warning)_10%,transparent)] border border-[var(--theme-border)] rounded-xl p-4 text-xs leading-relaxed">
-                        <p className="font-bold text-[var(--theme-warning)] mb-1">⏳ Mitigation Profile Not Yet Provisioned</p>
-                        <p className="text-[var(--theme-warning)]">
-                          OVH has not yet created a mitigation profile for <strong className="font-mono">{status?.ip}</strong>. 
-                          This profile is <strong>automatically provisioned by OVH the first time this IP is detected under a DDoS attack</strong>.
-                        </p>
-                        <p className="text-[var(--theme-warning)] mt-2">
-                          Once the IP has been through mitigation at least once, return here and you will be able to set the timeout. 
-                          In the meantime, OVH's default timeout of <strong>15 minutes</strong> applies.
-                        </p>
-                      </div>
-                    ) : (
-                      <form onSubmit={handleUpdateMitigationTimeout} className="flex gap-2 items-center">
-                        <select
-                          value={mitigationTimeout}
-                          onChange={e => setMitigationTimeout(parseInt(e.target.value, 10))}
-                          className="flex-1 max-w-[320px] ovh-field-select rounded-lg p-2 text-xs"
-                        >
-                          <option value={0}>0 Minutes (Scrubbing ends immediately)</option>
-                          <option value={15}>15 Minutes (Default)</option>
-                          <option value={60}>60 Minutes (1 Hour)</option>
-                          <option value={360}>360 Minutes (6 Hours)</option>
-                          <option value={1560}>1560 Minutes (26 Hours - Maximum)</option>
-                        </select>
-                        <button
-                          type="submit"
-                          disabled={mitigationUpdating}
-                          className="btn-primary py-1.5 px-4 text-xs"
-                        >
-                          {mitigationUpdating ? 'Updating...' : 'Update Timeout'}
-                        </button>
-                      </form>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* SUBTAB 2: EDGE FIREWALL */}
-              {activeSubTab === 'firewall' && (
-                <div className="p-6 text-xs flex flex-col gap-6">
-                  {/* Firewall Toggle */}
-                  <div className="flex items-center justify-between border-b border-[var(--theme-border)] pb-5 flex-wrap gap-4">
+                  {/* VAC Auto-Mitigation Timeout Tuning */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
                     <div>
-                      <h4 className="text-sm font-bold text-inherit">Hardware Edge Firewall</h4>
-                      <p className="text-[var(--theme-text-muted)] mt-1 text-[11px] leading-relaxed">Enable router-level packet filtering. Malicious packets are dropped at OVH routers before reaching your Proxmox server.</p>
+                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                        VAC Auto-Mitigation Timeout
+                      </h3>
+                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
+                        Duration that traffic remains inside scrubbing centers after an attack subsides before returning to normal routing.
+                      </p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${status.firewall.enabled ? 'bg-[#dcfce7] text-[#15803d] ' : 'bg-[#e2e8f0] text-[var(--theme-text-muted)] '}`}>
-                        {status.firewall.enabled ? 'ENABLED' : 'DISABLED'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleToggleFirewall}
-                        disabled={fwToggling}
-                        className={`px-5 py-2 rounded-lg text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
-                          status.firewall.enabled
-                            ? 'bg-[color-mix(in_srgb,var(--theme-danger)_10%,transparent)] border-[var(--theme-danger)]/30 text-[var(--theme-danger)] hover:bg-[#fee2e2] '
-                            : 'ovh-card-inner-btn'
-                        }`}
-                      >
-                        {fwToggling ? 'Toggling...' : status.firewall.enabled ? 'Disable Firewall' : 'Enable Firewall'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Firewall Rules List */}
-                  {status.firewall.enabled ? (
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-sm font-bold text-inherit">Edge Firewall Rules</h4>
-                      </div>
-                      
-                      {!fwRulesSupported ? (
-                        <div className="bg-[#fffaf0] border border-[var(--theme-border)] text-[#c05621] rounded-xl p-4 text-xs font-semibold leading-relaxed">
-                          ⚠️ Edge Firewall Rules configuration is not granted by your OVH API key, or this IP block does not support sequence rule customization. You can still toggle the overall Firewall status above.
-                        </div>
-                      ) : loadingFwRules ? (
-                        <div className="p-6 text-center text-[var(--theme-text-muted)] ">Loading rules...</div>
-                      ) : fwRules.length === 0 ? (
-                        <div className="p-6 text-center text-[var(--theme-text-muted)] ">No custom firewall rules configured.</div>
-                      ) : (
-                        <div className="overflow-x-auto ovh-table-wrap">
-                          <table className="w-full text-left border-collapse text-xs ovh-custom-table">
-                            <thead>
-                              <tr className="text-[var(--theme-text-muted)] ">
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Seq</th>
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Action</th>
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Protocol</th>
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Source IP</th>
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Ports (Src / Dst)</th>
-                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)] text-right">Options</th>
-                              </tr>
-                            </thead>
-                            <tbody className="font-mono text-inherit">
-                              {fwRules.map(rule => (
-                                <tr key={rule.sequence} className="hover:bg-[var(--theme-surface-muted)]">
-                                  <td className="px-4 py-2.5 font-bold text-inherit">{rule.sequence}</td>
-                                  <td className="px-4 py-2.5">
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${rule.action === 'permit' ? 'bg-[#dcfce7] text-[#15803d] ' : 'bg-[color-mix(in_srgb,var(--theme-danger)_10%,transparent)] text-[var(--theme-danger)] '}`}>
-                                      {rule.action.toUpperCase()}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-2.5 uppercase font-bold text-inherit opacity-90">{rule.protocol}</td>
-                                  <td className="px-4 py-2.5 text-inherit">{rule.source || 'Any IP'}</td>
-                                  <td className="px-4 py-2.5 text-inherit">
-                                    {rule.protocol === 'tcp' || rule.protocol === 'udp' 
-                                      ? `${rule.sourcePort || 'any'} → ${rule.destinationPort || 'any'}` 
-                                      : 'N/A'}
-                                  </td>
-                                  <td className="px-4 py-2.5 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteFwRule(rule.sequence)}
-                                      className="text-[var(--theme-danger)] font-semibold hover:underline cursor-pointer"
-                                    >
-                                      Delete
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {/* Add Rule Form */}
-                      {fwRulesSupported && (
-                        <div className="mt-6 border-t border-[var(--theme-border)] pt-6">
-                          <h5 className="font-bold text-inherit mb-3">Add Custom Edge Rule</h5>
-                          <form onSubmit={handleAddFwRule} className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">SEQUENCE (0-99)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                max="99"
-                                required
-                                value={newSeq}
-                                onChange={e => setNewSeq(parseInt(e.target.value, 10))}
-                                className="w-full ovh-field-input rounded-lg p-2 text-xs"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">ACTION</label>
-                              <select
-                                value={newAction}
-                                onChange={e => setNewAction(e.target.value as any)}
-                                className="w-full ovh-field-select rounded-lg p-2 text-xs"
-                              >
-                                <option value="permit">PERMIT</option>
-                                <option value="deny">DENY</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">PROTOCOL</label>
-                              <select
-                                value={newProto}
-                                onChange={e => setNewProto(e.target.value as any)}
-                                className="w-full ovh-field-select rounded-lg p-2 text-xs"
-                              >
-                                <option value="tcp">TCP</option>
-                                <option value="udp">UDP</option>
-                                <option value="icmp">ICMP</option>
-                                <option value="ipv4">IPv4 (ALL)</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">SRC IP (CIDR)</label>
-                              <input
-                                type="text"
-                                placeholder="e.g. 192.0.2.0/24"
-                                value={newSrcIp}
-                                onChange={e => setNewSrcIp(e.target.value)}
-                                className="w-full ovh-field-input rounded-lg p-2 text-xs font-mono"
-                              />
-                            </div>
-                            {(newProto === 'tcp' || newProto === 'udp') && (
-                              <>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">SRC PORT</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. 80"
-                                    value={newSrcPort}
-                                    onChange={e => setNewSrcPort(e.target.value)}
-                                    className="w-full ovh-field-input rounded-lg p-2 text-xs font-mono"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1">DST PORT</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. 80"
-                                    value={newDstPort}
-                                    onChange={e => setNewDstPort(e.target.value)}
-                                    className="w-full ovh-field-input rounded-lg p-2 text-xs font-mono"
-                                  />
-                                </div>
-                              </>
-                            )}
-                            <div className="col-span-2 md:col-span-6 flex justify-end">
-                              <button
-                                type="submit"
-                                disabled={ruleSubmitting}
-                                className="btn-primary py-1.5 px-4 text-xs"
-                              >
-                                {ruleSubmitting ? 'Adding...' : 'Add Rule'}
-                              </button>
-                            </div>
-                          </form>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center p-6 text-[var(--theme-text-muted)] bg-[var(--theme-surface-muted)] rounded-lg">
-                      Edge Firewall is currently disabled. Enable the firewall above to configure custom router rules.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* SUBTAB 3: GAME DDOS PROTECTION */}
-              {activeSubTab === 'game' && (
-                <div className="p-6 text-xs flex flex-col gap-6">
-                  <div>
-                    <h4 className="text-sm font-bold text-inherit">Dedicated Game Server DDoS Filters</h4>
-                    <p className="text-[var(--theme-text-muted)] mt-1 mb-4 text-[11px] leading-relaxed">Assign deep UDP/TCP packet validation filters tailored to specific multiplayer game engines. Bypasses game crash exploits at the router level.</p>
-
-                    {!gameDdosSupported ? (
-                      <div className="bg-[#fffaf0] border border-[var(--theme-border)] text-[#c05621] rounded-xl p-4 text-xs font-semibold leading-relaxed">
-                        ⚠️ Game DDoS mitigation is not supported on this IP address, or your OVH API key does not have permissions to query game rules.
-                      </div>
-                    ) : (
-                      <>
-                        {/* List rules */}
-                        {loadingGameRules ? (
-                          <div className="p-6 text-center text-[var(--theme-text-muted)] ">Loading game rules...</div>
-                        ) : gameRules.length === 0 ? (
-                          <div className="p-6 text-center text-[var(--theme-text-muted)] ">No game specific port filters enabled.</div>
-                        ) : (
-                          <div className="overflow-x-auto ovh-table-wrap">
-                            <table className="w-full text-left border-collapse text-xs ovh-custom-table">
-                              <thead>
-                                <tr className="text-[var(--theme-text-muted)] ">
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Rule ID</th>
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Port / Range</th>
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Protocol</th>
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Game Profile</th>
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)]">Mitigation Status</th>
-                                  <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-[var(--theme-text-muted)] text-right">Options</th>
-                                </tr>
-                              </thead>
-                              <tbody className="font-mono text-inherit">
-                                {gameRules.map(rule => (
-                                  <tr key={rule.id} className="hover:bg-[var(--theme-surface-muted)]">
-                                    <td className="px-4 py-2.5 text-[var(--theme-text-muted)]">#{rule.id}</td>
-                                    <td className="px-4 py-2.5 font-bold text-inherit font-mono">
-                                      {(() => {
-                                        const from = rule.fromPort;
-                                        const to = rule.toPort;
-                                        if (!to && !from) return <span className="opacity-50 text-[10px] font-sans font-normal">All Ports</span>;
-                                        if (from && to && from !== to) return <span>{from}<span className="font-normal opacity-50 mx-1">–</span>{to}</span>;
-                                        return <span>{to ?? from}</span>;
-                                      })()}
-                                    </td>
-                                    <td className="px-4 py-2.5 uppercase font-bold text-inherit text-[10px]">{(rule.l4Protocol || 'udp').toUpperCase()}</td>
-                                    <td className="px-4 py-2.5 text-inherit font-semibold opacity-90">{formatGameProfile(rule.gameType)}</td>
-                                    <td className="px-4 py-2.5">
-                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-[#dcfce7] text-[#15803d] ">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-pulse"></span>
-                                        Mitigated
-                                      </span>
-                                    </td>
-                                    <td className="px-4 py-2.5 text-right">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteGameRule(rule.id)}
-                                        className="text-[var(--theme-danger)] font-semibold hover:underline cursor-pointer"
-                                      >
-                                        Delete
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-
-                        {/* Add Game Rule Form */}
-                        <div className="mt-6 border-t border-[var(--theme-border)] pt-6">
-                          <h5 className="font-bold text-inherit mb-1">Enable Game DDoS Port Protection</h5>
-                          <p className="text-[11px] text-[var(--theme-text-muted)] mb-3">Leave "From Port" empty to protect a single port only. Set both to protect a port range.</p>
-                          <form onSubmit={handleAddGameRule} className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1 font-sans">FROM PORT <span className="font-normal opacity-60">(optional)</span></label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="65535"
-                                placeholder="e.g. 7777"
-                                value={gameFromPort}
-                                onChange={e => setGameFromPort(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                                className="w-full ovh-field-input rounded-lg p-2 text-xs font-mono"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1 font-sans">TO PORT <span className="font-normal opacity-60">(required)</span></label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="65535"
-                                required
-                                placeholder="e.g. 25565"
-                                value={gameToPort}
-                                onChange={e => setGameToPort(parseInt(e.target.value, 10))}
-                                className="w-full ovh-field-input rounded-lg p-2 text-xs font-mono"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1 font-sans">PROTOCOL</label>
-                              <select
-                                value={gameProto}
-                                onChange={e => setGameProto(e.target.value as any)}
-                                className="w-full ovh-field-select rounded-lg p-2 text-xs"
-                              >
-                                <option value="udp">UDP</option>
-                                <option value="tcp">TCP</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-bold text-[var(--theme-text-muted)] mb-1 font-sans">GAME PROFILE</label>
-                              <select
-                                value={gameProfile}
-                                onChange={e => setGameProfile(e.target.value)}
-                                className="w-full ovh-field-select rounded-lg p-2 text-xs"
-                              >
-                                <option value="minecraft">Minecraft Java Edition</option>
-                                <option value="minecraftPocketEdition">Minecraft Pocket Edition</option>
-                                <option value="minecraftQuery">Minecraft Query</option>
-                                <option value="rust">Rust Server</option>
-                                <option value="arkSurvivalEvolved">ARK: Survival Evolved</option>
-                                <option value="arma">Arma</option>
-                                <option value="dayz">DayZ</option>
-                                <option value="hl2Source">Valve Source (CS:GO, TF2, GMod)</option>
-                                <option value="teamspeak3">Teamspeak 3</option>
-                                <option value="gtaSanAndreasMultiplayerMod">GTA: SA-MP</option>
-                                <option value="gtaMultiTheftAutoSanAndreas">GTA: MTA</option>
-                                <option value="other">Other / FiveM (Standard UDP Filter)</option>
-                              </select>
-                            </div>
-                            <div className="flex items-end col-span-2 sm:col-span-1">
-                              <button
-                                type="submit"
-                                disabled={gameSubmitting}
-                                className="btn-primary py-1.5 px-4 text-xs"
-                              >
-                                {gameSubmitting ? 'Enabling...' : 'Add Protection'}
-                              </button>
-                            </div>
-                          </form>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Side Panel: Discovered Server IPs */}
-        <div className="lg:col-span-1 flex flex-col gap-6">
-          <div className="ovh-container-card rounded-xl p-5 shadow-sm self-start w-full">
-            <h3 className="text-sm font-bold text-inherit mb-1">OVH Account IPs</h3>
-            <p className="text-[11px] text-[var(--theme-text-muted)] mb-4 leading-relaxed font-medium">Click any IP address below to quick-select and query its OVH status.</p>
-            {loadingIps ? (
-              <div className="text-xs text-[var(--theme-text-muted)] animate-pulse py-4 text-center">Loading OVH IPs...</div>
-            ) : discoveredIpList.length === 0 ? (
-              <div className="text-xs text-[var(--theme-text-muted)] italic py-4 text-center">No active IPs found in this OVH account.</div>
-            ) : (
-              <div className="flex flex-col gap-4 max-h-[580px] overflow-y-auto pr-1">
-                {discoveredIpList.map(group => (
-                  <div key={group.block} className="ovh-block-group rounded-lg overflow-hidden">
-                    <div className="ovh-block-group-header px-3 py-2 text-[10px] font-bold flex justify-between items-center">
-                      <span>BLOCK: {group.block}</span>
-                      <span className="bg-[var(--theme-bg)] px-1.5 py-0.2 rounded text-[9px]">
-                        {group.ips.length} {group.ips.length === 1 ? 'IP' : 'IPs'}
-                      </span>
-                    </div>
-                    <div className="flex flex-col divide-y divide-[#dedfdf] ">
-                      {group.ips.map(ip => (
+                    <div className="flex items-center gap-2">
+                      {[15, 30, 60, 120].map(mins => (
                         <button
-                          key={ip}
+                          key={mins}
                           type="button"
-                          onClick={() => handleQuickSelect(ip)}
-                          className={`w-full text-left px-3 py-2.5 text-xs transition-all font-mono ovh-block-group-btn flex items-center justify-between cursor-pointer ${
-                            activeIp === ip ? 'is-active' : ''
+                          onClick={() => handleUpdateMitigationTimeout(mins)}
+                          disabled={mitigationUpdating}
+                          className={`px-2.5 py-1 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
+                            mitigationTimeout === mins
+                              ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold'
+                              : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a]'
                           }`}
                         >
-                          <span>{ip}</span>
-                          {activeIp === ip && <span className="text-[10px]">●</span>}
+                          {mins}m
                         </button>
                       ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+
+                  {/* Reverse DNS (PTR Record) */}
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                        Reverse DNS (PTR Record)
+                      </h3>
+                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
+                        Authorize mail deliverability and domain ownership by configuring the PTR record pointing back to your domain.
+                      </p>
+                    </div>
+
+                    <form onSubmit={handleUpdateRdns} className="flex flex-col sm:flex-row gap-2 max-w-xl">
+                      <input
+                        type="text"
+                        value={rdnsValue}
+                        onChange={e => setRdnsValue(e.target.value)}
+                        placeholder="e.g. node.votioncloud.org"
+                        className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white"
+                      />
+                      <button
+                        type="submit"
+                        disabled={rdnsUpdating}
+                        className="btn-primary px-4 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                      >
+                        {rdnsUpdating ? 'Updating…' : 'Save PTR'}
+                      </button>
+                      {status.reverse && (
+                        <button
+                          type="button"
+                          onClick={() => { setRdnsValue(''); }}
+                          className="btn-secondary px-3 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: EDGE FIREWALL */}
+              {activeSubTab === 'firewall' && (
+                <div className="p-6 text-xs flex flex-col gap-6">
+                  {/* Master Toggle */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
+                    <div>
+                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white flex items-center gap-2">
+                        Hardware Border Firewall
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${status.firewall.enabled ? 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]' : 'bg-[#f1f1f1] text-[#888] dark:bg-[#222]'}`}>
+                          {status.firewall.enabled ? 'ENABLED' : 'DISABLED'}
+                        </span>
+                      </h3>
+                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
+                        Line-rate stateless hardware firewall configured directly on OVH aggregation routers.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleFirewall}
+                      disabled={fwToggling}
+                      className={`btn-primary py-1.5 px-4 text-xs font-semibold cursor-pointer ${
+                        status.firewall.enabled ? '!bg-[#dc2626] hover:!bg-[#b91c1c]' : ''
+                      }`}
+                    >
+                      {fwToggling ? 'Updating…' : status.firewall.enabled ? 'Disable Edge Firewall' : 'Enable Edge Firewall'}
+                    </button>
+                  </div>
+
+                  {/* One-Click Presets */}
+                  <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#181818]">
+                    <h4 className="font-semibold text-xs text-[#1a1a1a] dark:text-white mb-2">
+                      Quick Security Presets
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewSeq(0);
+                          setNewAction('permit');
+                          setNewProto('tcp');
+                          setNewDstPort('80');
+                          setShowAddRuleForm(true);
+                        }}
+                        className="btn-secondary px-3 py-1.5 text-xs font-medium cursor-pointer"
+                      >
+                        + Permit HTTP (80)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewSeq(1);
+                          setNewAction('permit');
+                          setNewProto('tcp');
+                          setNewDstPort('443');
+                          setShowAddRuleForm(true);
+                        }}
+                        className="btn-secondary px-3 py-1.5 text-xs font-medium cursor-pointer"
+                      >
+                        + Permit HTTPS (443)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewSeq(2);
+                          setNewAction('permit');
+                          setNewProto('tcp');
+                          setNewDstPort('22');
+                          setShowAddRuleForm(true);
+                        }}
+                        className="btn-secondary px-3 py-1.5 text-xs font-medium cursor-pointer"
+                      >
+                        + Permit SSH (22)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewSeq(19);
+                          setNewAction('deny');
+                          setNewProto('ipv4');
+                          setNewDstPort('');
+                          setNewSrcPort('');
+                          setShowAddRuleForm(true);
+                        }}
+                        className="btn-secondary px-3 py-1.5 text-xs font-medium !text-[#dc2626] cursor-pointer"
+                      >
+                        + Drop All IPv4 (Seq 19)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Rules Controls & Search */}
+                  <div className="flex items-center justify-between gap-3">
+                    <input
+                      type="text"
+                      value={ruleSearchQuery}
+                      onChange={e => setRuleSearchQuery(e.target.value)}
+                      placeholder="Filter rules by sequence, port, protocol…"
+                      className="px-3 py-1.5 text-xs bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white w-64"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAddRuleForm(prev => !prev)}
+                      className="btn-primary px-3 py-1.5 text-xs font-semibold cursor-pointer"
+                    >
+                      {showAddRuleForm ? 'Cancel' : '+ Add Rule'}
+                    </button>
+                  </div>
+
+                  {/* Add Rule Form */}
+                  {showAddRuleForm && (
+                    <form onSubmit={handleCreateRule} className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#313131] bg-white dark:bg-[#181818] flex flex-col gap-3">
+                      <h4 className="font-semibold text-xs text-[#1a1a1a] dark:text-white">
+                        Create Hardware Firewall Rule
+                      </h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Sequence (0-19)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={19}
+                            value={newSeq}
+                            onChange={e => setNewSeq(Number(e.target.value))}
+                            className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Action</label>
+                          <select
+                            value={newAction}
+                            onChange={e => setNewAction(e.target.value as any)}
+                            className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
+                          >
+                            <option value="permit">PERMIT (Allow)</option>
+                            <option value="deny">DENY (Drop)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Protocol</label>
+                          <select
+                            value={newProto}
+                            onChange={e => setNewProto(e.target.value as any)}
+                            className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
+                          >
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                            <option value="icmp">ICMP</option>
+                            <option value="ipv4">IPv4 (All)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Dest Port</label>
+                          <input
+                            type="text"
+                            value={newDstPort}
+                            onChange={e => setNewDstPort(e.target.value)}
+                            placeholder="e.g. 80 or 443"
+                            disabled={newProto === 'icmp' || newProto === 'ipv4'}
+                            className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-mono disabled:opacity-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button type="button" onClick={() => setShowAddRuleForm(false)} className="btn-secondary px-3 py-1 text-xs cursor-pointer">
+                          Cancel
+                        </button>
+                        <button type="submit" disabled={ruleSubmitting} className="btn-primary px-4 py-1 text-xs font-semibold cursor-pointer">
+                          {ruleSubmitting ? 'Saving…' : 'Add Rule'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Rules Table */}
+                  <div className="border border-[#dedfdf] dark:border-[#262626] rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] font-mono text-[11px] text-[#656b6b] dark:text-[#a0a0a0] uppercase tracking-wider">
+                          <th className="px-4 py-2.5">Seq</th>
+                          <th className="px-4 py-2.5">Action</th>
+                          <th className="px-4 py-2.5">Protocol</th>
+                          <th className="px-4 py-2.5">Destination Port</th>
+                          <th className="px-4 py-2.5">Source IP</th>
+                          <th className="px-4 py-2.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#f1f1f1] dark:divide-[#1f1f1f]">
+                        {loadingFwRules ? (
+                          <tr><td colSpan={6} className="text-center py-6 text-[#888]">Loading hardware rules…</td></tr>
+                        ) : filteredFwRules.length === 0 ? (
+                          <tr><td colSpan={6} className="text-center py-6 text-[#888]">No firewall rules configured for this IP.</td></tr>
+                        ) : (
+                          filteredFwRules.map(rule => (
+                            <tr key={rule.sequence} className="hover:bg-[#fafafa] dark:hover:bg-[#181818]">
+                              <td className="px-4 py-2.5 font-mono font-bold text-[#1a1a1a] dark:text-white">
+                                #{rule.sequence}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                  rule.action === 'permit'
+                                    ? 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]'
+                                    : 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]'
+                                }`}>
+                                  {rule.action.toUpperCase()}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 font-mono uppercase text-[#1a1a1a] dark:text-white">
+                                {rule.protocol}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono text-[#656b6b] dark:text-[#a0a0a0]">
+                                {rule.destinationPort || 'ANY'}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono text-[#656b6b] dark:text-[#a0a0a0]">
+                                {rule.source || '0.0.0.0/0'}
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRule(rule.sequence)}
+                                  className="text-xs text-[#dc2626] hover:underline cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: GAME DDOS CONTROLS */}
+              {activeSubTab === 'game' && (
+                <div className="p-6 text-xs flex flex-col gap-6">
+                  <div>
+                    <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                      Hardware Game DDoS Protection
+                    </h3>
+                    <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
+                      Custom stateful L4/L7 packet inspection designed for real-time game protocols (Source, Minecraft, GTA, etc.).
+                    </p>
+                  </div>
+
+                  {/* Game Presets */}
+                  <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#181818]">
+                    <h4 className="font-semibold text-xs text-[#1a1a1a] dark:text-white mb-2">
+                      Popular Game Server Presets
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {GAME_PRESETS.map(preset => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => {
+                            setGameProfile(preset.game);
+                            setGameToPort(preset.port || 25565);
+                          }}
+                          className="btn-secondary px-3 py-1.5 text-xs font-medium cursor-pointer"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Add Game Rule Form */}
+                  <form onSubmit={handleCreateGameRule} className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#313131] bg-white dark:bg-[#181818] flex flex-col gap-3">
+                    <h4 className="font-semibold text-xs text-[#1a1a1a] dark:text-white">
+                      Add Game Protection Rule
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Game Profile</label>
+                        <select
+                          value={gameProfile}
+                          onChange={e => setGameProfile(e.target.value)}
+                          className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
+                        >
+                          <option value="minecraft">Minecraft Pocket / Java</option>
+                          <option value="gtav">GTA V / FiveM / RageMP</option>
+                          <option value="valve">Valve Source (CS2, TF2, Rust)</option>
+                          <option value="rust">Rust Server</option>
+                          <option value="teamspeak">Teamspeak Voice Server</option>
+                          <option value="ark">ARK: Survival Evolved</option>
+                          <option value="palworld">Palworld Dedicated</option>
+                          <option value="other">Other (Custom UDP Filter)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Destination Port</label>
+                        <input
+                          type="number"
+                          value={gameToPort}
+                          onChange={e => setGameToPort(Number(e.target.value))}
+                          className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold mb-1 text-[#656b6b] dark:text-[#a0a0a0]">Protocol</label>
+                        <select
+                          value={gameProto}
+                          onChange={e => setGameProto(e.target.value as any)}
+                          className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
+                        >
+                          <option value="udp">UDP (Recommended for Games)</option>
+                          <option value="tcp">TCP</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <button type="submit" disabled={gameSubmitting} className="btn-primary px-4 py-1.5 text-xs font-semibold cursor-pointer">
+                        {gameSubmitting ? 'Saving…' : '+ Add Game Protection Rule'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Active Game Rules Table */}
+                  <div className="border border-[#dedfdf] dark:border-[#262626] rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] font-mono text-[11px] text-[#656b6b] dark:text-[#a0a0a0] uppercase tracking-wider">
+                          <th className="px-4 py-2.5">Rule ID</th>
+                          <th className="px-4 py-2.5">Game Profile</th>
+                          <th className="px-4 py-2.5">Protected Port</th>
+                          <th className="px-4 py-2.5">Protocol</th>
+                          <th className="px-4 py-2.5 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#f1f1f1] dark:divide-[#1f1f1f]">
+                        {loadingGameRules ? (
+                          <tr><td colSpan={5} className="text-center py-6 text-[#888]">Loading game rules…</td></tr>
+                        ) : gameRules.length === 0 ? (
+                          <tr><td colSpan={5} className="text-center py-6 text-[#888]">No custom game DDoS rules assigned to this IP.</td></tr>
+                        ) : (
+                          gameRules.map(rule => (
+                            <tr key={rule.id} className="hover:bg-[#fafafa] dark:hover:bg-[#181818]">
+                              <td className="px-4 py-2.5 font-mono text-[#1a1a1a] dark:text-white">
+                                #{rule.id}
+                              </td>
+                              <td className="px-4 py-2.5 font-semibold text-[#1a1a1a] dark:text-white">
+                                {formatGameProfile(rule.gameType)}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono text-[#2563eb] dark:text-[#60a5fa] font-bold">
+                                {rule.toPort || 'ANY'}
+                              </td>
+                              <td className="px-4 py-2.5 font-mono uppercase text-[#656b6b]">
+                                {rule.l4Protocol || 'UDP'}
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteGameRule(rule.id)}
+                                  className="text-xs text-[#dc2626] hover:underline cursor-pointer"
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: ANTI-HACK WATCHDOG */}
+              {activeSubTab === 'antihack' && (
+                <div className="p-6 text-xs flex flex-col gap-6">
+                  {status.antiHack ? (
+                    <div className="p-5 rounded-xl border border-[#fecaca] dark:border-[#7f1d1d] bg-[#fef2f2] dark:bg-[#2b0c0c] text-xs">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">⚠️</span>
+                          <h3 className="font-bold text-sm text-[#dc2626] dark:text-[#f87171]">
+                            IP Quarantined by OVH Anti-Hack System
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleUnblockAntiHack}
+                          disabled={unblockingAntiHack}
+                          className="btn-primary !bg-[#dc2626] hover:!bg-[#b91c1c] px-4 py-1.5 text-xs font-semibold cursor-pointer"
+                        >
+                          {unblockingAntiHack ? 'Submitting Request…' : 'Request Immediate Unblock'}
+                        </button>
+                      </div>
+
+                      <p className="text-[#7f1d1d] dark:text-[#fca5a5] mb-3 leading-relaxed">
+                        Traffic to and from this IP is currently blocked by OVH automated security sensors due to detected outbound malicious activity or abuse complaints.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 font-mono text-[11px]">
+                        <div className="p-3 bg-white dark:bg-[#1a0a0a] rounded-lg border border-[#fecaca] dark:border-[#5c1818]">
+                          <span className="text-[#888]">Quarantine Initiated:</span>
+                          <div className="font-bold text-[#1a1a1a] dark:text-white mt-0.5">{status.antiHack.blockedSince}</div>
+                        </div>
+                        <div className="p-3 bg-white dark:bg-[#1a0a0a] rounded-lg border border-[#fecaca] dark:border-[#5c1818]">
+                          <span className="text-[#888]">Time to Unblock Eligibility:</span>
+                          <div className="font-bold text-[#1a1a1a] dark:text-white mt-0.5">
+                            {status.antiHack.timeToUnblock > 0 ? `${status.antiHack.timeToUnblock} seconds remaining` : 'Eligible for unblock now'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="block font-semibold text-[#888] mb-1">OVH Security Incident Log:</span>
+                        <pre className="p-3 bg-black text-green-400 rounded-lg font-mono text-[10px] overflow-x-auto whitespace-pre-wrap max-h-48">
+                          {status.antiHack.logs}
+                        </pre>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center bg-[#f0fdf4] dark:bg-[#052e16] border border-[#bbf7d0] dark:border-[#166534] rounded-xl">
+                      <div className="w-12 h-12 rounded-full bg-[#dcfce7] dark:bg-[#14532d] text-[#16a34a] flex items-center justify-center text-xl mx-auto mb-3">
+                        ✓
+                      </div>
+                      <h3 className="font-serif font-medium text-base text-[#16a34a] dark:text-[#4ade80]">
+                        Anti-Hack Status: Clear & Healthy
+                      </h3>
+                      <p className="text-xs text-[#166534] dark:text-[#86efac] mt-1 max-w-md mx-auto leading-relaxed">
+                        No active abuse reports, outgoing volumetric attacks, or spambot signatures have been detected by OVH security sensors for this IP.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

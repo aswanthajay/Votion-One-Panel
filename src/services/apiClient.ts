@@ -2342,8 +2342,8 @@ class ApiClient {
   }
 
   // --- OVH Admin IP Manager controls ---
-  async getAdminOvhIps() {
-    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/ip`, { headers: this.getHeaders() });
+  async getAdminOvhIps(): Promise<string[]> {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/ips`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to fetch OVH account IPs.');
     return data.data || [];
   }
@@ -2352,6 +2352,15 @@ class ApiClient {
     const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/status?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to fetch OVH status.');
     return data.data;
+  }
+
+  async unblockAdminOvhAntiHack(ip: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/antihack/unblock`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip })
+    });
+    return await res.json();
   }
 
   async setAdminOvhRdns(ip: string, reverse: string) {
