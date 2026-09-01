@@ -3169,6 +3169,31 @@ body {
 
 [data-theme="dark"] .support-center [class~="bg-[#1a1a1a]"] {
   background-color: var(--theme-surface-raised) !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .support-center .support-bubble-admin,
+[data-theme="dark"] .support-center [class~="support-bubble-admin"] {
+  background-color: #222222 !important;
+  border-color: #383838 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .support-center .support-bubble-admin p,
+[data-theme="dark"] .support-center [class~="support-bubble-admin"] p {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .support-center .support-bubble-customer,
+[data-theme="dark"] .support-center [class~="support-bubble-customer"] {
+  background-color: #141414 !important;
+  border-color: #262626 !important;
+  color: #ededed !important;
+}
+
+[data-theme="dark"] .support-center .support-bubble-customer p,
+[data-theme="dark"] .support-center [class~="support-bubble-customer"] p {
+  color: #ededed !important;
 }
 
 [data-theme="dark"] .support-center [class~="border-[#dedfdf]"],

@@ -277,7 +277,37 @@ export const SupportCenter: React.FC<SupportCenterProps> = ({ userRole }) => {
                 </div>
                 <div className="flex-1 space-y-4 overflow-y-auto bg-[#fbfaf9] p-5 sm:p-6">
                   {details.replies.length === 0 && <div className="rounded-lg border border-dashed border-[#cfd3d3] bg-white p-4 text-sm text-[#656b6b]">No message has been added to this request yet. Add context below to make the next action clear.</div>}
-                  {details.replies.map(item => { const internal = item.senderRole === 'admin'; return <article key={item.id} className={`flex gap-3 ${internal ? 'justify-end' : 'justify-start'}`}><div className={`flex max-w-[88%] gap-3 ${internal ? 'flex-row-reverse' : ''}`}><div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${internal ? 'bg-[#1a1a1a] text-white' : 'bg-[#e7edf9] text-[#2456a6]'}`}>{initials(item.senderEmail)}</div><div className={`rounded-xl border px-4 py-3 ${internal ? 'border-[#1a1a1a] bg-[#1a1a1a] text-white' : 'border-[#dedfdf] bg-white text-[#1a1a1a]'}`}><div className={`mb-1 flex flex-wrap items-center gap-x-2 text-[11px] ${internal ? 'text-white/75' : 'text-[#656b6b]'}`}><span className="font-semibold">{internal ? 'Support team' : 'Customer'}</span><span>{formatDate(item.timestamp)}</span></div><p className="whitespace-pre-wrap text-sm leading-6">{item.message}</p></div></div></article>; })}
+                  {details.replies.map(item => {
+                    const internal = item.senderRole === 'admin';
+                    return (
+                      <article key={item.id} className={`flex gap-3 ${internal ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`flex max-w-[88%] gap-3 ${internal ? 'flex-row-reverse' : ''}`}>
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                            internal
+                              ? 'bg-[#1a1a1a] text-white dark:bg-[#2e2e2e] dark:text-white'
+                              : 'bg-[#e7edf9] text-[#2456a6] dark:bg-[#172554] dark:text-[#93c5fd]'
+                          }`}>
+                            {initials(item.senderEmail)}
+                          </div>
+                          <div className={`support-message-bubble rounded-xl border px-4 py-3 ${
+                            internal
+                              ? 'support-bubble-admin border-[#1a1a1a] bg-[#1a1a1a] text-white dark:border-[#383838] dark:bg-[#222222] dark:text-white'
+                              : 'support-bubble-customer border-[#dedfdf] bg-white text-[#1a1a1a] dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]'
+                          }`}>
+                            <div className={`mb-1 flex flex-wrap items-center gap-x-2 text-[11px] ${
+                              internal ? 'text-white/80 dark:text-[#a0a0a0]' : 'text-[#656b6b] dark:text-[#a0a0a0]'
+                            }`}>
+                              <span className="font-semibold">{internal ? 'Support team' : 'Customer'}</span>
+                              <span>{formatDate(item.timestamp)}</span>
+                            </div>
+                            <p className={`whitespace-pre-wrap text-sm leading-6 ${internal ? 'text-white' : 'text-[#1a1a1a] dark:text-[#ededed]'}`}>
+                              {item.message}
+                            </p>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
                 {details.ticket.status !== 'closed' && <form onSubmit={submitReply} className="border-t border-[#dedfdf] bg-white p-4 sm:p-5"><label className="sr-only" htmlFor="ticket-reply">Reply to ticket</label><textarea id="ticket-reply" value={reply} onChange={event => setReply(event.target.value)} rows={3} maxLength={10_000} placeholder={isAdmin ? 'Write a clear update for the customer…' : 'Add a reply or any new information…'} className="w-full resize-y rounded-lg border border-[#dedfdf] p-3 text-sm text-[#1a1a1a] outline-none placeholder:text-[#8b9292] focus:border-[#1a1a1a]" /><div className="mt-3 flex items-center justify-between gap-3"><p className="hidden text-xs text-[#656b6b] sm:block">Replies are saved to the ticket history.</p><button type="submit" disabled={!reply.trim() || isReplying} className="btn-primary ml-auto inline-flex min-h-10 items-center gap-2 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-50"><Send size={15} aria-hidden="true" />{isReplying ? 'Sending…' : 'Send reply'}</button></div></form>}
               </div>}
