@@ -14,6 +14,10 @@ export const pgPool = new Pool({
   connectionTimeoutMillis: 2000,
 });
 
+pgPool.on('error', (err: any) => {
+  console.error('[database.ts pgPool] Unexpected idle client error:', err?.message || err);
+});
+
 export function hashPassword(password: string, customSalt?: string): { hash: string; salt: string } {
   const salt = customSalt || crypto.randomBytes(32).toString('hex');
   const derivedKey = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512');

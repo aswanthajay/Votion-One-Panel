@@ -81,6 +81,10 @@ export const pgPool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
+pgPool.on('error', (err: any) => {
+  console.error('[pgPool] Unexpected idle client error:', err?.message || err);
+});
+
 export const REQUIRED_DATABASE_TABLES = [
   'accounts',
   'password_reset_tokens',
