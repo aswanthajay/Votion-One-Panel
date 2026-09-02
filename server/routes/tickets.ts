@@ -25,7 +25,13 @@ const handleCreateTicket = async (req: any, res: any) => {
   const parsedVmid = vmid ? parseInt(String(vmid), 10) : undefined;
   if (Number.isInteger(parsedVmid) && !isAdmin(req)) {
     const linkedVm = await dbService.getVMByVMID(parsedVmid!);
-    if (!linkedVm || String(linkedVm.ownerEmail || '').toLowerCase() !== userEmail.toLowerCase()) {
+    const isOwner = linkedVm && String(linkedVm.ownerEmail || '').toLowerCase() === userEmail.toLowerCase();
+    let hasDelegatedAccess = false;
+    if (!isOwner && linkedVm) {
+      const delegated = await dbService.getSubUserAccess(parsedVmid!, userEmail.toLowerCase());
+      if (delegated) hasDelegatedAccess = true;
+    }
+    if (!linkedVm || (!isOwner && !hasDelegatedAccess)) {
       return res.status(403).json({ success: false, error: 'You can only link a support ticket to a service assigned to your account.' });
     }
   }

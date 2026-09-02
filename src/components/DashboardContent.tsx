@@ -221,8 +221,8 @@ export const DashboardContent: React.FC<{
       setLoadError(null);
 
       // Set fallback defaults for forms if not already set
-      if (mappedNodes.length > 0 && !newVmNode) {
-        setNewVmNode(mappedNodes[0].name);
+      if (mappedNodes.length > 0) {
+        setNewVmNode(curr => curr || mappedNodes[0].name);
       }
     } catch (err: any) {
       setLoadError(err?.message || 'Unable to synchronize cluster telemetry.');
@@ -230,12 +230,24 @@ export const DashboardContent: React.FC<{
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [workspaceConnectionId, newVmNode]);
+  }, [workspaceConnectionId]);
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => loadData(false), 6000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      loadData(false);
+    }, 6000);
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        loadData(false);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [loadData]);
 
   // Derived Fleet Metrics for "At a Glance" Engine

@@ -23,8 +23,16 @@ vncRouter.post('/init', async (req, res) => {
     const vm = await dbService.getVMByVMID(Number(vmid), proxmoxConnectionId);
     if (!vm) return res.status(404).json({ success: false, error: `Proxmox VMID ${vmid} not found` });
     const user = (req as any).authUser;
-    if (!user || (!adminRoles.has(user.role) && String(vm.ownerEmail).toLowerCase() !== String(user.email).toLowerCase())) {
-      return res.status(403).json({ success: false, error: 'You do not have access to this VM' });
+    const userEmail = String(user?.email || '').toLowerCase();
+    let hasAccess = Boolean(user && (adminRoles.has(user.role) || String(vm.ownerEmail).toLowerCase() === userEmail));
+    if (!hasAccess && userEmail) {
+      const delegated = await dbService.getSubUserAccess(Number(vmid), userEmail);
+      if (delegated && ['full', 'power', 'owner'].includes(delegated.scope)) {
+        hasAccess = true;
+      }
+    }
+    if (!hasAccess) {
+      return res.status(403).json({ success: false, error: 'You do not have access to this VM console' });
     }
     if (!isProviderCredentialKeyConfigured()) {
       return res.status(503).json({

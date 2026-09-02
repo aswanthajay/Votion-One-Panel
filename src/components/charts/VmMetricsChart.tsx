@@ -184,9 +184,27 @@ export default function VmMetricsChart({ vmid, proxmoxConnectionId }: VmMetricsC
     fetchAggregations();
     fetchLiveTelemetry();
 
-    const liveInterval = setInterval(fetchLiveTelemetry, 1000);
-    const aggInterval = setInterval(fetchAggregations, 15000); // Refresh history DB every 15s
-    return () => { clearInterval(liveInterval); clearInterval(aggInterval); };
+    const liveInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      fetchLiveTelemetry();
+    }, 1000);
+    const aggInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      fetchAggregations();
+    }, 15000); // Refresh history DB every 15s
+
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchLiveTelemetry();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(liveInterval);
+      clearInterval(aggInterval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [vmid, proxmoxConnectionId]);
 
   if (isLoading && !currentLive) {

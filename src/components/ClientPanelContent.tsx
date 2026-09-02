@@ -65,6 +65,9 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   }, [selectedVmid, filter]);
 
   const handleBackToTable = () => {
+    selectedVmidRef.current = undefined;
+    selectedConnRef.current = undefined;
+    selectedVmRef.current = null;
     setViewMode('table');
     setSelectedVm(null);
     if (onBackToTable) {
