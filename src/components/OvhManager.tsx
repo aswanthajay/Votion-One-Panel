@@ -54,12 +54,16 @@ interface GameRule {
 }
 
 const GAME_PRESETS = [
+  { label: 'GTA: SA-MP', game: 'samp', port: 7777 },
+  { label: 'MTA: SA', game: 'mta', port: 22003 },
   { label: 'Minecraft (Java)', game: 'minecraft', port: 25565 },
+  { label: 'Minecraft (Bedrock)', game: 'minecraftpocketedition', port: 19132 },
   { label: 'FiveM / GTA V', game: 'gtav', port: 30120 },
   { label: 'CS2 / Source', game: 'valve', port: 27015 },
   { label: 'Rust Dedicated', game: 'rust', port: 28015 },
   { label: 'Palworld', game: 'palworld', port: 8211 },
   { label: 'ARK: Survival', game: 'ark', port: 7777 },
+  { label: 'ArmA 2 / 3', game: 'arma', port: 2302 },
   { label: 'TeamSpeak 3', game: 'teamspeak', port: 9987 },
   { label: 'Custom UDP Filter', game: 'other', port: 0 },
 ];
@@ -141,23 +145,32 @@ export const OvhManager: React.FC = () => {
   const formatGameProfile = (profile?: string | null): string => {
     if (!profile) return 'Standard UDP Filter';
     const mapping: Record<string, string> = {
-      minecraft: 'Minecraft Pocket / Java',
-      minecraftpocketedition: 'Minecraft Pocket Edition',
+      samp: 'GTA: SA-MP (San Andreas Multiplayer)',
+      gtasanandreasmultiplayermod: 'GTA: SA-MP (San Andreas Multiplayer)',
+      mta: 'MTA: SA (Multi Theft Auto)',
+      gtamultitheftautosanandreas: 'MTA: SA (Multi Theft Auto)',
+      minecraft: 'Minecraft Java / Bedrock',
       minecraftjava: 'Minecraft Java Edition',
+      minecraftpocketedition: 'Minecraft Bedrock / PE',
       minecraftquery: 'Minecraft Query',
-      rust: 'Rust Server',
+      rust: 'Rust Dedicated Server',
       gta5: 'GTA V / FiveM / RageMP',
       gtav: 'GTA V / FiveM',
-      valve: 'Valve Source Engine (CS, GMod, TF2)',
-      teamspeak: 'Teamspeak Voice Server',
+      valve: 'Valve Source (CS2, TF2, GMod)',
+      halflife: 'Valve Source (CS2, TF2, GMod)',
+      teamspeak: 'TeamSpeak 3 Voice',
+      teamspeak3: 'TeamSpeak 3 Voice',
+      teamspeak2: 'TeamSpeak 2 Voice',
+      mumble: 'Mumble Voice Server',
       ark: 'ARK: Survival Evolved',
-      arma: 'Arma / DayZ',
-      dayz: 'DayZ Standalone',
+      arksurvivalevolved: 'ARK: Survival Evolved',
+      arma: 'ArmA 2 / 3 Tactical',
+      trackmania: 'TrackMania Dedicated',
+      palworld: 'Palworld Dedicated',
       other: 'Other (Standard UDP Filter)',
-      palworld: 'Palworld',
     };
     const key = profile.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return mapping[key] || profile;
+    return mapping[key] || mapping[profile] || profile;
   };
 
   // Initial load: fetch OVH IPs and VM allocations
@@ -1049,20 +1062,27 @@ export const OvhManager: React.FC = () => {
                         Duration that traffic remains inside scrubbing centers after an attack subsides before returning to normal routing.
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {[15, 30, 60, 120].map(mins => (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[
+                        { value: 0, label: '0m (Permanent)', desc: '0 minutes (Permanent scrubbing until attack terminates)' },
+                        { value: 15, label: '15m (Default)', desc: '15 minutes after attack ends' },
+                        { value: 60, label: '1h (60m)', desc: '60 minutes (1 hour) after attack ends' },
+                        { value: 360, label: '6h (360m)', desc: '360 minutes (6 hours) after attack ends' },
+                        { value: 1560, label: '26h (1560m)', desc: '1560 minutes (26 hours) after attack ends' },
+                      ].map(opt => (
                         <button
-                          key={mins}
+                          key={opt.value}
                           type="button"
-                          onClick={() => handleUpdateMitigationTimeout(mins)}
+                          title={opt.desc}
+                          onClick={() => handleUpdateMitigationTimeout(opt.value)}
                           disabled={mitigationUpdating}
-                          className={`px-2.5 py-1 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
-                            mitigationTimeout === mins
-                              ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold'
-                              : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a]'
+                          className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
+                            mitigationTimeout === opt.value
+                              ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold shadow-sm'
+                              : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white'
                           }`}
                         >
-                          {mins}m
+                          {opt.label}
                         </button>
                       ))}
                     </div>
@@ -1536,13 +1556,17 @@ export const OvhManager: React.FC = () => {
                           onChange={e => setGameProfile(e.target.value)}
                           className="w-full p-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131] rounded-lg font-semibold"
                         >
-                          <option value="minecraft">Minecraft Pocket / Java</option>
-                          <option value="gtav">GTA V / FiveM / RageMP</option>
-                          <option value="valve">Valve Source (CS2, TF2, Rust)</option>
-                          <option value="rust">Rust Server</option>
-                          <option value="teamspeak">Teamspeak Voice Server</option>
-                          <option value="ark">ARK: Survival Evolved</option>
-                          <option value="palworld">Palworld Dedicated</option>
+                          <option value="samp">GTA: SA-MP (San Andreas Multiplayer - 7777)</option>
+                          <option value="mta">MTA: SA (Multi Theft Auto - 22003)</option>
+                          <option value="minecraft">Minecraft Java Edition (25565)</option>
+                          <option value="minecraftpocketedition">Minecraft Bedrock / Pocket Edition (19132)</option>
+                          <option value="gtav">GTA V / FiveM / RageMP (30120)</option>
+                          <option value="valve">Valve Source (CS2, TF2, GMod - 27015)</option>
+                          <option value="rust">Rust Server (28015)</option>
+                          <option value="teamspeak">TeamSpeak 3 Voice (9987)</option>
+                          <option value="ark">ARK: Survival Evolved (7777)</option>
+                          <option value="arma">ArmA 2 / 3 (2302)</option>
+                          <option value="palworld">Palworld Dedicated (8211)</option>
                           <option value="other">Other (Custom UDP Filter)</option>
                         </select>
                       </div>

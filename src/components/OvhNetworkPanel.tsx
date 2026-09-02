@@ -26,6 +26,37 @@ interface GameRule {
   state: string;
 }
 
+const formatGameProfile = (profile?: string | null): string => {
+  if (!profile) return 'Standard UDP Filter';
+  const mapping: Record<string, string> = {
+    samp: 'GTA: SA-MP (San Andreas Multiplayer)',
+    gtasanandreasmultiplayermod: 'GTA: SA-MP (San Andreas Multiplayer)',
+    mta: 'MTA: SA (Multi Theft Auto)',
+    gtamultitheftautosanandreas: 'MTA: SA (Multi Theft Auto)',
+    minecraft: 'Minecraft Java / Bedrock',
+    minecraftjava: 'Minecraft Java Edition',
+    minecraftpocketedition: 'Minecraft Bedrock / PE',
+    minecraftquery: 'Minecraft Query',
+    rust: 'Rust Dedicated Server',
+    gta5: 'GTA V / FiveM / RageMP',
+    gtav: 'GTA V / FiveM',
+    valve: 'Valve Source (CS2, TF2, GMod)',
+    halflife: 'Valve Source (CS2, TF2, GMod)',
+    teamspeak: 'TeamSpeak 3 Voice',
+    teamspeak3: 'TeamSpeak 3 Voice',
+    teamspeak2: 'TeamSpeak 2 Voice',
+    mumble: 'Mumble Voice Server',
+    ark: 'ARK: Survival Evolved',
+    arksurvivalevolved: 'ARK: Survival Evolved',
+    arma: 'ArmA 2 / 3 Tactical',
+    trackmania: 'TrackMania Dedicated',
+    palworld: 'Palworld Dedicated',
+    other: 'Other (Standard UDP Filter)',
+  };
+  const key = profile.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return mapping[key] || mapping[profile] || profile;
+};
+
 export const OvhNetworkPanel: React.FC<{ vmid: number; ipAddress?: string }> = ({ vmid, ipAddress }) => {
   const isAdmin = ['admin', 'administrator', 'moderator'].includes(apiClient.getUserRole());
   const [loading, setLoading] = useState(true);
@@ -608,7 +639,7 @@ export const OvhNetworkPanel: React.FC<{ vmid: number; ipAddress?: string }> = (
                           <td className="px-4 py-2.5 text-[var(--theme-text-muted)]">#{rule.id}</td>
                           <td className="px-4 py-2.5 font-bold text-[var(--theme-text)]">{rule.toPort}</td>
                           <td className="px-4 py-2.5 uppercase font-bold">{rule.protocol}</td>
-                          <td className="px-4 py-2.5 uppercase text-gray-700 font-semibold">{rule.gameType}</td>
+                          <td className="px-4 py-2.5 uppercase text-gray-700 font-semibold">{formatGameProfile(rule.gameType)}</td>
                           <td className="px-4 py-2.5">
                             <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold bg-[#dcfce7] text-[#15803d]">
                               <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] animate-pulse"></span>
@@ -666,16 +697,31 @@ export const OvhNetworkPanel: React.FC<{ vmid: number; ipAddress?: string }> = (
                   <label className="block font-semibold mb-1">Game Profile Type</label>
                   <select
                     value={newGameProfile}
-                    onChange={e => setNewGameProfile(e.target.value)}
+                    onChange={e => {
+                      const prof = e.target.value;
+                      setNewGameProfile(prof);
+                      if (prof === 'samp' || prof === 'ark') setNewGamePort(7777);
+                      else if (prof === 'mta') setNewGamePort(22003);
+                      else if (prof === 'minecraft') setNewGamePort(25565);
+                      else if (prof === 'minecraftpocketedition') setNewGamePort(19132);
+                      else if (prof === 'rust') setNewGamePort(28015);
+                      else if (prof === 'valve') setNewGamePort(27015);
+                      else if (prof === 'teamspeak') setNewGamePort(9987);
+                      else if (prof === 'arma') setNewGamePort(2302);
+                      else if (prof === 'gta5') setNewGamePort(30120);
+                    }}
                     className="w-full border border-[var(--theme-border)] rounded-lg px-2.5 py-1.5 text-xs outline-none bg-[var(--theme-bg)] cursor-pointer"
                   >
-                    <option value="minecraft">Minecraft (Java/Bedrock)</option>
-                    <option value="rust">Rust</option>
-                    <option value="gta5">GTA V / FiveM</option>
-                    <option value="valve">Source Engine (CS:GO, TF2, GMod)</option>
-                    <option value="teamspeak">Teamspeak 3</option>
-                    <option value="ark">ARK Survival Evolved</option>
-                    <option value="arma">Arma 3</option>
+                    <option value="samp">GTA: SA-MP (San Andreas Multiplayer - 7777)</option>
+                    <option value="mta">MTA: SA (Multi Theft Auto - 22003)</option>
+                    <option value="minecraft">Minecraft Java Edition (25565)</option>
+                    <option value="minecraftpocketedition">Minecraft Bedrock / PE (19132)</option>
+                    <option value="rust">Rust Dedicated (28015)</option>
+                    <option value="gta5">GTA V / FiveM (30120)</option>
+                    <option value="valve">Source Engine (CS2, TF2, GMod - 27015)</option>
+                    <option value="teamspeak">TeamSpeak 3 Voice (9987)</option>
+                    <option value="ark">ARK Survival Evolved (7777)</option>
+                    <option value="arma">Arma 2 / 3 (2302)</option>
                     <option value="other">Other / Standard UDP Query</option>
                   </select>
                 </div>

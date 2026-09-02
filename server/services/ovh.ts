@@ -424,15 +424,61 @@ class OvhService {
     }
   }
 
+  // Normalise game profile string to OVH's exact protocol enum
+  normalizeGameProfile(game: string): string {
+    const g = (game || '').trim().toLowerCase();
+    if (g === 'samp' || g === 'sa-mp' || g === 'gtasamp' || g === 'gtasa' || g === 'gtasanandreasmultiplayermod') {
+      return 'gtaSanAndreasMultiplayerMod';
+    }
+    if (g === 'mta' || g === 'mtasa' || g === 'gtamultitheftautosanandreas') {
+      return 'gtaMultiTheftAutoSanAndreas';
+    }
+    if (g === 'minecraft' || g === 'minecraftjava') {
+      return 'minecraft';
+    }
+    if (g === 'minecraftpocketedition' || g === 'bedrock' || g === 'pe') {
+      return 'minecraftPocketEdition';
+    }
+    if (g === 'minecraftquery') {
+      return 'minecraftQuery';
+    }
+    if (g === 'rust') {
+      return 'rust';
+    }
+    if (g === 'ark' || g === 'arksurvivalevolved') {
+      return 'arkSurvivalEvolved';
+    }
+    if (g === 'arma' || g === 'arma3') {
+      return 'arma';
+    }
+    if (g === 'teamspeak' || g === 'teamspeak3' || g === 'ts3') {
+      return 'teamspeak3';
+    }
+    if (g === 'teamspeak2') {
+      return 'teamspeak2';
+    }
+    if (g === 'mumble') {
+      return 'mumble';
+    }
+    if (g === 'valve' || g === 'halflife' || g === 'source' || g === 'cs2' || g === 'csgo' || g === 'tf2') {
+      return 'halfLife';
+    }
+    if (g === 'trackmania') {
+      return 'trackmania';
+    }
+    return game || 'other';
+  }
+
   // Create Game DDoS Rule
   async createGameDdosRule(ip: string, rule: { fromPort?: number; port: number; protocol: 'tcp' | 'udp'; game: string }): Promise<any> {
     const block = this.getBlock(ip);
     const toPort = rule.port;
     const fromPort = rule.fromPort !== undefined ? rule.fromPort : toPort;
+    const protocol = this.normalizeGameProfile(rule.game);
     const payload: any = {
       // OVH's actual schema: ports nested object + protocol = game type
       ports: { from: fromPort, to: toPort },
-      protocol: rule.game, // e.g. 'other', 'minecraft', 'gtasanandreasmultiplayermod'
+      protocol,
     };
     return await this.request('POST', `/ip/${encodeURIComponent(block)}/game/${encodeURIComponent(ip)}/rule`, payload);
   }
