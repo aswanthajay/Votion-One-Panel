@@ -370,24 +370,18 @@ export const DashboardContent: React.FC<{
             <span>{currentTime.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
           </div>
 
-          {/* DDoS Defense Security Indicator */}
-          <button
-            type="button"
-            onClick={() => navigate('/ovh-manager')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-              fleetDdos?.isAnyUnderAttack
-                ? 'border-[#f87171] bg-[#fef2f2] dark:bg-[#450a0a] text-[#dc2626] dark:text-[#fca5a5] font-bold animate-pulse'
-                : 'border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#141414] text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
-            }`}
-            title="Click to view Router & Anti-DDoS Manager"
-          >
-            <span className={`w-2 h-2 rounded-full ${fleetDdos?.isAnyUnderAttack ? 'bg-[#dc2626]' : 'bg-[#16a34a]'}`} />
-            <span>
-              {fleetDdos?.isAnyUnderAttack
-                ? `DDoS: ${fleetDdos.activeAttacksCount} Attack${fleetDdos.activeAttacksCount > 1 ? 's' : ''} Active`
-                : 'DDoS Shield: Normal'}
-            </span>
-          </button>
+          {/* Active Protection Incident Pill */}
+          {fleetDdos?.isAnyUnderAttack && (
+            <button
+              type="button"
+              onClick={() => navigate('/ovh-manager')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#fecaca] dark:border-[#7f1d1d] bg-[#fef2f2] dark:bg-[#2c0e0e] text-[#dc2626] dark:text-[#f87171] text-xs font-mono cursor-pointer"
+              title="Open Router Manager"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#dc2626] animate-pulse" />
+              <span>{fleetDdos.activeAttacksCount} Mitigation Event{fleetDdos.activeAttacksCount > 1 ? 's' : ''}</span>
+            </button>
+          )}
 
           {/* Quick Action Buttons */}
           <button
@@ -411,56 +405,39 @@ export const DashboardContent: React.FC<{
         </div>
       </header>
 
-      {/* Active DDoS Attack Emergency Alert Banner */}
+      {/* Active Protection Event Incident Card */}
       {fleetDdos?.isAnyUnderAttack && (
-        <section className="mb-6 rounded-xl border border-[#f87171] dark:border-[#b91c1c] bg-[#fef2f2] dark:bg-[#450a0a]/70 p-4 sm:p-5 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <span className="w-3.5 h-3.5 rounded-full bg-[#ef4444] animate-ping mt-1 shrink-0" />
+        <section className="mb-6 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#141414] p-4 text-xs shadow-xs" role="alert">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full bg-[#dc2626] shrink-0 animate-pulse" />
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-[#b91c1c] dark:text-[#fca5a5] uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                    <span>⚠️</span> Active DDoS Attack Mitigation Detected
+                <div className="flex items-center gap-2">
+                  <span className="font-serif font-medium text-sm text-[#1a1a1a] dark:text-white">
+                    Network Protection Incident
                   </span>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#dc2626] text-white">
-                    {fleetDdos.activeAttacksCount} IP{fleetDdos.activeAttacksCount === 1 ? '' : 's'} Under Volumetric Flood
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#fef2f2] dark:bg-[#2c0e0e] text-[#dc2626] dark:text-[#f87171] border border-[#fecaca] dark:border-[#7f1d1d]/40">
+                    {fleetDdos.activeAttacksCount} IP{fleetDdos.activeAttacksCount > 1 ? 's' : ''} Under Mitigation
                   </span>
                 </div>
-                
-                <p className="text-[#7f1d1d] dark:text-[#fecaca] text-xs mt-1.5 leading-relaxed">
-                  Anti-DDoS VAC hardware scrubbers are actively filtering malicious traffic directed at:{' '}
+                <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-1">
+                  Automated mitigation active on{' '}
                   {fleetDdos.attacks.map((atk, idx) => (
-                    <span key={atk.ip} className="font-mono font-bold text-[#991b1b] dark:text-white underline decoration-dotted">
-                      {atk.ip}{atk.vm ? ` (VM ${atk.vm.vmid}: ${atk.vm.name} on ${atk.vm.node})` : ''}{idx < fleetDdos.attacks.length - 1 ? ', ' : ''}
+                    <span key={atk.ip} className="font-mono text-[#1a1a1a] dark:text-white font-medium">
+                      {atk.ip}{atk.vm ? ` (${atk.vm.name})` : ''}{idx < fleetDdos.attacks.length - 1 ? ', ' : ''}
                     </span>
                   ))}
+                  .
                 </p>
-
-                {fleetDdos.totalInboundRateBps > 0 && (
-                  <div className="mt-2.5 flex items-center flex-wrap gap-4 text-xs font-mono">
-                    <span className="text-[#dc2626] font-semibold flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-[#dc2626]" />
-                      Ingress Attack: {formatBps(fleetDdos.totalInboundRateBps)}
-                    </span>
-                    <span className="text-[#d97706] font-semibold flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-[#d97706]" />
-                      Scrubbed: {formatBps(fleetDdos.totalScrubbedRateBps)}
-                    </span>
-                    <span className="text-[#16a34a] font-semibold flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
-                      Clean to Guest: {formatBps(fleetDdos.totalPassedRateBps)}
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
 
             <button
               type="button"
               onClick={() => navigate('/ovh-manager')}
-              className="btn-primary py-2 px-4 text-xs font-semibold whitespace-nowrap shrink-0 self-start sm:self-auto cursor-pointer !bg-[#dc2626] hover:!bg-[#b91c1c] !text-white shadow-sm flex items-center gap-1.5"
+              className="btn-secondary !text-xs !py-1.5 !px-3.5 shrink-0 self-start sm:self-auto cursor-pointer flex items-center gap-1.5"
             >
-              <span>Inspect in Router Manager</span>
+              <span>Router Manager</span>
               <span>→</span>
             </button>
           </div>
