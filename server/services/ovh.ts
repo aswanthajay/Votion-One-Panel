@@ -15,9 +15,36 @@ const ENDPOINTS: Record<string, string> = {
   'ovh-us': 'https://us.api.ovh.com/1.0',
 };
 
+function ipInCidr(ip: string, cidr: string): boolean {
+  if (!cidr.includes('/')) return ip === cidr;
+  const [range, bitsStr] = cidr.split('/');
+  const bits = parseInt(bitsStr, 10);
+  if (isNaN(bits) || bits < 0 || bits > 32) return false;
+  if (bits === 0) return true;
+
+  const ipParts = ip.split('.').map(Number);
+  const rangeParts = range.split('.').map(Number);
+  if (ipParts.length !== 4 || rangeParts.length !== 4) return false;
+
+  const ipNum = ((ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3]) >>> 0;
+  const rangeNum = ((rangeParts[0] << 24) | (rangeParts[1] << 16) | (rangeParts[2] << 8) | rangeParts[3]) >>> 0;
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+
+  return (ipNum & mask) === (rangeNum & mask);
+}
+
 class OvhService {
+  private knownBlocks: string[] = [];
+
   private getBlock(ip: string): string {
-    return ip.includes('/') ? ip : `${ip}/32`;
+    if (ip.includes('/')) return ip;
+    const cleanIp = ip.trim();
+    for (const b of this.knownBlocks) {
+      if (b.includes('/') && ipInCidr(cleanIp, b)) {
+        return b;
+      }
+    }
+    return `${cleanIp}/32`;
   }
   private config: OvhConfig | null = null;
   private timeDelta = 0;
@@ -135,6 +162,9 @@ class OvhService {
           { method: 'PUT', path: '/ip*' },
           { method: 'DELETE', path: '/ip*' },
           { method: 'GET', path: '/dedicated/server*' },
+          { method: 'POST', path: '/dedicated/server*' },
+          { method: 'PUT', path: '/dedicated/server*' },
+          { method: 'DELETE', path: '/dedicated/server*' },
         ],
       }),
     });
@@ -150,7 +180,11 @@ class OvhService {
   // Get all IP blocks owned by account
   async getIps(): Promise<string[]> {
     const data = await this.request('GET', '/ip');
-    return Array.isArray(data) ? data : [];
+    if (Array.isArray(data)) {
+      this.knownBlocks = data;
+      return data;
+    }
+    return [];
   }
 
   // Get Reverse DNS record
