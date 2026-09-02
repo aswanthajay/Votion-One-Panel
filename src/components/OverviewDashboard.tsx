@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan, ApiVmBillingProfile } from '../services/apiClient';
+import { apiClient, ApiVM, ApiAuditLog, ApiBillingInvoice, ApiBillingSummary, ApiPricingPlan, ApiVmBillingProfile, ApiFleetDdosStatus } from '../services/apiClient';
 import { formatDate, formatTime } from '../services/dateTime';
 
 /*
@@ -285,6 +285,7 @@ export const OverviewDashboard: React.FC<{
   const [fleetFailed, setFleetFailed] = useState(false);
   const [providerAvailable, setProviderAvailable] = useState(true);
   const [clusterStorageData, setClusterStorageData] = useState<{ totalGb: number; usedGb: number; freeGb: number; usagePct: number } | null>(null);
+  const [fleetDdos, setFleetDdos] = useState<ApiFleetDdosStatus | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataAge, setDataAge] = useState(0);
   const mountedRef = useRef(true);
@@ -307,15 +308,17 @@ export const OverviewDashboard: React.FC<{
     if (isRefreshing && backgroundOnly) return;
     setIsRefreshing(true);
 
-    // FAST BACKGROUND STREAM — tickets + audit (≈3ms each)
+    // FAST BACKGROUND STREAM — tickets + audit + ddos (≈3ms each)
     try {
-      const [tk, al] = await Promise.all([
+      const [tk, al, ddos] = await Promise.all([
         fetchOne(`${API_BASE}/support/tickets`),
         fetchOne(`${API_BASE}/audit-logs?limit=20`),
+        apiClient.getAdminFleetDdosStatus().catch(() => null),
       ]);
       if (!mountedRef.current) return;
       if (tk?.data) setTickets(tk.data);
       if (al?.data) setAudit(al.data);
+      if (ddos) setFleetDdos(ddos);
     } catch { /* self-heals on next cycle */ }
 
     // BILLING STREAM — optional and non-blocking. A billing outage must never
@@ -687,6 +690,33 @@ export const OverviewDashboard: React.FC<{
           </div>
 
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-5 sm:px-7 py-4">
+            {/* Active DDoS Attack Alert Banner */}
+            {fleetDdos?.isAnyUnderAttack && (
+              <section className="mb-4 rounded-xl border border-[#f87171] dark:border-[#b91c1c] bg-[#fef2f2] dark:bg-[#450a0a]/70 p-4 shadow-sm" role="alert">
+                <div className="flex items-start gap-3">
+                  <span className="w-3 h-3 rounded-full bg-[#ef4444] animate-ping mt-1 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-[#b91c1c] dark:text-[#fca5a5] uppercase tracking-wider text-[11px]">
+                        ● Active Anti-DDoS Mitigation Detected
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#dc2626] text-white">
+                        {fleetDdos.activeAttacksCount} IP{fleetDdos.activeAttacksCount === 1 ? '' : 's'} Under Attack
+                      </span>
+                    </div>
+                    <p className="text-[#7f1d1d] dark:text-[#fecaca] text-xs mt-1 leading-relaxed">
+                      Anti-DDoS hardware edge scrubbers are actively filtering volumetric malicious traffic directed at:{' '}
+                      {fleetDdos.attacks.map((atk, idx) => (
+                        <span key={atk.ip} className="font-mono font-bold text-[#991b1b] dark:text-white underline decoration-dotted">
+                          {atk.ip}{atk.vm ? ` (${atk.vm.name})` : ''}{idx < fleetDdos.attacks.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
+
             {!fleetLoading && !fleetFailed && !providerAvailable && (
               <section className="mb-4 rounded-md border border-[#dedfdf] bg-white px-4 py-3" role="status" aria-live="polite">
                 <p className="text-[12px] font-semibold text-[#1a1a1a]">Live cloud status unavailable</p>

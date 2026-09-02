@@ -9,8 +9,16 @@ import {
   ApiReimageRequest,
   ApiNotification,
   ApiAuditLog,
+  ApiFleetDdosStatus,
 } from '../services/apiClient';
 import { formatDate, formatTime } from '../services/dateTime';
+
+const formatBps = (bps: number) => {
+  if (!bps || bps <= 0) return '0 bps';
+  if (bps < 1e6) return `${(bps / 1e3).toFixed(1)} Kbps`;
+  if (bps < 1e9) return `${(bps / 1e6).toFixed(1)} Mbps`;
+  return `${(bps / 1e9).toFixed(2)} Gbps`;
+};
 
 /* -------------------------------------------------------------
    STELLAR / VOTION ADMIN EXECUTIVE COMMAND CENTER (v4 - Carta Ink)
@@ -155,6 +163,7 @@ export const DashboardContent: React.FC<{
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [fleetDdos, setFleetDdos] = useState<ApiFleetDdosStatus | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -183,10 +192,11 @@ export const DashboardContent: React.FC<{
       ]);
 
       // Optional secondary streams
-      const [pendingRequests, notificationsRes, auditLogs] = await Promise.all([
+      const [pendingRequests, notificationsRes, auditLogs, ddosStatus] = await Promise.all([
         apiClient.getAdminReimageRequests('pending').catch(() => []),
         apiClient.getNotifications(true).catch(() => ({ success: true, data: [] })),
         apiClient.getAuditLogs().catch(() => []),
+        apiClient.getAdminFleetDdosStatus().catch(() => null),
       ]);
 
       const mappedNodes: StellarNode[] = (apiNodes || []).map((n, idx) => ({
@@ -217,6 +227,7 @@ export const DashboardContent: React.FC<{
       setPendingReimageRequests(pendingRequests || []);
       setActiveNotifications(notificationsRes.success ? notificationsRes.data.slice(0, 4) : []);
       setRecentAuditLogs(Array.isArray(auditLogs) ? auditLogs.slice(0, 6) : []);
+      setFleetDdos(ddosStatus);
 
       setLoadError(null);
 
@@ -359,6 +370,25 @@ export const DashboardContent: React.FC<{
             <span>{currentTime.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
           </div>
 
+          {/* DDoS Defense Security Indicator */}
+          <button
+            type="button"
+            onClick={() => navigate('/ovh-manager')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
+              fleetDdos?.isAnyUnderAttack
+                ? 'border-[#f87171] bg-[#fef2f2] dark:bg-[#450a0a] text-[#dc2626] dark:text-[#fca5a5] font-bold animate-pulse'
+                : 'border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#141414] text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
+            }`}
+            title="Click to view Router & Anti-DDoS Manager"
+          >
+            <span className={`w-2 h-2 rounded-full ${fleetDdos?.isAnyUnderAttack ? 'bg-[#dc2626]' : 'bg-[#16a34a]'}`} />
+            <span>
+              {fleetDdos?.isAnyUnderAttack
+                ? `DDoS: ${fleetDdos.activeAttacksCount} Attack${fleetDdos.activeAttacksCount > 1 ? 's' : ''} Active`
+                : 'DDoS Shield: Normal'}
+            </span>
+          </button>
+
           {/* Quick Action Buttons */}
           <button
             type="button"
@@ -380,6 +410,62 @@ export const DashboardContent: React.FC<{
           </button>
         </div>
       </header>
+
+      {/* Active DDoS Attack Emergency Alert Banner */}
+      {fleetDdos?.isAnyUnderAttack && (
+        <section className="mb-6 rounded-xl border border-[#f87171] dark:border-[#b91c1c] bg-[#fef2f2] dark:bg-[#450a0a]/70 p-4 sm:p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="w-3.5 h-3.5 rounded-full bg-[#ef4444] animate-ping mt-1 shrink-0" />
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-[#b91c1c] dark:text-[#fca5a5] uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <span>⚠️</span> Active DDoS Attack Mitigation Detected
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#dc2626] text-white">
+                    {fleetDdos.activeAttacksCount} IP{fleetDdos.activeAttacksCount === 1 ? '' : 's'} Under Volumetric Flood
+                  </span>
+                </div>
+                
+                <p className="text-[#7f1d1d] dark:text-[#fecaca] text-xs mt-1.5 leading-relaxed">
+                  Anti-DDoS VAC hardware scrubbers are actively filtering malicious traffic directed at:{' '}
+                  {fleetDdos.attacks.map((atk, idx) => (
+                    <span key={atk.ip} className="font-mono font-bold text-[#991b1b] dark:text-white underline decoration-dotted">
+                      {atk.ip}{atk.vm ? ` (VM ${atk.vm.vmid}: ${atk.vm.name} on ${atk.vm.node})` : ''}{idx < fleetDdos.attacks.length - 1 ? ', ' : ''}
+                    </span>
+                  ))}
+                </p>
+
+                {fleetDdos.totalInboundRateBps > 0 && (
+                  <div className="mt-2.5 flex items-center flex-wrap gap-4 text-xs font-mono">
+                    <span className="text-[#dc2626] font-semibold flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#dc2626]" />
+                      Ingress Attack: {formatBps(fleetDdos.totalInboundRateBps)}
+                    </span>
+                    <span className="text-[#d97706] font-semibold flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#d97706]" />
+                      Scrubbed: {formatBps(fleetDdos.totalScrubbedRateBps)}
+                    </span>
+                    <span className="text-[#16a34a] font-semibold flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
+                      Clean to Guest: {formatBps(fleetDdos.totalPassedRateBps)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigate('/ovh-manager')}
+              className="btn-primary py-2 px-4 text-xs font-semibold whitespace-nowrap shrink-0 self-start sm:self-auto cursor-pointer !bg-[#dc2626] hover:!bg-[#b91c1c] !text-white shadow-sm flex items-center gap-1.5"
+            >
+              <span>Inspect in Router Manager</span>
+              <span>→</span>
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Global Load Error Banner */}
       {loadError && (

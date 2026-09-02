@@ -2646,6 +2646,52 @@ apiRouter.get('/admin/ovh/attacks/events/:eventId/stats', requireOvhEnabledAdmin
   }
 });
 
+apiRouter.get('/admin/ddos/fleet-status', requireAdmin, async (_req, res) => {
+  try {
+    const fleetStatus = await ovhService.getFleetDdosStatus();
+
+    // Correlate attacked IPs with database VMs
+    let dbVms: any[] = [];
+    try {
+      const vmsRes = await pgPool.query('SELECT vmid, vm_name, node, owner_email, ip_address FROM vms');
+      dbVms = vmsRes.rows || [];
+    } catch { /* proceed */ }
+
+    const vmByIp = new Map<string, any>();
+    for (const v of dbVms) {
+      if (v.ip_address) {
+        const clean = String(v.ip_address).split('/')[0].trim();
+        vmByIp.set(clean, v);
+      }
+    }
+
+    const attacksWithVm = fleetStatus.attacks.map(atk => {
+      const vm = vmByIp.get(atk.ip);
+      return {
+        ...atk,
+        carrier: 'ovh',
+        vm: vm ? {
+          vmid: vm.vmid,
+          name: vm.vm_name,
+          node: vm.node,
+          ownerEmail: vm.owner_email,
+        } : null,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...fleetStatus,
+        attacks: attacksWithVm,
+      },
+    });
+  } catch (err: any) {
+    console.error('[ADMIN DDOS FLEET STATUS ERROR]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 apiRouter.post('/admin/ovh/firewall/toggle', requireOvhEnabledAdmin, async (req, res) => {
   try {
     const ip = validateIpAdmin(req.body.ip);

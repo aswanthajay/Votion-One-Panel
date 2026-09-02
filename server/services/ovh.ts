@@ -467,6 +467,126 @@ class OvhService {
     };
   }
 
+  // Cache for fleet DDoS check to prevent hammering OVH API
+  private fleetDdosCache: { data: any; timestamp: number } | null = null;
+
+  async getFleetDdosStatus(): Promise<{
+    isAnyUnderAttack: boolean;
+    activeAttacksCount: number;
+    attacks: Array<{
+      ip: string;
+      block: string;
+      state: string;
+      mode: 'automatic' | 'permanent';
+      inBps?: number;
+      droppedBps?: number;
+      passedBps?: number;
+      inPps?: number;
+      vectors?: string[];
+      startedAt?: string;
+    }>;
+    totalInboundRateBps: number;
+    totalScrubbedRateBps: number;
+    totalPassedRateBps: number;
+    checkedAt: string;
+    checkedBlocksCount: number;
+  }> {
+    const now = Date.now();
+    if (this.fleetDdosCache && (now - this.fleetDdosCache.timestamp < 15000)) {
+      return this.fleetDdosCache.data;
+    }
+
+    if (!this.isEnabled()) {
+      return {
+        isAnyUnderAttack: false,
+        activeAttacksCount: 0,
+        attacks: [],
+        totalInboundRateBps: 0,
+        totalScrubbedRateBps: 0,
+        totalPassedRateBps: 0,
+        checkedAt: new Date().toISOString(),
+        checkedBlocksCount: 0,
+      };
+    }
+
+    const blocks = await this.getIps().catch(() => []);
+    const attacks: any[] = [];
+    let totalInboundRateBps = 0;
+    let totalScrubbedRateBps = 0;
+    let totalPassedRateBps = 0;
+
+    // Scan IPv4 blocks for active mitigation in parallel (batches of 6)
+    const ipv4Blocks = blocks.filter(b => !b.includes(':'));
+    for (let i = 0; i < ipv4Blocks.length; i += 6) {
+      const batch = ipv4Blocks.slice(i, i + 6);
+      await Promise.all(
+        batch.map(async (b) => {
+          try {
+            const mitigatedIps = await this.request('GET', `/ip/${encodeURIComponent(b)}/mitigation`);
+            if (Array.isArray(mitigatedIps) && mitigatedIps.length > 0) {
+              for (const ip of mitigatedIps) {
+                try {
+                  const detail = await this.request('GET', `/ip/${encodeURIComponent(b)}/mitigation/${encodeURIComponent(ip)}`).catch(() => null);
+                  const stats = await this.getLiveMitigationStats(ip).catch(() => []);
+                  const latestStat = stats && stats.length > 0 ? stats[stats.length - 1] : null;
+
+                  const inBps = Number(latestStat?.in?.bps || latestStat?.inBps || 0);
+                  const droppedBps = Number(latestStat?.drop?.bps || latestStat?.droppedBps || 0);
+                  const passedBps = Number(latestStat?.passed?.bps || latestStat?.passedBps || 0);
+                  const inPps = Number(latestStat?.in?.pps || latestStat?.pps || 0);
+
+                  totalInboundRateBps += inBps;
+                  totalScrubbedRateBps += droppedBps;
+                  totalPassedRateBps += passedBps;
+
+                  attacks.push({
+                    ip,
+                    block: b,
+                    state: detail?.state || 'mitigated',
+                    mode: detail?.permanent ? 'permanent' : 'automatic',
+                    inBps,
+                    droppedBps,
+                    passedBps,
+                    inPps,
+                    vectors: ['Volumetric Ingress Scrubbing'],
+                    startedAt: detail?.date || new Date().toISOString(),
+                  });
+                } catch {
+                  attacks.push({
+                    ip,
+                    block: b,
+                    state: 'mitigated',
+                    mode: 'automatic',
+                    inBps: 0,
+                    droppedBps: 0,
+                    passedBps: 0,
+                    inPps: 0,
+                    startedAt: new Date().toISOString(),
+                  });
+                }
+              }
+            }
+          } catch {
+            // Block does not support /mitigation or has error
+          }
+        })
+      );
+    }
+
+    const result = {
+      isAnyUnderAttack: attacks.length > 0,
+      activeAttacksCount: attacks.length,
+      attacks,
+      totalInboundRateBps,
+      totalScrubbedRateBps,
+      totalPassedRateBps,
+      checkedAt: new Date().toISOString(),
+      checkedBlocksCount: ipv4Blocks.length,
+    };
+
+    this.fleetDdosCache = { data: result, timestamp: Date.now() };
+    return result;
+  }
 
   // Get Anti-Hack (Blocked IP) Status
   async getAntiHackStatus(ip: string): Promise<{ blockedSince: string; logs: string; state: string; timeToUnblock: number } | null> {

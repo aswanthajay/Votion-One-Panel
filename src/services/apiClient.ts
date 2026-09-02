@@ -249,6 +249,35 @@ export interface ApiPricingPlan {
   sortOrder: number;
 }
 
+export interface ApiFleetDdosStatus {
+  isAnyUnderAttack: boolean;
+  activeAttacksCount: number;
+  attacks: Array<{
+    ip: string;
+    block?: string;
+    state: string;
+    mode: 'automatic' | 'permanent';
+    carrier?: 'ovh' | 'hetzner' | 'other';
+    inBps?: number;
+    droppedBps?: number;
+    passedBps?: number;
+    inPps?: number;
+    vectors?: string[];
+    startedAt?: string;
+    vm?: {
+      vmid: number;
+      name: string;
+      node: string;
+      ownerEmail?: string;
+    } | null;
+  }>;
+  totalInboundRateBps: number;
+  totalScrubbedRateBps: number;
+  totalPassedRateBps: number;
+  checkedAt: string;
+  checkedBlocksCount: number;
+}
+
 export interface ApiBillingInvoice {
   id: string;
   accountEmail: string;
@@ -2520,6 +2549,25 @@ class ApiClient {
     const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/attacks/events/${encodeURIComponent(String(eventId))}/stats?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
     const data = await this.readApiResponse(res, 'Unable to fetch attack event stats.');
     return data.data || [];
+  }
+
+  async getAdminFleetDdosStatus(): Promise<ApiFleetDdosStatus> {
+    try {
+      const res = await this.swrFetch(`${API_BASE_URL}/admin/ddos/fleet-status`, { headers: this.getHeaders() });
+      const data = await this.readApiResponse(res, 'Unable to fetch fleet DDoS status.');
+      return data.data;
+    } catch {
+      return {
+        isAnyUnderAttack: false,
+        activeAttacksCount: 0,
+        attacks: [],
+        totalInboundRateBps: 0,
+        totalScrubbedRateBps: 0,
+        totalPassedRateBps: 0,
+        checkedAt: new Date().toISOString(),
+        checkedBlocksCount: 0,
+      };
+    }
   }
 
   async toggleAdminOvhFirewall(ip: string, enabled: boolean) {
