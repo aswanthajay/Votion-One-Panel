@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient, ApiVM } from '../services/apiClient';
+import { isIpInSubnets, getIpCarrierType, getIpNetworkType } from '../utils/ipUtils';
 
 interface OvhStatus {
   ip: string;
+  carrier?: 'ovh' | 'hetzner' | 'custom';
   reverse: string | null;
   virtualMac?: string | null;
   vmMac?: string | null;
@@ -32,6 +34,13 @@ interface OvhStatus {
     logs: string;
     state: string;
     timeToUnblock: number;
+  } | null;
+  hetznerDetails?: {
+    serverIp?: string;
+    serverNumber?: number;
+    locked?: boolean;
+    separateMac?: string | null;
+    trafficWarnings?: boolean;
   } | null;
 }
 
@@ -79,11 +88,18 @@ export const OvhManager: React.FC = () => {
   const [vms, setVms] = useState<ApiVM[]>([]);
   const [loadingIps, setLoadingIps] = useState(false);
   const [ipFilterMode, setIpFilterMode] = useState<'all' | 'assigned' | 'free'>('all');
+  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner'>('all');
   const [ipSearchQuery, setIpSearchQuery] = useState('');
+
+  // Hetzner Account IPs & subnets
+  const [hetznerIps, setHetznerIps] = useState<string[]>([]);
+  const [hetznerSubnets, setHetznerSubnets] = useState<Array<{ ip: string; mask: number; serverIp?: string; failover?: boolean; locked?: boolean }>>([]);
+  const [hetznerSubmittingMac, setHetznerSubmittingMac] = useState(false);
+  const [hetznerDeletingMac, setHetznerDeletingMac] = useState(false);
 
   // Status & Tab state
   const [status, setStatus] = useState<OvhStatus | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'vmac' | 'firewall' | 'game' | 'antihack'>('general');
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'vmac' | 'firewall' | 'game' | 'antihack' | 'subnet'>('general');
 
   // Virtual MAC state
   const [macSubmitting, setMacSubmitting] = useState(false);
@@ -173,12 +189,12 @@ export const OvhManager: React.FC = () => {
     return mapping[key] || mapping[profile] || profile;
   };
 
-  // Initial load: fetch OVH IPs and VM allocations
+  // Initial load: fetch OVH, Hetzner IPs and VM allocations
   const loadInitialData = async () => {
     setLoadingIps(true);
     setPermissionError(false);
     try {
-      const [ipsList, vmsList] = await Promise.all([
+      const [ipsList, vmsList, hetznerData] = await Promise.all([
         apiClient.getAdminOvhIps().catch((err: any) => {
           const msg = String(err.message || '');
           if (
@@ -194,9 +210,14 @@ export const OvhManager: React.FC = () => {
           return [];
         }),
         apiClient.getVMs().catch(() => []),
+        apiClient.getAdminHetznerIps().catch(() => ({ ips: [], subnets: [] })),
       ]);
       setOvhIps(ipsList || []);
       setVms(vmsList || []);
+      const hSingleIps = (hetznerData?.ips || []).map((x: any) => `${x.ip}/32`);
+      const hSubnetIps = (hetznerData?.subnets || []).map((x: any) => `${x.ip}/${x.mask}`);
+      setHetznerIps([...hSingleIps, ...hSubnetIps]);
+      setHetznerSubnets(hetznerData?.subnets || []);
     } catch (err: any) {
       console.error('Failed to load initial data:', err);
     } finally {
@@ -249,9 +270,9 @@ export const OvhManager: React.FC = () => {
     return result;
   };
 
-  // Discovered flat host list with VM metadata + auto-supplement with live Proxmox VM IPs
+  // Discovered flat host list with VM metadata + carrier correlation
   const hostListWithMetadata = useMemo(() => {
-    const list: Array<{ ip: string; block: string; boundVm: ApiVM | null }> = [];
+    const list: Array<{ ip: string; block: string; boundVm: ApiVM | null; carrier: 'ovh' | 'hetzner' | 'custom' }> = [];
     const seen = new Set<string>();
 
     for (const block of ovhIps) {
@@ -263,6 +284,22 @@ export const OvhManager: React.FC = () => {
             ip,
             block,
             boundVm: vmByIp.get(ip) || null,
+            carrier: 'ovh',
+          });
+        }
+      }
+    }
+
+    for (const block of hetznerIps) {
+      const expanded = expandCidr(block);
+      for (const ip of expanded) {
+        if (!seen.has(ip)) {
+          seen.add(ip);
+          list.push({
+            ip,
+            block,
+            boundVm: vmByIp.get(ip) || null,
+            carrier: 'hetzner',
           });
         }
       }
@@ -274,21 +311,27 @@ export const OvhManager: React.FC = () => {
         const clean = vm.ipAddress.split('/')[0].trim();
         if (clean && !seen.has(clean)) {
           seen.add(clean);
+          const carrierType = getIpCarrierType(clean, ovhIps, hetznerIps);
           list.push({
             ip: clean,
             block: `${clean}/32`,
             boundVm: vm,
+            carrier: carrierType.carrier,
           });
         }
       }
     });
 
     return list;
-  }, [ovhIps, vms, vmByIp]);
+  }, [ovhIps, hetznerIps, vms, vmByIp]);
 
   // Filtered IP List
   const filteredHostList = useMemo(() => {
     return hostListWithMetadata.filter(item => {
+      // 0. Carrier Tab Filter
+      if (carrierFilter === 'ovh' && item.carrier !== 'ovh') return false;
+      if (carrierFilter === 'hetzner' && item.carrier !== 'hetzner') return false;
+
       // 1. Assignment Filter
       if (ipFilterMode === 'assigned' && !item.boundVm) return false;
       if (ipFilterMode === 'free' && item.boundVm) return false;
@@ -304,21 +347,63 @@ export const OvhManager: React.FC = () => {
       }
       return true;
     });
-  }, [hostListWithMetadata, ipFilterMode, ipSearchQuery]);
+  }, [hostListWithMetadata, carrierFilter, ipFilterMode, ipSearchQuery]);
 
   // Aggregate Metrics for At a Glance Top Strip
   const fleetMetrics = useMemo(() => {
     const totalHosts = hostListWithMetadata.length;
     const boundCount = hostListWithMetadata.filter(h => h.boundVm !== null).length;
     const freeCount = totalHosts - boundCount;
-    const subnetsCount = ovhIps.length;
+    const subnetsCount = ovhIps.length + hetznerSubnets.length;
     return { totalHosts, boundCount, freeCount, subnetsCount };
-  }, [hostListWithMetadata, ovhIps]);
+  }, [hostListWithMetadata, ovhIps, hetznerSubnets]);
 
   // Fetch status for a targeted IP
   const fetchStatusForIp = async (targetIp: string) => {
     setLoading(true);
     setError(null);
+    const carrier = getIpCarrierType(targetIp, ovhIps, hetznerIps);
+
+    if (carrier.isHetzner) {
+      try {
+        const res = await apiClient.getAdminHetznerStatus(targetIp);
+        const boundFromList = vmByIp.get(targetIp);
+        const effectiveVmMac = res.vmMac || boundFromList?.macAddress || null;
+        const effectiveVirtualMac = res.virtualMac || null;
+        const effectiveMac = res.macAddress || effectiveVirtualMac || effectiveVmMac || null;
+        const isMatched = res.macMatched !== undefined ? res.macMatched : Boolean(
+          effectiveVirtualMac && effectiveVmMac && effectiveVirtualMac.toLowerCase() === effectiveVmMac.toLowerCase()
+        );
+
+        setStatus({
+          ip: targetIp,
+          carrier: 'hetzner',
+          reverse: res.reverse,
+          virtualMac: effectiveVirtualMac,
+          vmMac: effectiveVmMac,
+          macAddress: effectiveMac,
+          macMatched: isMatched,
+          boundVm: res.boundVm || (boundFromList ? {
+            vmid: boundFromList.vmid,
+            name: boundFromList.name,
+            node: boundFromList.node,
+            status: boundFromList.status,
+          } : null),
+          ddos: { state: 'unsupported', mode: 'automatic' },
+          firewall: { enabled: false, state: 'unsupported' },
+          hetznerDetails: res.details || null,
+        });
+        setRdnsValue(res.reverse || '');
+        setActiveIp(targetIp);
+      } catch (err: any) {
+        setError(err.message || 'Failed to query Hetzner Robot status.');
+        setStatus(null);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
       const res = await apiClient.getAdminOvhStatus(targetIp);
       const boundFromList = vmByIp.get(targetIp);
@@ -333,6 +418,7 @@ export const OvhManager: React.FC = () => {
 
       setStatus({
         ip: targetIp,
+        carrier: 'ovh',
         reverse: res.reverse,
         virtualMac: effectiveVirtualMac,
         vmMac: effectiveVmMac,
@@ -369,6 +455,67 @@ export const OvhManager: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Hetzner action handlers
+  const handleUpdateHetznerRdns = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp) return;
+    setRdnsUpdating(true);
+    try {
+      const res = await apiClient.setAdminHetznerRdns(targetIp, rdnsValue.trim());
+      if (res.success) {
+        showToast('success', res.message || 'PTR record updated on Hetzner Robot successfully.');
+        await fetchStatusForIp(targetIp);
+      } else {
+        showToast('error', res.error || 'Failed to update Reverse DNS.');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Network error updating Reverse DNS.');
+    } finally {
+      setRdnsUpdating(false);
+    }
+  };
+
+  const handleGenerateHetznerMac = async (syncToVm = true) => {
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp) return;
+    setHetznerSubmittingMac(true);
+    try {
+      const res = await apiClient.generateAdminHetznerMac(targetIp, syncToVm);
+      if (res.success) {
+        showToast('success', res.message || 'Virtual MAC generated on Hetzner Robot.');
+        await fetchStatusForIp(targetIp);
+        void loadInitialData();
+      } else {
+        showToast('error', res.error || 'Failed to generate Virtual MAC on Hetzner.');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Network error generating Virtual MAC.');
+    } finally {
+      setHetznerSubmittingMac(false);
+    }
+  };
+
+  const handleDeleteHetznerMac = async () => {
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp) return;
+    setHetznerDeletingMac(true);
+    try {
+      const res = await apiClient.deleteAdminHetznerMac(targetIp);
+      if (res.success) {
+        showToast('success', res.message || 'Virtual MAC removed from Hetzner Robot.');
+        await fetchStatusForIp(targetIp);
+        void loadInitialData();
+      } else {
+        showToast('error', res.error || 'Failed to delete Virtual MAC on Hetzner.');
+      }
+    } catch (err: any) {
+      showToast('error', err.message || 'Network error deleting Virtual MAC.');
+    } finally {
+      setHetznerDeletingMac(false);
     }
   };
 
@@ -465,7 +612,7 @@ export const OvhManager: React.FC = () => {
       const res = await apiClient.setAdminOvhDdos(activeIp, nextMode);
       if (res.success) {
         showToast('success', `DDoS mitigation set to ${nextMode.toUpperCase()}.`);
-        setStatus(prev => prev ? { ...prev, ddos: { ...prev.ddos, mode: nextMode } } : null);
+        setStatus(prev => prev ? { ...prev, ddos: { state: prev.ddos.state, mode: nextMode } } : null);
       } else {
         showToast('error', res.error || 'Failed to toggle DDoS mode.');
       }
@@ -519,7 +666,7 @@ export const OvhManager: React.FC = () => {
       const res = await apiClient.toggleAdminOvhFirewall(activeIp, nextEnabled);
       if (res.success) {
         showToast('success', `Edge Firewall ${nextEnabled ? 'enabled' : 'disabled'}.`);
-        setStatus(prev => prev ? { ...prev, firewall: { ...prev.firewall, enabled: nextEnabled } } : null);
+        setStatus(prev => prev ? { ...prev, firewall: { state: prev.firewall.state, enabled: nextEnabled } } : null);
         if (nextEnabled) void fetchFirewallRules(activeIp);
       } else {
         showToast('error', res.error || 'Failed to toggle firewall.');
@@ -833,7 +980,29 @@ export const OvhManager: React.FC = () => {
               className="w-full px-3 py-1.5 text-xs bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white mb-3"
             />
 
-            {/* Filter Tabs */}
+            {/* Carrier Filter Tabs */}
+            <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-2">
+              {[
+                { key: 'all', label: 'All Networks' },
+                { key: 'ovh', label: 'OVHcloud' },
+                { key: 'hetzner', label: 'Hetzner' }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setCarrierFilter(tab.key as any)}
+                  className={`flex-1 py-1 rounded-md text-center transition-colors cursor-pointer ${
+                    carrierFilter === tab.key
+                      ? 'bg-white dark:bg-[#262626] text-[#1a1a1a] dark:text-white shadow-xs font-bold'
+                      : 'hover:text-[#1a1a1a] dark:hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Assignment Filter Tabs */}
             <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-3">
               {(['all', 'assigned', 'free'] as const).map(tab => (
                 <button
@@ -860,6 +1029,7 @@ export const OvhManager: React.FC = () => {
               ) : (
                 filteredHostList.map(item => {
                   const isSelected = activeIp === item.ip;
+                  const ipType = getIpCarrierType(item.ip, ovhIps, hetznerIps);
                   return (
                     <button
                       key={item.ip}
@@ -872,9 +1042,12 @@ export const OvhManager: React.FC = () => {
                       }`}
                     >
                       <div className="min-w-0 pr-2">
-                        <div className="font-mono text-[12px] text-[#1a1a1a] dark:text-white flex items-center gap-1.5">
+                        <div className="font-mono text-[12px] text-[#1a1a1a] dark:text-white flex items-center gap-1.5 flex-wrap">
                           <span>{item.ip}</span>
                           {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" />}
+                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${ipType.badgeClass}`}>
+                            {ipType.shortLabel}
+                          </span>
                         </div>
                         {item.boundVm ? (
                           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -951,6 +1124,15 @@ export const OvhManager: React.FC = () => {
                     <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white px-2.5 py-0.5 rounded bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#313131]">
                       {status.ip}
                     </span>
+                    {(() => {
+                      const ipType = getIpCarrierType(status.ip, ovhIps, hetznerIps);
+                      return (
+                        <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1.5 ${ipType.badgeClass}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${ipType.isOvh ? 'bg-[#16a34a]' : ipType.isHetzner ? 'bg-[#2563eb]' : 'bg-[#9ca3af]'}`} />
+                          {ipType.label}
+                        </span>
+                      );
+                    })()}
                     {status.macAddress || activeVm?.macAddress ? (
                       <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#f3f4f6] dark:bg-[#262626] border border-[#e5e7eb] dark:border-[#333] text-[#1a1a1a] dark:text-white flex items-center gap-1.5" title="Hardware / Virtual MAC Address">
                         <span className="text-[#8a9090]">MAC:</span>
@@ -996,135 +1178,236 @@ export const OvhManager: React.FC = () => {
 
               {/* SUB-TABS */}
               <div className="flex border-b border-[#dedfdf] dark:border-[#262626] px-6 bg-white dark:bg-[#121212] overflow-x-auto text-xs">
-                {[
-                  { key: 'general', label: 'General & rDNS' },
-                  { key: 'vmac', label: `Virtual MAC (${(status.macAddress || activeVm?.macAddress) ? (status.macAddress || activeVm?.macAddress)!.slice(0, 8) + '…' : 'None'})` },
-                  { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
-                  { key: 'game', label: `Game DDoS (${gameRules.length})` },
-                  { key: 'antihack', label: `Anti-Hack ${status.antiHack ? '(!)' : ''}` },
-                ].map(t => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setActiveSubTab(t.key as any)}
-                    className={`py-3 px-4 text-xs font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap cursor-pointer ${
-                      activeSubTab === t.key
-                        ? 'border-[#1a1a1a] text-[#1a1a1a] dark:border-white dark:text-white font-bold'
-                        : 'border-transparent text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+                {status.carrier === 'hetzner' ? (
+                  [
+                    { key: 'general', label: 'General & rDNS' },
+                    { key: 'vmac', label: `Virtual MAC (${(status.macAddress || activeVm?.macAddress) ? (status.macAddress || activeVm?.macAddress)!.slice(0, 8) + '…' : 'None'})` },
+                    { key: 'subnet', label: `Subnets & Routing (${hetznerSubnets.length})` },
+                  ].map(t => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setActiveSubTab(t.key as any)}
+                      className={`py-3 px-4 text-xs font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap cursor-pointer ${
+                        activeSubTab === t.key
+                          ? 'border-[#1a1a1a] text-[#1a1a1a] dark:border-white dark:text-white font-bold'
+                          : 'border-transparent text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))
+                ) : (
+                  [
+                    { key: 'general', label: 'General & rDNS' },
+                    { key: 'vmac', label: `Virtual MAC (${(status.macAddress || activeVm?.macAddress) ? (status.macAddress || activeVm?.macAddress)!.slice(0, 8) + '…' : 'None'})` },
+                    { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
+                    { key: 'game', label: `Game DDoS (${gameRules.length})` },
+                    { key: 'antihack', label: `Anti-Hack ${status.antiHack ? '(!)' : ''}` },
+                  ].map(t => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setActiveSubTab(t.key as any)}
+                      className={`py-3 px-4 text-xs font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap cursor-pointer ${
+                        activeSubTab === t.key
+                          ? 'border-[#1a1a1a] text-[#1a1a1a] dark:border-white dark:text-white font-bold'
+                          : 'border-transparent text-[#656b6b] dark:text-[#a0a0a0] hover:text-[#1a1a1a] dark:hover:text-white'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))
+                )}
               </div>
 
               {/* TAB 1: GENERAL & RDNS */}
               {activeSubTab === 'general' && (
                 <div className="p-6 text-xs flex flex-col gap-6">
-                  {/* Permanent DDoS Mitigation */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
-                    <div>
-                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
-                        Permanent VAC DDoS Mitigation
-                      </h3>
-                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
-                        Forces constant traffic scrubbing at the OVH border. Bypasses the 3-second automatic attack detection threshold.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                        status.ddos.mode === 'permanent'
-                          ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]'
-                          : 'bg-[#f1f1f1] text-[#656b6b] dark:bg-[#262626] dark:text-[#a0a0a0]'
-                      }`}>
-                        {status.ddos.mode === 'permanent' ? 'PERMANENT ACTIVE' : 'AUTOMATIC'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleToggleDdos}
-                        disabled={ddosUpdating}
-                        className={`btn-secondary py-1.5 px-3 text-xs font-semibold cursor-pointer ${
-                          status.ddos.mode === 'permanent' ? '!text-[#dc2626]' : ''
-                        }`}
-                      >
-                        {ddosUpdating ? 'Toggling…' : status.ddos.mode === 'permanent' ? 'Disable Permanent' : 'Enable Permanent'}
-                      </button>
-                    </div>
-                  </div>
+                  {status.carrier === 'hetzner' ? (
+                    <>
+                      {/* Hetzner Server Route Telemetry */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-5 border-b border-[#dedfdf] dark:border-[#262626]">
+                        <div className="p-3.5 rounded-lg border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] block mb-1">
+                            Assigned Server IP
+                          </span>
+                          <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white">
+                            {status.hetznerDetails?.serverIp || 'Main Dedicated Host'}
+                          </span>
+                        </div>
+                        <div className="p-3.5 rounded-lg border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] block mb-1">
+                            Server Reference ID
+                          </span>
+                          <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white">
+                            #{status.hetznerDetails?.serverNumber || 'Direct'}
+                          </span>
+                        </div>
+                        <div className="p-3.5 rounded-lg border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] block mb-1">
+                            Traffic Warning Daemon
+                          </span>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${status.hetznerDetails?.trafficWarnings ? 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]' : 'bg-[#f1f1f1] text-[#656b6b] dark:bg-[#222]'}`}>
+                            {status.hetznerDetails?.trafficWarnings ? 'Active / Monitored' : 'Disabled'}
+                          </span>
+                        </div>
+                        <div className="p-3.5 rounded-lg border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] block mb-1">
+                            Security Lock
+                          </span>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${status.hetznerDetails?.locked ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]' : 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]'}`}>
+                            {status.hetznerDetails?.locked ? 'Locked' : 'Unlocked / Operational'}
+                          </span>
+                        </div>
+                      </div>
 
-                  {/* VAC Auto-Mitigation Timeout Tuning */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
-                    <div>
-                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
-                        VAC Auto-Mitigation Timeout
-                      </h3>
-                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
-                        Duration that traffic remains inside scrubbing centers after an attack subsides before returning to normal routing.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {[
-                        { value: 0, label: '0m (Permanent)', desc: '0 minutes (Permanent scrubbing until attack terminates)' },
-                        { value: 15, label: '15m (Default)', desc: '15 minutes after attack ends' },
-                        { value: 60, label: '1h (60m)', desc: '60 minutes (1 hour) after attack ends' },
-                        { value: 360, label: '6h (360m)', desc: '360 minutes (6 hours) after attack ends' },
-                        { value: 1560, label: '26h (1560m)', desc: '1560 minutes (26 hours) after attack ends' },
-                      ].map(opt => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          title={opt.desc}
-                          onClick={() => handleUpdateMitigationTimeout(opt.value)}
-                          disabled={mitigationUpdating}
-                          className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
-                            mitigationTimeout === opt.value
-                              ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold shadow-sm'
-                              : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                      {/* Hetzner Reverse DNS (PTR Record) */}
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                            Hetzner Reverse DNS (PTR Record)
+                          </h3>
+                          <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
+                            Programmatically update PTR records via Hetzner Robot WebService (<code>POST /rdns/{status.ip}</code>) for email deliverability and hostname validation.
+                          </p>
+                        </div>
 
-                  {/* Reverse DNS (PTR Record) */}
-                  <div className="flex flex-col gap-3">
-                    <div>
-                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
-                        Reverse DNS (PTR Record)
-                      </h3>
-                      <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
-                        Authorize mail deliverability and domain ownership by configuring the PTR record pointing back to your domain.
-                      </p>
-                    </div>
+                        <form onSubmit={handleUpdateHetznerRdns} className="flex flex-col sm:flex-row gap-2 max-w-xl">
+                          <input
+                            type="text"
+                            value={rdnsValue}
+                            onChange={e => setRdnsValue(e.target.value)}
+                            placeholder="e.g. mail.yourdomain.com"
+                            className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white"
+                          />
+                          <button
+                            type="submit"
+                            disabled={rdnsUpdating}
+                            className="btn-primary px-4 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                          >
+                            {rdnsUpdating ? 'Updating…' : 'Save PTR on Hetzner'}
+                          </button>
+                          {status.reverse && (
+                            <button
+                              type="button"
+                              onClick={() => { setRdnsValue(''); }}
+                              className="btn-secondary px-3 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </form>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Permanent DDoS Mitigation */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
+                        <div>
+                          <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                            Permanent VAC DDoS Mitigation
+                          </h3>
+                          <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
+                            Forces constant traffic scrubbing at the OVH border. Bypasses the 3-second automatic attack detection threshold.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                            status.ddos?.mode === 'permanent'
+                              ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]'
+                              : 'bg-[#f1f1f1] text-[#656b6b] dark:bg-[#262626] dark:text-[#a0a0a0]'
+                          }`}>
+                            {status.ddos?.mode === 'permanent' ? 'PERMANENT ACTIVE' : 'AUTOMATIC'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleToggleDdos}
+                            disabled={ddosUpdating}
+                            className={`btn-secondary py-1.5 px-3 text-xs font-semibold cursor-pointer ${
+                              status.ddos?.mode === 'permanent' ? '!text-[#dc2626]' : ''
+                            }`}
+                          >
+                            {ddosUpdating ? 'Toggling…' : status.ddos?.mode === 'permanent' ? 'Disable Permanent' : 'Enable Permanent'}
+                          </button>
+                        </div>
+                      </div>
 
-                    <form onSubmit={handleUpdateRdns} className="flex flex-col sm:flex-row gap-2 max-w-xl">
-                      <input
-                        type="text"
-                        value={rdnsValue}
-                        onChange={e => setRdnsValue(e.target.value)}
-                        placeholder="e.g. node.votioncloud.org"
-                        className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white"
-                      />
-                      <button
-                        type="submit"
-                        disabled={rdnsUpdating}
-                        className="btn-primary px-4 py-2 text-xs font-semibold cursor-pointer shrink-0"
-                      >
-                        {rdnsUpdating ? 'Updating…' : 'Save PTR'}
-                      </button>
-                      {status.reverse && (
-                        <button
-                          type="button"
-                          onClick={() => { setRdnsValue(''); }}
-                          className="btn-secondary px-3 py-2 text-xs font-semibold cursor-pointer shrink-0"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </form>
-                  </div>
+                      {/* VAC Auto-Mitigation Timeout Tuning */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-[#dedfdf] dark:border-[#262626] gap-4">
+                        <div>
+                          <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                            VAC Auto-Mitigation Timeout
+                          </h3>
+                          <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 max-w-lg leading-relaxed">
+                            Duration that traffic remains inside scrubbing centers after an attack subsides before returning to normal routing.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {[
+                            { value: 0, label: '0m (Permanent)', desc: '0 minutes (Permanent scrubbing until attack terminates)' },
+                            { value: 15, label: '15m (Default)', desc: '15 minutes after attack ends' },
+                            { value: 60, label: '1h (60m)', desc: '60 minutes (1 hour) after attack ends' },
+                            { value: 360, label: '6h (360m)', desc: '360 minutes (6 hours) after attack ends' },
+                            { value: 1560, label: '26h (1560m)', desc: '1560 minutes (26 hours) after attack ends' },
+                          ].map(opt => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              title={opt.desc}
+                              onClick={() => handleUpdateMitigationTimeout(opt.value)}
+                              disabled={mitigationUpdating}
+                              className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
+                                mitigationTimeout === opt.value
+                                  ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold shadow-sm'
+                                  : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Reverse DNS (PTR Record) */}
+                      <div className="flex flex-col gap-3">
+                        <div>
+                          <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white">
+                            Reverse DNS (PTR Record)
+                          </h3>
+                          <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5 leading-relaxed">
+                            Authorize mail deliverability and domain ownership by configuring the PTR record pointing back to your domain.
+                          </p>
+                        </div>
+
+                        <form onSubmit={handleUpdateRdns} className="flex flex-col sm:flex-row gap-2 max-w-xl">
+                          <input
+                            type="text"
+                            value={rdnsValue}
+                            onChange={e => setRdnsValue(e.target.value)}
+                            placeholder="e.g. node.votioncloud.org"
+                            className="flex-1 px-3 py-2 text-xs font-mono bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white"
+                          />
+                          <button
+                            type="submit"
+                            disabled={rdnsUpdating}
+                            className="btn-primary px-4 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                          >
+                            {rdnsUpdating ? 'Updating…' : 'Save PTR'}
+                          </button>
+                          {status.reverse && (
+                            <button
+                              type="button"
+                              onClick={() => { setRdnsValue(''); }}
+                              className="btn-secondary px-3 py-2 text-xs font-semibold cursor-pointer shrink-0"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </form>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1133,10 +1416,12 @@ export const OvhManager: React.FC = () => {
                 <div className="p-6 text-xs flex flex-col gap-6">
                   <div>
                     <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white mb-1">
-                      Virtual MAC (vMAC) & Hardware Routing
+                      {status.carrier === 'hetzner' ? 'Hetzner Separate Virtual MAC (vMAC)' : 'Virtual MAC (vMAC) & Hardware Routing'}
                     </h3>
                     <p className="text-[#656b6b] dark:text-[#a0a0a0] leading-relaxed">
-                      OVH hardware border routers enforce MAC address filtering on bridged interfaces (<code>vmbr0</code>). To route traffic to guest VMs without triggering Anti-Hack port security locks, this Failover IP must have an authorized Virtual MAC that matches the VM network interface card (<code>net0</code>).
+                      {status.carrier === 'hetzner'
+                        ? 'Hetzner Robot assigns separate virtual MAC addresses for additional single IPs via PUT /ip/{ip}/mac. When assigned, the guest VM net0 interface should use this virtual MAC for layer-2 bridging.'
+                        : 'OVH hardware border routers enforce MAC address filtering on bridged interfaces (vmbr0). To route traffic to guest VMs without triggering Anti-Hack port security locks, this Failover IP must have an authorized Virtual MAC that matches the VM network interface card (net0).'}
                     </p>
                   </div>
 
@@ -1150,19 +1435,19 @@ export const OvhManager: React.FC = () => {
                         {status.macAddress || activeVm?.macAddress || 'None'}
                       </p>
                       <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
-                        {status.macMatched ? 'Synchronized across OVH & Proxmox' : (status.macAddress || activeVm?.macAddress) ? 'Active Interface Address' : 'No MAC allocated'}
+                        {status.macMatched ? 'Synchronized with Proxmox net0' : (status.macAddress || activeVm?.macAddress) ? 'Active Interface Address' : 'No MAC allocated'}
                       </span>
                     </div>
 
                     <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717]">
                       <p className="text-[11px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] mb-1">
-                        OVH Virtual MAC (vMAC)
+                        {status.carrier === 'hetzner' ? 'Hetzner Separate MAC' : 'OVH Virtual MAC (vMAC)'}
                       </p>
                       <p className="font-mono text-base font-bold text-[#1a1a1a] dark:text-white">
-                        {status.virtualMac || 'Not Created on OVH'}
+                        {status.virtualMac || (status.carrier === 'hetzner' ? 'None Generated' : 'Not Created on OVH')}
                       </p>
                       <span className="text-[10px] text-[#656b6b] dark:text-[#888] mt-1 block">
-                        {status.serviceName ? `Dedicated Server: ${status.serviceName}` : 'OVH dedicated routing layer'}
+                        {status.carrier === 'hetzner' ? 'Hetzner Robot WebService' : (status.serviceName ? `Dedicated Server: ${status.serviceName}` : 'OVH dedicated routing layer')}
                       </span>
                     </div>
 
@@ -1179,96 +1464,198 @@ export const OvhManager: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Sync Status Alert */}
-                  {status.macMatched ? (
-                    <div className="p-4 rounded-xl border border-[#bbf7d0] dark:border-[#166534] bg-[#f0fdf4] dark:bg-[#052e16] text-[#166534] dark:text-[#86efac] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">✓</span>
+                  {/* Hetzner-specific MAC management controls */}
+                  {status.carrier === 'hetzner' ? (
+                    <div className="p-5 border border-[#dedfdf] dark:border-[#262626] rounded-xl bg-[#fbfaf9] dark:bg-[#171717] flex flex-col gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div>
-                          <p className="font-bold text-xs">Virtual MAC Fully Synchronized</p>
-                          <p className="text-[11px] opacity-90">OVH router and Proxmox VM net0 interface share the exact same hardware address ({status.macAddress || activeVm?.macAddress}). Network traffic is fully optimized.</p>
+                          <h4 className="font-bold text-sm text-[#1a1a1a] dark:text-white">Generate / Provision Separate Virtual MAC</h4>
+                          <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5">
+                            Calls Hetzner Robot API <code>PUT /ip/{status.ip}/mac</code> to generate an authentic virtual MAC (e.g. <code>00:50:56:xx:xx:xx</code>).
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateHetznerMac(syncToVmChecked)}
+                            disabled={hetznerSubmittingMac}
+                            className="btn-primary py-2 px-4 text-xs font-semibold cursor-pointer"
+                          >
+                            {hetznerSubmittingMac ? 'Generating on Hetzner…' : 'Generate Virtual MAC on Hetzner →'}
+                          </button>
+                          {status.virtualMac && (
+                            <button
+                              type="button"
+                              onClick={handleDeleteHetznerMac}
+                              disabled={hetznerDeletingMac}
+                              className="btn-secondary py-2 px-3 text-xs font-semibold !text-[#dc2626] cursor-pointer"
+                            >
+                              {hetznerDeletingMac ? 'Deleting…' : 'Delete vMAC'}
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ) : status.virtualMac && (status.vmMac || activeVm?.macAddress) && !status.macMatched ? (
-                    <div className="p-4 rounded-xl border border-[#fed7aa] dark:border-[#9a3412] bg-[#fff7ed] dark:bg-[#2c1206] text-[#9a3412] dark:text-[#fdba74] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">⚠️</span>
-                        <div>
-                          <p className="font-bold text-xs">MAC Mismatch Detected</p>
-                          <p className="text-[11px] opacity-90">OVH vMAC is {status.virtualMac}, but Proxmox VM net0 has {status.vmMac || activeVm?.macAddress}. Packets may be dropped by OVH border security.</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCreateMac(true)}
-                        disabled={macSubmitting}
-                        className="px-3 py-1.5 bg-[#9a3412] text-white text-xs font-semibold rounded-lg hover:bg-[#7c2d12] cursor-pointer shrink-0"
-                      >
-                        {macSubmitting ? 'Syncing...' : 'Sync to VM net0 →'}
-                      </button>
-                    </div>
-                  ) : !status.virtualMac && (status.vmMac || activeVm?.macAddress) ? (
-                    <div className="p-4 rounded-xl border border-[#bae6fd] dark:border-[#0369a1] bg-[#f0f9ff] dark:bg-[#082f49] text-[#0369a1] dark:text-[#7dd3fc] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">ℹ️</span>
-                        <div>
-                          <p className="font-bold text-xs">vMAC Registration Recommended</p>
-                          <p className="text-[11px] opacity-90">Guest VM has interface MAC ({status.vmMac || activeVm?.macAddress}), but no Virtual MAC is registered on OVH for {status.ip}. Register it on OVH to ensure border router authorization.</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCreateMac(false)}
-                        disabled={macSubmitting}
-                        className="px-3 py-1.5 bg-[#0284c7] text-white text-xs font-semibold rounded-lg hover:bg-[#0369a1] cursor-pointer shrink-0"
-                      >
-                        {macSubmitting ? 'Registering...' : 'Register on OVH →'}
-                      </button>
-                    </div>
-                  ) : null}
 
-                  {/* Action Controls */}
-                  <div className="p-5 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col gap-4">
-                    <h4 className="font-bold text-xs text-[#1a1a1a] dark:text-white uppercase tracking-wider">
-                      Virtual MAC Controls
-                    </h4>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={() => handleCreateMac(syncToVmChecked)}
-                        disabled={macSubmitting}
-                        className="px-4 py-2 bg-[#1a1a1a] dark:bg-white text-white dark:text-[#1a1a1a] font-semibold text-xs rounded-lg hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        <span>{macSubmitting ? '↻' : '✨'}</span>
-                        {status.macAddress ? 'Re-Apply Virtual MAC' : 'Create Virtual MAC'}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleResetMac(syncToVmChecked)}
-                        disabled={macSubmitting}
-                        className="px-4 py-2 bg-white dark:bg-[#222] border border-[#dedfdf] dark:border-[#333] text-[#dc2626] dark:text-[#ef4444] font-semibold text-xs rounded-lg hover:bg-[#fef2f2] dark:hover:bg-[#2c0b0e] transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        <span>{macSubmitting ? '↻' : '⟳'}</span>
-                        Reset & Generate New MAC ID
-                      </button>
-                    </div>
-
-                    <div className="pt-2 border-t border-[#dedfdf] dark:border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-[#656b6b] dark:text-[#a0a0a0]">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className="flex items-center gap-2 text-xs text-[#1a1a1a] dark:text-white cursor-pointer select-none">
                         <input
                           type="checkbox"
                           checked={syncToVmChecked}
                           onChange={e => setSyncToVmChecked(e.target.checked)}
-                          className="rounded border-[#dedfdf] accent-[#2563eb]"
+                          className="accent-[#2563eb] w-4 h-4 rounded"
                         />
-                        <span className="font-medium text-[#1a1a1a] dark:text-white">
-                          Automatically synchronize new MAC address to bound Proxmox VM (net0 interface)
-                        </span>
+                        <span>Automatically apply and sync generated virtual MAC to bound Proxmox VM (net0 interface)</span>
                       </label>
                     </div>
+                  ) : (
+                    <>
+                      {/* Sync Status Alert */}
+                      {status.macMatched ? (
+                        <div className="p-4 rounded-xl border border-[#bbf7d0] dark:border-[#166534] bg-[#f0fdf4] dark:bg-[#052e16] text-[#166534] dark:text-[#86efac] flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">✓</span>
+                            <div>
+                              <p className="font-bold text-xs">Virtual MAC Fully Synchronized</p>
+                              <p className="text-[11px] opacity-90">OVH router and Proxmox VM net0 interface share the exact same hardware address ({status.macAddress || activeVm?.macAddress}). Network traffic is fully optimized.</p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : status.virtualMac && (status.vmMac || activeVm?.macAddress) && !status.macMatched ? (
+                        <div className="p-4 rounded-xl border border-[#fed7aa] dark:border-[#9a3412] bg-[#fff7ed] dark:bg-[#2c1206] text-[#9a3412] dark:text-[#fdba74] flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">⚠️</span>
+                            <div>
+                              <p className="font-bold text-xs">MAC Mismatch Detected</p>
+                              <p className="text-[11px] opacity-90">OVH vMAC is {status.virtualMac}, but Proxmox VM net0 has {status.vmMac || activeVm?.macAddress}. Packets may be dropped by OVH border security.</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleCreateMac(true)}
+                            disabled={macSubmitting}
+                            className="px-3 py-1.5 bg-[#9a3412] text-white text-xs font-semibold rounded-lg hover:bg-[#7c2d12] cursor-pointer shrink-0"
+                          >
+                            {macSubmitting ? 'Syncing...' : 'Sync to VM net0 →'}
+                          </button>
+                        </div>
+                      ) : !status.virtualMac && (status.vmMac || activeVm?.macAddress) ? (
+                        <div className="p-4 rounded-xl border border-[#bae6fd] dark:border-[#0369a1] bg-[#f0f9ff] dark:bg-[#082f49] text-[#0369a1] dark:text-[#7dd3fc] flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">ℹ️</span>
+                            <div>
+                              <p className="font-bold text-xs">vMAC Registration Recommended</p>
+                              <p className="text-[11px] opacity-90">Guest VM has interface MAC ({status.vmMac || activeVm?.macAddress}), but no Virtual MAC is registered on OVH for {status.ip}. Register it on OVH to ensure border router authorization.</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setCustomMacInput(status.vmMac || activeVm?.macAddress || ''); handleCreateMac(false); }}
+                            disabled={macSubmitting}
+                            className="px-3 py-1.5 bg-[#0284c7] text-white text-xs font-semibold rounded-lg hover:bg-[#0369a1] cursor-pointer shrink-0"
+                          >
+                            {macSubmitting ? 'Registering...' : 'Register Existing MAC on OVH →'}
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {/* OVH vMAC Actions */}
+                      <div className="p-5 border border-[#dedfdf] dark:border-[#262626] rounded-xl bg-[#fbfaf9] dark:bg-[#171717] flex flex-col gap-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <h4 className="font-bold text-sm text-[#1a1a1a] dark:text-white">Generate / Assign Virtual MAC</h4>
+                            <p className="text-[#656b6b] dark:text-[#a0a0a0] text-xs mt-0.5">
+                              OVH will allocate a virtual MAC from its hardware block (e.g. <code>02:00:00:xx:xx:xx</code>) and route layer-2 frames to your host.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => handleCreateMac(syncToVmChecked)}
+                              disabled={macSubmitting}
+                              className="btn-primary py-2 px-4 text-xs font-semibold cursor-pointer"
+                            >
+                              {macSubmitting ? 'Creating...' : 'Auto-Generate OVH vMAC →'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowMacModal('create')}
+                              disabled={macSubmitting}
+                              className="btn-secondary py-2 px-3 text-xs font-semibold cursor-pointer"
+                            >
+                              Custom MAC…
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-[#dedfdf] dark:border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-[#656b6b] dark:text-[#a0a0a0]">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={syncToVmChecked}
+                              onChange={e => setSyncToVmChecked(e.target.checked)}
+                              className="rounded border-[#dedfdf] accent-[#2563eb]"
+                            />
+                            <span className="font-medium text-[#1a1a1a] dark:text-white">
+                              Automatically synchronize new MAC address to bound Proxmox VM (net0 interface)
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* TAB: HETZNER SUBNETS & ROUTING */}
+              {activeSubTab === 'subnet' && (
+                <div className="p-6 text-xs flex flex-col gap-5">
+                  <div>
+                    <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white mb-1">
+                      Hetzner Discovered Subnets & Routed Blocks
+                    </h3>
+                    <p className="text-[#656b6b] dark:text-[#a0a0a0] leading-relaxed">
+                      Subnets assigned to your Hetzner Robot account discovered via <code>GET /subnet</code>.
+                    </p>
+                  </div>
+
+                  <div className="border border-[#dedfdf] dark:border-[#262626] rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#fbfaf9] dark:bg-[#171717] border-b border-[#dedfdf] dark:border-[#262626] font-bold text-[#656b6b] dark:text-[#a0a0a0] uppercase text-[10.5px]">
+                        <tr>
+                          <th className="p-3">Subnet Address</th>
+                          <th className="p-3">CIDR Mask</th>
+                          <th className="p-3">Gateway / Server IP</th>
+                          <th className="p-3">Failover Routed</th>
+                          <th className="p-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#dedfdf] dark:divide-[#262626] font-mono">
+                        {hetznerSubnets.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="p-6 text-center text-xs text-[#656b6b] font-sans">
+                              No routed subnets assigned on this Hetzner Robot account.
+                            </td>
+                          </tr>
+                        ) : (
+                          hetznerSubnets.map((sub, idx) => (
+                            <tr key={idx} className="hover:bg-[#fafafa] dark:hover:bg-[#181818]">
+                              <td className="p-3 font-bold text-[#1a1a1a] dark:text-white">{sub.ip}</td>
+                              <td className="p-3">/{sub.mask}</td>
+                              <td className="p-3 text-[#2563eb]">{sub.serverIp || '—'}</td>
+                              <td className="p-3 font-sans">
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${sub.failover ? 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]' : 'bg-[#f1f1f1] text-[#656b6b] dark:bg-[#222]'}`}>
+                                  {sub.failover ? 'Failover' : 'Static'}
+                                </span>
+                              </td>
+                              <td className="p-3 font-sans">
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${sub.locked ? 'bg-[#fef2f2] text-[#dc2626] dark:bg-[#450a0a]' : 'bg-[#f0fdf4] text-[#16a34a] dark:bg-[#052e16]'}`}>
+                                  {sub.locked ? 'Locked' : 'Active'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}

@@ -12,6 +12,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '../services/apiClient';
+import { getIpCarrierType, isIpInSubnets } from '../utils/ipUtils';
 
 // ---------------------------------------------------------------------------
 // Types (aligned with server/adminVmFleet.ts + db/database.ts)
@@ -256,6 +257,8 @@ export const AdminVMFleet: React.FC = () => {
   const [locationFilter, setLocationFilter] = useState('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'bad' | 'info' } | null>(null);
+  const [ovhIps, setOvhIps] = useState<string[]>([]);
+  const [hetznerIps, setHetznerIps] = useState<string[]>([]);
 
   // Modals
   const [editVM, setEditVM] = useState<FleetVM | null>(null);
@@ -362,6 +365,13 @@ export const AdminVMFleet: React.FC = () => {
         }));
         setNodes(mapped);
       }
+
+      // Fetch OVH and Hetzner carrier subnets for IP badge decoration
+      void apiClient.getAdminOvhIps().then(setOvhIps).catch(() => {});
+      void apiClient.getAdminHetznerIps().then(h => {
+        const l = [...(h.ips || []).map((x: any) => `${x.ip}/32`), ...(h.subnets || []).map((x: any) => `${x.ip}/${x.mask}`)];
+        setHetznerIps(l);
+      }).catch(() => {});
     } catch (e: any) {
       if (!isBackground) flash('Network error loading fleet', 'bad');
     } finally {
@@ -730,9 +740,22 @@ export const AdminVMFleet: React.FC = () => {
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-1">
                                 <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
-                                <span className="text-[11px] font-medium text-[#a7aaaa]">
-                                  {v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
-                                  {v.ipAddress ? ` • ${v.ipAddress}` : ''}
+                                <span className="text-[11px] font-medium text-[#a7aaaa] flex items-center gap-1.5 flex-wrap">
+                                  <span>{v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}</span>
+                                  {v.ipAddress && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="font-mono text-[#d4d4d8]">{v.ipAddress}</span>
+                                      {(() => {
+                                        const ipType = getIpCarrierType(v.ipAddress, ovhIps, hetznerIps);
+                                        return (
+                                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${ipType.badgeClass}`}>
+                                            {ipType.shortLabel}
+                                          </span>
+                                        );
+                                      })()}
+                                    </>
+                                  )}
                                 </span>
                               </div>
                             </td>
@@ -864,7 +887,7 @@ export const AdminVMFleet: React.FC = () => {
       </div>
 
       {/* Edit VM modal */}
-      {editVM && <EditVMModal vm={editVM} onClose={() => setEditVM(null)} onSaved={async () => { setEditVM(null); await fetchFleet(); flash('Server updated', 'ok'); }} apiHeaders={apiHeaders} base={base} flash={flash} />}
+      {editVM && <EditVMModal vm={editVM} ovhIps={ovhIps} hetznerIps={hetznerIps} onClose={() => setEditVM(null)} onSaved={async () => { setEditVM(null); await fetchFleet(); flash('Server updated', 'ok'); }} apiHeaders={apiHeaders} base={base} flash={flash} />}
 
       
       {/* Assign existing VM modal */}
@@ -913,12 +936,14 @@ const ActionButton: React.FC<{
 // ---------------------------------------------------------------------------
 const EditVMModal: React.FC<{
   vm: FleetVM;
+  ovhIps?: string[];
+  hetznerIps?: string[];
   onClose: () => void;
   onSaved: () => void;
   apiHeaders: () => Record<string, string>;
   base: string;
   flash: (text: string, tone: 'ok' | 'bad' | 'info') => void;
-}> = ({ vm, onClose, onSaved, apiHeaders, base, flash }) => {
+}> = ({ vm, ovhIps = [], hetznerIps = [], onClose, onSaved, apiHeaders, base, flash }) => {
   const [name, setName] = useState(vm.name);
   const [os, setOs] = useState(vm.os === '—' ? 'Ubuntu 24.04 LTS' : vm.os);
   const [ipAddress, setIpAddress] = useState(vm.ipAddress || '');
@@ -971,7 +996,26 @@ const EditVMModal: React.FC<{
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Server name"><input style={modalInputCls} value={name} onChange={e => setName(e.target.value)} /></Field>
         <Field label="Operating system"><input style={modalInputCls} value={os} onChange={e => setOs(e.target.value)} /></Field>
-        <Field label="IP address (optional)"><input style={modalInputCls} value={ipAddress} onChange={e => setIpAddress(e.target.value)} placeholder="e.g. 192.0.2.10" /></Field>
+        <Field label="IP address (optional)">
+          <input style={modalInputCls} value={ipAddress} onChange={e => setIpAddress(e.target.value)} placeholder="e.g. 192.0.2.10" />
+          {ipAddress.trim() && (
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+              {(() => {
+                const ipType = getIpCarrierType(ipAddress.trim(), ovhIps, hetznerIps);
+                return (
+                  <>
+                    <span className={`px-2 py-0.5 rounded font-mono text-[10px] border ${ipType.badgeClass}`}>
+                      {ipType.label}
+                    </span>
+                    <span className="text-[#a7aaaa] text-[10.5px]">
+                      {ipType.isOvh ? 'OVH Hardware Anti-DDoS & vMAC ready' : ipType.isHetzner ? 'Hetzner Robot (vMAC & PTR supported)' : 'External Network Carrier'}
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </Field>
         <Field label="Expiry extension (days)"><input type="number" style={modalInputCls} value={expiryDays} onChange={e => setExpiryDays(e.target.value)} placeholder="30" /></Field>
         <Field label="CPU cores"><input type="number" style={modalInputCls} value={cpus} onChange={e => setCpus(e.target.value)} /></Field>
         <Field label="RAM (GB)"><input type="number" style={modalInputCls} value={memoryGb} onChange={e => setMemoryGb(e.target.value)} /></Field>

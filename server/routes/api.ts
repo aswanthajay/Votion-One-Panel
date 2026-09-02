@@ -19,6 +19,7 @@ import { proxmoxApi, getVMNetworkMac, updateVMNetworkMac, generateMacAddress } f
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { emailService } from '../services/email.js';
 import { ovhService } from '../services/ovh.js';
+import { hetznerService } from '../services/hetzner.js';
 import { generateMetricsReportPdf } from '../services/reportPdf.js';
 import { checkDbHealth } from '../services/databaseHealth.js';
 import { fetchProxmoxTlsFingerprint, proxmoxFetch } from '../services/proxmoxHttp.js';
@@ -1875,6 +1876,61 @@ apiRouter.post('/admin/settings/smtp/test', async (req, res) => {
     }
   });
 
+  apiRouter.get('/admin/settings/hetzner', async (req, res) => {
+    try {
+      const config = await dbService.getSystemSetting('hetzner_config');
+      if (config) {
+        res.json({
+          success: true,
+          data: {
+            enabled: Boolean(config.enabled),
+            user: config.user || '',
+            password: config.password ? '********' : '',
+          }
+        });
+      } else {
+        res.json({
+          success: true,
+          data: { enabled: false, user: '', password: '' }
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  apiRouter.post('/admin/settings/hetzner', async (req, res) => {
+    try {
+      const input = req.body;
+      const current = await dbService.getSystemSetting('hetzner_config');
+      const config = {
+        enabled: Boolean(input.enabled),
+        user: String(input.user || '').trim(),
+        password: input.password === '********' ? (current?.password || '') : String(input.password || '').trim(),
+      };
+      await dbService.updateSystemSetting('hetzner_config', config);
+      if (typeof hetznerService.loadConfig === 'function') {
+        await hetznerService.loadConfig();
+      }
+      await dbService.logAudit(req.authUser?.email || 'unknown', 'UPDATE_HETZNER_CONFIG', 'system', 'Hetzner Robot configuration updated');
+      res.json({ success: true, message: 'Hetzner Robot configuration saved and applied' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  apiRouter.post('/admin/settings/hetzner/test', async (req, res) => {
+    try {
+      if (!hetznerService.isEnabled()) {
+        return res.status(503).json({ success: false, error: 'Hetzner service is disabled. Save an enabled Hetzner configuration first.' });
+      }
+      const ips = await hetznerService.getIps();
+      res.json({ success: true, message: `Hetzner Robot authenticated successfully! Discovered ${ips.length} assigned single IP(s).` });
+    } catch (err: any) {
+      res.status(502).json({ success: false, error: `Hetzner Robot test failed: ${err.message}` });
+    }
+  });
+
   // BILLING CONTROL PLANE
 const isBillingAdmin = (req: any) => ['admin', 'administrator'].includes(String(req.authUser?.role || '').toLowerCase());
 const billingActor = (req: any) => String(req.authUser?.email || '').toLowerCase().trim();
@@ -2669,6 +2725,153 @@ apiRouter.delete('/admin/ovh/game-ddos/:ruleId', requireOvhEnabledAdmin, async (
     }
     await ovhService.deleteGameDdosRule(ip, ruleId);
     res.json({ success: true, message: 'Game DDoS port profile rule deleted successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// ===========================================================================
+// HETZNER ROBOT ADMIN CONTROLS (vMAC, rDNS, IPs, Subnets - No Ordering/Buying APIs)
+// ===========================================================================
+const requireHetznerEnabledAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  const userRole = (req as any).authUser?.role;
+  if (!['admin', 'administrator', 'moderator'].includes(userRole)) {
+    return res.status(403).json({ success: false, error: 'Unauthorized. Admin access required.' });
+  }
+  if (!hetznerService.isEnabled()) {
+    return res.status(503).json({ success: false, error: 'Hetzner Robot API integration is not enabled or configured' });
+  }
+  next();
+};
+
+apiRouter.get(['/admin/hetzner/ips', '/admin/hetzner/ip'], requireHetznerEnabledAdmin, async (req, res) => {
+  try {
+    const [ips, subnets] = await Promise.all([
+      hetznerService.getIps().catch(() => []),
+      hetznerService.getSubnets().catch(() => []),
+    ]);
+    res.json({ success: true, data: { ips, subnets } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/admin/hetzner/status', requireHetznerEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const cleanIp = ip.split('/')[0].trim();
+
+    const vmRes = await pgPool.query(
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address, status FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 OR split_part(trim(ip_address), \'/\', 1) = $1 LIMIT 1',
+      [cleanIp, `${cleanIp}/%`]
+    );
+    const boundVm = vmRes.rows[0] || null;
+
+    const [reverse, virtualMac, ipDetails, liveVmMac] = await Promise.all([
+      hetznerService.getReverse(cleanIp).catch(() => null),
+      hetznerService.getVirtualMac(cleanIp).catch(() => null),
+      hetznerService.getIpDetails(cleanIp).catch(() => null),
+      (async () => {
+        if (!boundVm || !boundVm.proxmox_connection_id) return boundVm?.mac_address || null;
+        try {
+          const conn = await dbService.getProxmoxConnectionCredentials(boundVm.proxmox_connection_id);
+          if (!conn) return boundVm.mac_address || null;
+          const liveMac = await getVMNetworkMac(conn, boundVm.node, boundVm.vmid, false);
+          if (liveMac && liveMac !== boundVm.mac_address) {
+            await dbService.updateVmMacAddress(boundVm.vmid, boundVm.proxmox_connection_id, liveMac);
+          }
+          return liveMac || boundVm.mac_address || null;
+        } catch {
+          return boundVm.mac_address || null;
+        }
+      })(),
+    ]);
+
+    const vmMac = liveVmMac || boundVm?.mac_address || null;
+    const effectiveMac = virtualMac || vmMac || null;
+    const macMatched = Boolean(virtualMac && vmMac && virtualMac.toLowerCase() === vmMac.toLowerCase());
+
+    res.json({
+      success: true,
+      data: {
+        ip: cleanIp,
+        reverse,
+        virtualMac,
+        vmMac,
+        macAddress: effectiveMac,
+        macMatched,
+        details: ipDetails,
+        boundVm: boundVm ? {
+          vmid: boundVm.vmid,
+          name: boundVm.vm_name,
+          node: boundVm.node,
+          status: boundVm.status,
+          proxmoxConnectionId: boundVm.proxmox_connection_id,
+        } : null,
+      }
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/hetzner/rdns', requireHetznerEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const { reverse } = req.body;
+    await hetznerService.setReverse(ip, String(reverse || '').trim());
+    res.json({ success: true, message: 'Reverse DNS updated on Hetzner Robot successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/hetzner/mac/generate', requireHetznerEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    const syncToVm = Boolean(req.body.syncToVm !== false);
+
+    const createdMac = await hetznerService.generateVirtualMac(ip);
+
+    // Look up bound VM
+    const cleanIp = ip.split('/')[0].trim();
+    const vmRes = await pgPool.query(
+      'SELECT vmid, vm_name, node, proxmox_connection_id, mac_address FROM vms WHERE ip_address = $1 OR ip_address LIKE $2 OR split_part(trim(ip_address), \'/\', 1) = $1 LIMIT 1',
+      [cleanIp, `${cleanIp}/%`]
+    );
+    const boundVm = vmRes.rows[0] || null;
+
+    if (syncToVm && boundVm && boundVm.proxmox_connection_id) {
+      try {
+        const conn = await dbService.getProxmoxConnectionCredentials(boundVm.proxmox_connection_id);
+        if (conn) {
+          const updateRes = await updateVMNetworkMac(conn, boundVm.node, boundVm.vmid, false, createdMac);
+          if (updateRes.success) {
+            await dbService.updateVmMacAddress(boundVm.vmid, boundVm.proxmox_connection_id, createdMac);
+          }
+        }
+      } catch (syncErr) {
+        console.warn('[HETZNER MAC SYNC] Proxmox net0 MAC update warning:', syncErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      macAddress: createdMac,
+      message: syncToVm && boundVm
+        ? `Virtual MAC ${createdMac} generated on Hetzner and synced to VM ${boundVm.vm_name} (net0) successfully.`
+        : `Virtual MAC ${createdMac} generated on Hetzner Robot successfully.`
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.post('/admin/hetzner/mac/delete', requireHetznerEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(req.body.ip);
+    await hetznerService.deleteVirtualMac(ip);
+    res.json({ success: true, message: 'Virtual MAC removed from Hetzner Robot successfully' });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }

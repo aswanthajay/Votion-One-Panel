@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { ovhService } from '../services/ovh.js';
+import { hetznerService } from '../services/hetzner.js';
 import { dbService } from '../db/database.js';
 import { emailService } from '../services/email.js';
 import { hasTeamAccessScope, isDelegatedTeamAccessScope, type TeamAccessScope } from '../services/teamAccessPolicy.js';
-import { proxmoxApi } from '../services/proxmox.js';
+import { proxmoxApi, updateVMNetworkMac } from '../services/proxmox.js';
 import { ProxmoxService } from '../services/proxmoxService.js';
 import { requireAuth } from '../middleware.js';
 import { proxmoxFetch } from '../services/proxmoxHttp.js';
@@ -1299,3 +1300,101 @@ clientRouter.post('/vms/:vmid/password', requireClientVmScope('full'), async (re
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ===========================================================================
+// HETZNER ROBOT CLIENT VM ROUTES (vMAC, rDNS, Network Status)
+// ===========================================================================
+const requireHetznerEnabled = (_req: any, res: any, next: any) => {
+  if (!hetznerService.isEnabled()) {
+    return res.status(503).json({ success: false, error: 'Hetzner Robot API integration is not enabled or configured by administrator' });
+  }
+  next();
+};
+
+clientRouter.get('/vms/:vmid/hetzner/status', requireClientVmScope('readonly'), requireHetznerEnabled, async (req: any, res) => {
+  try {
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const [reverse, virtualMac, details] = await Promise.all([
+      hetznerService.getReverse(ip).catch(() => null),
+      hetznerService.getVirtualMac(ip).catch(() => null),
+      hetznerService.getIpDetails(ip).catch(() => null),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        ip,
+        reverse,
+        virtualMac,
+        details,
+        vmMac: vm.mac_address || null,
+      }
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/hetzner/rdns', requireClientVmScope('full'), requireHetznerEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to modify Hetzner network configurations.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const { reverse } = req.body;
+    await hetznerService.setReverse(ip, String(reverse || '').trim());
+    res.json({ success: true, message: 'Reverse DNS update request submitted to Hetzner Robot successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/hetzner/mac/generate', requireClientVmScope('full'), requireHetznerEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to generate Hetzner Virtual MACs.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    const createdMac = await hetznerService.generateVirtualMac(ip);
+
+    if (vm.proxmox_connection_id) {
+      try {
+        const conn = await getConnectionForVm(vm);
+        const updateRes = await updateVMNetworkMac(conn, vm.node, vm.vmid, false, createdMac);
+        if (updateRes.success) {
+          await dbService.updateVmMacAddress(vm.vmid, vm.proxmox_connection_id, createdMac);
+        }
+      } catch (syncErr) {
+        console.warn('[HETZNER MAC SYNC] Proxmox VM net0 sync error:', syncErr);
+      }
+    }
+
+    res.json({
+      success: true,
+      macAddress: createdMac,
+      message: `Virtual MAC ${createdMac} generated and applied to VM net0 successfully.`
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+clientRouter.post('/vms/:vmid/hetzner/mac/delete', requireClientVmScope('full'), requireHetznerEnabled, async (req: any, res) => {
+  try {
+    const isAdmin = ['administrator', 'admin', 'moderator'].includes(req.authUser?.role || '');
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only administrators are authorized to delete Hetzner Virtual MACs.' });
+    }
+    const vm = req.authorizedVm;
+    const ip = await getVmIp(vm);
+    await hetznerService.deleteVirtualMac(ip);
+    res.json({ success: true, message: 'Virtual MAC removed from Hetzner Robot successfully' });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+

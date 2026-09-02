@@ -48,7 +48,7 @@ const friendlyKey = (key: string): string => {
 };
 
 export const SystemSettings: React.FC = () => {
-  const [tab, setTab] = useState<'platform' | 'smtp' | 'templates' | 'notifications' | 'ovh'>('platform');
+  const [tab, setTab] = useState<'platform' | 'smtp' | 'templates' | 'notifications' | 'ovh' | 'hetzner'>('platform');
   const [ovhEnabled, setOvhEnabled] = useState(false);
   const [ovhEndpoint, setOvhEndpoint] = useState('ovh-eu');
   const [ovhAppKey, setOvhAppKey] = useState('');
@@ -57,6 +57,14 @@ export const SystemSettings: React.FC = () => {
   const [ovhSaving, setOvhSaving] = useState(false);
   const [ovhTesting, setOvhTesting] = useState(false);
   const [ovhGeneratingKey, setOvhGeneratingKey] = useState(false);
+
+  // Hetzner Robot
+  const [hetznerEnabled, setHetznerEnabled] = useState(false);
+  const [hetznerUser, setHetznerUser] = useState('');
+  const [hetznerPassword, setHetznerPassword] = useState('');
+  const [hetznerSaving, setHetznerSaving] = useState(false);
+  const [hetznerTesting, setHetznerTesting] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -102,6 +110,22 @@ export const SystemSettings: React.FC = () => {
         if (tpl.success) setTemplates(tpl.data || []);
         const n = await apiClient.getMailNotifications();
         if (n.success) setNotifs(n.data || {});
+
+        const ovhConf = await apiClient.getOvhSettings().catch(() => null);
+        if (ovhConf?.data) {
+          setOvhEnabled(Boolean(ovhConf.data.enabled));
+          setOvhEndpoint(ovhConf.data.endpoint || 'ovh-eu');
+          setOvhAppKey(ovhConf.data.applicationKey || '');
+          setOvhAppSecret(ovhConf.data.applicationSecret || '');
+          setOvhConsumerKey(ovhConf.data.consumerKey || '');
+        }
+
+        const hetzConf = await apiClient.getHetznerConfig().catch(() => null);
+        if (hetzConf) {
+          setHetznerEnabled(Boolean(hetzConf.enabled));
+          setHetznerUser(hetzConf.user || '');
+          setHetznerPassword(hetzConf.password || '');
+        }
       } catch (err) {
         console.error('Failed to load settings', err);
       } finally {
@@ -244,6 +268,42 @@ export const SystemSettings: React.FC = () => {
       }
     };
 
+    const handleSaveHetzner = async () => {
+      setHetznerSaving(true);
+      try {
+        const res = await apiClient.saveHetznerConfig({
+          enabled: hetznerEnabled,
+          user: hetznerUser,
+          password: hetznerPassword,
+        });
+        if (res.success) {
+          show('success', 'Hetzner Robot configuration saved and applied.');
+        } else {
+          show('error', res.error || 'Failed to save Hetzner settings.');
+        }
+      } catch {
+        show('error', 'Network error saving Hetzner configuration.');
+      } finally {
+        setHetznerSaving(false);
+      }
+    };
+
+    const handleTestHetzner = async () => {
+      setHetznerTesting(true);
+      try {
+        const res = await apiClient.testHetznerConnection();
+        if (res.success) {
+          show('success', res.message || 'Hetzner connection test succeeded!');
+        } else {
+          show('error', res.error || 'Hetzner connection test failed.');
+        }
+      } catch {
+        show('error', 'Network error during Hetzner connection test.');
+      } finally {
+        setHetznerTesting(false);
+      }
+    };
+
     const handleGenerateOvhKey = async () => {
       if (!ovhAppKey) {
         show('error', 'Please enter your Application Key first.');
@@ -294,6 +354,7 @@ export const SystemSettings: React.FC = () => {
     { key: 'templates', label: 'Mail Templates' },
     { key: 'notifications', label: 'Notifications' },
     { key: 'ovh', label: 'OVH Cloud API' },
+    { key: 'hetzner', label: 'Hetzner Robot API' },
   ] as const;
 
   return (
@@ -766,6 +827,75 @@ export const SystemSettings: React.FC = () => {
                 className="px-6 py-2 bg-[#1a1a1a] text-white font-semibold text-sm rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-60"
               >
                 {ovhSaving ? 'Saving...' : 'Save Configuration'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= HETZNER ROBOT TAB ================= */}
+      {tab === 'hetzner' && (
+        <div className="bg-ink-card border border-[#dedfdf] rounded-xl shadow-sm overflow-hidden mb-8">
+          <div className="px-6 py-5 border-b border-[#dedfdf] flex items-center justify-between bg-[#fbfaf9]">
+            <div>
+              <h2 className="text-base font-bold text-[#1a1a1a]">Hetzner Robot WebService API Integration</h2>
+              <p className="text-xs text-[#656b6b] mt-1">Configure your Hetzner Robot WebService credentials to enable automatic Virtual MAC generation, reverse DNS management, and subnet inventory discovery.</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={hetznerEnabled}
+                onChange={(e) => setHetznerEnabled(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#2563eb]"></div>
+              <span className="ms-3 text-xs font-semibold text-[#1a1a1a] uppercase tracking-wide">Enabled</span>
+            </label>
+          </div>
+          <div className="p-6 flex flex-col gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Robot WebService Username</label>
+                <input
+                  type="text"
+                  value={hetznerUser}
+                  onChange={(e) => setHetznerUser(e.target.value)}
+                  placeholder="e.g. your_robot_webservice_user"
+                  className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
+                />
+                <p className="mt-1 text-[11px] text-[#656b6b]">Hetzner Robot account username or dedicated WebService user created in Hetzner Robot settings.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">WebService Password / API Token</label>
+                <input
+                  type="password"
+                  value={hetznerPassword}
+                  onChange={(e) => setHetznerPassword(e.target.value)}
+                  placeholder={hetznerPassword ? '********' : 'Enter WebService password'}
+                  className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
+                />
+                <p className="mt-1 text-[11px] text-[#656b6b]">Secure credentials for Basic Auth against https://robot-ws.your-server.de.</p>
+              </div>
+            </div>
+          </div>
+          <div className="px-6 py-4 bg-[#fbfaf9] border-t border-[#dedfdf] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <span className="text-[11px] text-[#656b6b]">Operates in pure network management mode (rDNS, Virtual MACs, subnets). Server buying is strictly prohibited.</span>
+            <div className="flex items-center justify-end gap-3 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={handleTestHetzner}
+                disabled={hetznerTesting || !hetznerEnabled || !hetznerUser}
+                className="px-4 py-2 bg-white border border-[#dedfdf] text-xs font-semibold text-[#1a1a1a] rounded-lg hover:bg-gray-50 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {hetznerTesting ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveHetzner}
+                disabled={hetznerSaving}
+                className="px-6 py-2 bg-[#1a1a1a] text-white font-semibold text-sm rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {hetznerSaving ? 'Saving...' : 'Save Configuration'}
               </button>
             </div>
           </div>

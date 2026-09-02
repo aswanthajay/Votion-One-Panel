@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../services/apiClient';
+import { getIpCarrierType } from '../utils/ipUtils';
 
 interface OvhStatus {
   ip: string;
@@ -349,7 +350,17 @@ export const OvhNetworkPanel: React.FC<{ vmid: number; ipAddress?: string }> = (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-[var(--theme-surface-muted)] border border-[var(--theme-border)] rounded-lg">
               <div>
                 <p className="text-[10px] uppercase font-bold text-[var(--theme-text-muted)] tracking-wider">IPv4 Address</p>
-                <p className="text-sm font-mono font-bold text-[var(--theme-text)] mt-0.5">{status.ip}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <p className="text-sm font-mono font-bold text-[var(--theme-text)]">{status.ip}</p>
+                  {(() => {
+                    const carrier = getIpCarrierType(status.ip, [], []);
+                    return (
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${carrier.badgeClass}`}>
+                        {carrier.label}
+                      </span>
+                    );
+                  })()}
+                </div>
               </div>
               <div>
                 <p className="text-[10px] uppercase font-bold text-[var(--theme-text-muted)] tracking-wider">DDoS Mitigation Status</p>

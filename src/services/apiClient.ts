@@ -2525,6 +2525,101 @@ class ApiClient {
     });
     return await res.json();
   }
+
+  // --- Hetzner Admin Settings & IP Controls ---
+  async getHetznerConfig() {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/settings/hetzner`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch Hetzner configuration.');
+    return data.data;
+  }
+
+  async saveHetznerConfig(config: { enabled: boolean; user: string; password?: string }) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/hetzner`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(config)
+    });
+    return await res.json();
+  }
+
+  async testHetznerConnection() {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/settings/hetzner/test`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  async getAdminHetznerIps(): Promise<{ ips: Array<{ ip: string; serverIp?: string; serverNumber?: number; locked?: boolean; separateMac?: string | null }>; subnets: Array<{ ip: string; mask: number; serverIp?: string; serverNumber?: number; failover?: boolean; locked?: boolean }> }> {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/hetzner/ips`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch Hetzner account IPs.');
+    return data.data || { ips: [], subnets: [] };
+  }
+
+  async getAdminHetznerStatus(ip: string) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/hetzner/status?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch Hetzner status.');
+    return data.data;
+  }
+
+  async setAdminHetznerRdns(ip: string, reverse: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/hetzner/rdns`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, reverse })
+    });
+    return await res.json();
+  }
+
+  async generateAdminHetznerMac(ip: string, syncToVm: boolean = true) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/hetzner/mac/generate`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip, syncToVm })
+    });
+    return await res.json();
+  }
+
+  async deleteAdminHetznerMac(ip: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/admin/hetzner/mac/delete`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ ip })
+    });
+    return await res.json();
+  }
+
+  // --- Hetzner Client VM Controls ---
+  async getClientHetznerStatus(vmid: number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/hetzner/status`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch VM Hetzner network status.');
+    return data.data;
+  }
+
+  async setClientHetznerRdns(vmid: number, reverse: string) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/hetzner/rdns`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ reverse })
+    });
+    return await res.json();
+  }
+
+  async generateClientHetznerMac(vmid: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/hetzner/mac/generate`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
+
+  async deleteClientHetznerMac(vmid: number) {
+    const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/hetzner/mac/delete`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    return await res.json();
+  }
 }
 
 export const apiClient = new ApiClient();

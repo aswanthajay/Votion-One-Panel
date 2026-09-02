@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { apiClient, ApiVM, ApiVmMetadata, ApiReimageRequest } from '../services/apiClient';
 import { VmMetadataPanel } from './VmMetadataPanel';
+import { getIpCarrierType } from '../utils/ipUtils';
 
 const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
 const VmMetricsChart = lazy(() => import('./charts/VmMetricsChart'));
@@ -582,7 +583,18 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                   )}
                   {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'lxc' ? 'Container' : 'Cloud Compute'}</td>}
                   {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.nodeDisplayName || vm.displayNode || vm.proxmoxConnectionName || (vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01')}</td>}
-                  {visibleColumns.ip && <td className="py-3 px-4 text-[13px] text-[#1a1a1a] text-right">{vm.ipAddress || 'Pending'}</td>}
+                  {visibleColumns.ip && (
+                    <td className="py-3 px-4 text-[13px] text-[#1a1a1a] dark:text-white text-right">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        <span className="font-mono">{vm.ipAddress || 'Pending'}</span>
+                        {vm.ipAddress && vm.ipAddress !== 'Pending' && (
+                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${getIpCarrierType(vm.ipAddress, [], []).badgeClass}`}>
+                            {getIpCarrierType(vm.ipAddress, [], []).shortLabel}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
               {isLoading && clientVMs.length === 0 ? (
@@ -697,7 +709,14 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                     )}
                     <div>
                       <dt>Address</dt>
-                      <dd className="vm-identity-value-mono">{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</dd>
+                      <dd className="vm-identity-value-mono flex items-center gap-1.5 flex-wrap">
+                        <span>{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</span>
+                        {(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress) && (
+                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${getIpCarrierType(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress, [], []).badgeClass}`}>
+                            {getIpCarrierType(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress, [], []).label}
+                          </span>
+                        )}
+                      </dd>
                     </div>
                     <div>
                       <dt>Expires</dt>
