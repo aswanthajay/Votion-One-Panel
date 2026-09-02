@@ -571,19 +571,19 @@ export const OverviewDashboard: React.FC<{
           <div className="flex-1 min-w-0 flex items-baseline gap-5 overflow-hidden">
             <h1 className="page-heading !text-[24px] font-serif font-medium !mb-0 !leading-none truncate">Overview</h1>
             <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate text-[#8a9090]">
-              Loading…
+              Connecting to Votion Cloud…
             </p>
           </div>
         </header>
 
-        {/* CLEAN MINIMALIST CENTERED PRELOADER */}
+        {/* PROPRIETARY VOTION PRELOADER */}
         <div className="flex-1 flex flex-col items-center justify-center p-8 select-none text-center">
           <div className="w-8 h-8 rounded-full border-2 border-[#dedfdf] dark:border-[#313131] border-t-[#1a1a1a] dark:border-t-white animate-spin mb-4" />
           <h2 className="text-base font-semibold text-[#1a1a1a] dark:text-white tracking-tight">
-            Loading Overview
+            Votion Cloud
           </h2>
           <p className="text-xs text-[#656b6b] dark:text-[#a0a0a0] mt-1">
-            Fetching instances and metrics…
+            Preparing your environment…
           </p>
         </div>
       </div>
@@ -598,8 +598,8 @@ export const OverviewDashboard: React.FC<{
           <h1 className="page-heading !text-[24px] font-serif font-medium !mb-0 !leading-none truncate">Overview</h1>
           <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate">
             {loadDone
-              ? `Fleet of ${vms.length} instance${vms.length === 1 ? '' : 's'} · ${scopeLabel} · refreshed ${dataAge}s ago`
-              : 'Loading…'}
+              ? `${vms.length} Cloud Instance${vms.length === 1 ? '' : 's'} · ${scopeLabel} · Updated ${dataAge}s ago`
+              : 'Connecting to Votion Cloud…'}
           </p>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0 max-w-full">
@@ -624,28 +624,28 @@ export const OverviewDashboard: React.FC<{
         </div>
       </header>
 
-          {/* ================= MAIN HORIZONTAL SPLIT ================= */}
+      {/* ================= MAIN HORIZONTAL SPLIT ================= */}
       <div className="flex flex-1 min-h-0 min-w-0 overflow-x-hidden">
         
-        {/* ---------- CENTER: FLEET TELEMETRY INSTRUMENT PANEL ---------- */}
+        {/* ---------- CENTER: RESOURCE INSTRUMENT PANEL ---------- */}
         <section className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          {/* fleet identity strip */}
+          {/* identity strip */}
           <div className="px-5 sm:px-7 pt-5 pb-3 flex items-center justify-between border-b border-[#dedfdf] bg-white">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className={`w-2 h-2 rounded-full shrink-0 ${runningVms > 0 ? 'bg-[#10b981] animate-pulse' : 'bg-[#a0a1a2]'}`} />
-              <span className="text-sm font-serif font-medium text-[#1a1a1a] tracking-[-0.015em] truncate">Fleet Operations Overview</span>
+              <span className="text-sm font-serif font-medium text-[#1a1a1a] tracking-[-0.015em] truncate">Infrastructure Overview</span>
               {loadDone && (
                 <>
                   <span className="hidden sm:inline text-[12px] text-[#a0a1a2]">·</span>
-                  <span className="hidden sm:inline font-mono text-[12px] text-[#656b6b] truncate">{runningVms} / {vms.length} running</span>
+                  <span className="hidden sm:inline font-mono text-[12px] text-[#656b6b] truncate">{runningVms} / {vms.length} active</span>
                   <span className="hidden sm:inline text-[12px] text-[#a0a1a2]">·</span>
-                  <span className="hidden sm:inline text-[12px] text-[#656b6b]">{acctCpus} total vCPUs active</span>
+                  <span className="hidden sm:inline text-[12px] text-[#656b6b]">{acctCpus} vCPUs allocated</span>
                 </>
               )}
             </div>
             {loadDone && !fleetFailed && (
               <span className="text-[10px] text-[#a0a1a2] font-mono shrink-0">
-                {isRefreshing ? 'refreshing…' : providerAvailable ? `live data ${dataAge}s` : 'stored data'}
+                {isRefreshing ? 'updating…' : providerAvailable ? `live ${dataAge}s` : 'cached'}
               </span>
             )}
           </div>
@@ -653,8 +653,8 @@ export const OverviewDashboard: React.FC<{
           <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden px-5 sm:px-7 py-4">
             {!fleetLoading && !fleetFailed && !providerAvailable && (
               <section className="mb-4 rounded-md border border-[#dedfdf] bg-white px-4 py-3" role="status" aria-live="polite">
-                <p className="text-[12px] font-semibold text-[#1a1a1a]">Live provider access is unavailable</p>
-                <p className="mt-1 text-[12px] leading-relaxed text-[#656b6b]">The deployment credential key is not configured. Inventory and historical operational data remain available from the local database, but live telemetry, console access, connection tests, and provider actions are paused.</p>
+                <p className="text-[12px] font-semibold text-[#1a1a1a]">Live cloud status unavailable</p>
+                <p className="mt-1 text-[12px] leading-relaxed text-[#656b6b]">Infrastructure credentials are being verified. Saved server configurations remain available.</p>
               </section>
             )}
             {fleetLoading ? (
@@ -664,41 +664,41 @@ export const OverviewDashboard: React.FC<{
               </div>
             ) : fleetFailed ? (
               <div className="px-4 py-6 border border-dashed border-[#dedfdf] bg-white rounded-md flex flex-col items-center justify-center text-center max-w-lg mx-auto mt-10">
-                <div className="text-sm text-[#1a1a1a] font-semibold mb-2">Couldn't reach the engine</div>
-                <p className="text-xs text-[#656b6b] mb-4">The backend didn't respond after several retries. The dashboard will keep retrying automatically in the background.</p>
-                <button onClick={() => loadData(false)} className="btn-secondary !text-[11px] !px-4 !py-1.5 cursor-pointer">Force retry</button>
+                <div className="text-sm text-[#1a1a1a] font-semibold mb-2">Connection Timeout</div>
+                <p className="text-xs text-[#656b6b] mb-4">Unable to reach the infrastructure services. Reconnecting automatically…</p>
+                <button onClick={() => loadData(false)} className="btn-secondary !text-[11px] !px-4 !py-1.5 cursor-pointer">Retry Connection</button>
               </div>
             ) : vms.length === 0 ? (
               <div className="px-4 py-10 flex flex-col items-center justify-center text-center max-w-md mx-auto mt-10">
                 <div className="w-12 h-12 bg-white border border-[#dedfdf] rounded-lg mb-4 flex items-center justify-center text-lg shadow-sm">☁️</div>
-                <h3 className="text-base font-serif font-medium text-[#1a1a1a] mb-1">No server purchased yet</h3>
-                <p className="text-[12px] text-[#656b6b] mb-5 leading-relaxed">Purchase a server to get started. Once your order is active, your server details and live service status will appear here.</p>
-                <button type="button" onClick={() => onOpenModal('pricing')} className="btn-secondary !px-4 !py-2 !text-[11px] cursor-pointer">View server plans</button>
+                <h3 className="text-base font-serif font-medium text-[#1a1a1a] mb-1">No active servers</h3>
+                <p className="text-[12px] text-[#656b6b] mb-5 leading-relaxed">Deploy a cloud server to begin. Your resource allocation and real-time status will display here.</p>
+                <button type="button" onClick={() => onOpenModal('pricing')} className="btn-secondary !px-4 !py-2 !text-[11px] cursor-pointer">View Cloud Plans</button>
               </div>
             ) : (
               <div className="flex flex-col gap-4">
-                {/* telemetry instrument block */}
+                {/* resource usage block */}
                 <div className="ink-block-wrapper !mb-0">
                   <div className="ink-block-header !px-4 !py-3 flex items-center justify-between">
-                    <span className="ink-block-title !text-[13px] font-serif font-medium">Aggregated Fleet Telemetry</span>
-                    <span className="text-[10px] text-[#a0a1a2] font-mono">{providerAvailable ? 'LIVE' : 'STORED'}</span>
+                    <span className="ink-block-title !text-[13px] font-serif font-medium">Resource Allocation & Usage</span>
+                    <span className="text-[10px] text-[#a0a1a2] font-mono">{providerAvailable ? 'LIVE' : 'CACHED'}</span>
                   </div>
                   <table className="overview-telemetry-table w-full border-collapse table-fixed">
                     <tbody>
                       <tr className="ink-table-row hover:bg-[#fbfaf9]">
-                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px] !w-24">Cluster CPU</td>
+                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px] !w-24">Compute (vCPU)</td>
                         <td className="ink-table-td !py-2.5 !px-2">
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-[#1a1a1a] tabular-nums">
                               {liveCpuPct.toFixed(1)}%
-                              <span className="text-[#a0a1a2] text-[11px] ml-1.5">of {acctCpus} core{acctCpus === 1 ? '' : 's'}</span>
+                              <span className="text-[#a0a1a2] text-[11px] ml-1.5">of {acctCpus} vCPU{acctCpus === 1 ? '' : 's'}</span>
                             </span>
                             <div className="hidden sm:block shrink-0"><Sparkline values={aggCpuSeries.slice(-30)} stroke="#1a1a1a" height={22} /></div>
                           </div>
                         </td>
                       </tr>
                       <tr className="ink-table-row hover:bg-[#fbfaf9]">
-                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Cluster RAM</td>
+                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Memory (RAM)</td>
                         <td className="ink-table-td !py-2.5 !px-2">
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-[#1a1a1a] tabular-nums">
@@ -710,7 +710,7 @@ export const OverviewDashboard: React.FC<{
                         </td>
                       </tr>
                       <tr className="ink-table-row hover:bg-[#fbfaf9]">
-                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Cluster Disk</td>
+                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Storage Pool</td>
                         <td className="ink-table-td !py-2.5 !px-2">
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-[#1a1a1a] tabular-nums">
@@ -724,7 +724,7 @@ export const OverviewDashboard: React.FC<{
                         </td>
                       </tr>
                       <tr className="hover:bg-[#fbfaf9]">
-                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Cluster Network</td>
+                        <td className="ink-table-th !py-2.5 !pl-4 !pr-2 !text-[12px]">Network Throughput</td>
                         <td className="ink-table-td !py-2.5 !px-2">
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-[#1a1a1a] tabular-nums">
@@ -742,19 +742,19 @@ export const OverviewDashboard: React.FC<{
                 {/* session counters */}
                 <div className="ink-block-wrapper !mb-0">
                   <div className="ink-block-header !px-4 !py-3">
-                    <span className="ink-block-title !text-[12px]">Live Fleet Activity Rates</span>
+                    <span className="ink-block-title !text-[12px]">Data Transfer & Activity</span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-[#dedfdf] text-center">
                     <div className="py-3 px-2">
-                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Net In (Total)</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Inbound Traffic</div>
                       <div className="font-mono text-sm text-[#1a1a1a] mt-0.5">{(liveTotalNetIn / GB).toFixed(1)} GB</div>
                     </div>
                     <div className="py-3 px-2">
-                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Net Out (Total)</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Outbound Traffic</div>
                       <div className="font-mono text-sm text-[#1a1a1a] mt-0.5">{(liveTotalNetOut / GB).toFixed(1)} GB</div>
                     </div>
                     <div className="py-3 px-2 flex flex-col justify-center items-center">
-                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Running services</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[#656b6b]">Active Instances</div>
                       <div className="font-mono text-sm text-[#1a1a1a] mt-0.5">{runningVms} / {vms.length}</div>
                     </div>
                     <div className="py-3 px-2 flex flex-col justify-center items-center">
