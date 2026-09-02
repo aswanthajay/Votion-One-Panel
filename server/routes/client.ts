@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { ovhService } from '../services/ovh.js';
 import { hetznerService } from '../services/hetzner.js';
-import { dbService } from '../db/database.js';
+import { dbService, pgPool } from '../db/database.js';
 import { emailService } from '../services/email.js';
 import { hasTeamAccessScope, isDelegatedTeamAccessScope, type TeamAccessScope } from '../services/teamAccessPolicy.js';
 import { proxmoxApi, updateVMNetworkMac } from '../services/proxmox.js';
@@ -372,11 +372,73 @@ clientRouter.get('/vms', async (req, res) => {
   const allowedVms = connectionId
     ? accessibleVms.filter((vm) => vm.proxmoxConnectionId === connectionId)
     : accessibleVms;
-    const vms = allowedVms.map(vm => ({
+
+  // Query latest known telemetry per VM
+  const metricsResult = await pgPool.query(`
+    SELECT DISTINCT ON (vmid, COALESCE(proxmox_connection_id, ''))
+      vmid, proxmox_connection_id, cpu_pct, ram_bytes, net_in_bytes, net_out_bytes, diskread_bytes, diskwrite_bytes
+    FROM vm_metrics
+    ORDER BY vmid, COALESCE(proxmox_connection_id, ''), timestamp DESC
+  `).catch(() => ({ rows: [] }));
+
+  const metricsMap = new Map<string, any>();
+  for (const m of metricsResult.rows) {
+    const key = `${m.proxmox_connection_id || ''}:${m.vmid}`;
+    metricsMap.set(key, m);
+    if (!metricsMap.has(String(m.vmid))) metricsMap.set(String(m.vmid), m);
+  }
+
+  // Get live / cached node storage metrics for cluster storage calculation
+  let clusterStorage: { totalGb: number; usedGb: number; freeGb: number; usagePct: number } | null = null;
+  try {
+    const nodeMetrics = await proxmoxApi.getNodeMetrics(undefined, connectionId);
+    let totalStorageGb = 0;
+    let usedStorageGb = 0;
+    for (const node of nodeMetrics) {
+      if (node.storagePools && node.storagePools.length > 0) {
+        const thinPools = node.storagePools.filter(p => /lvmthin|zfs|btrfs/i.test(p.type) || /thin|data|local/i.test(p.name));
+        const activePools = thinPools.length > 0 ? thinPools : node.storagePools;
+        for (const pool of activePools) {
+          usedStorageGb += Number(pool.usedGb || 0);
+          totalStorageGb += Number(pool.totalGb || 0);
+        }
+      } else if (node.storageTotalGb) {
+        usedStorageGb += Number(node.storageUsageGb || 0);
+        totalStorageGb += Number(node.storageTotalGb || 0);
+      }
+    }
+    if (totalStorageGb > 0) {
+      clusterStorage = {
+        totalGb: +totalStorageGb.toFixed(1),
+        usedGb: +usedStorageGb.toFixed(1),
+        freeGb: +(Math.max(0, totalStorageGb - usedStorageGb)).toFixed(1),
+        usagePct: +Math.min(100, (usedStorageGb / totalStorageGb) * 100).toFixed(1)
+      };
+    }
+  } catch (_e) {}
+
+  const vms = allowedVms.map(vm => {
+    const key = `${vm.proxmoxConnectionId || ''}:${vm.vmid}`;
+    const m = metricsMap.get(key) || metricsMap.get(String(vm.vmid));
+    return {
       ...vm,
       ipAddress: vm.ipAddress || (vm as any).ip_address || '',
-    }));
-  res.json({ success: true, count: vms.length, data: vms, providerAvailable });
+      cpuUsagePct: m ? Number(m.cpu_pct || 0) : ((vm as any).cpuUsagePct ?? 0),
+      ramUsageBytes: m ? Number(m.ram_bytes || 0) : ((vm as any).ramUsageBytes ?? 0),
+      netInBytes: m ? Number(m.net_in_bytes || 0) : ((vm as any).netInBytes ?? 0),
+      netOutBytes: m ? Number(m.net_out_bytes || 0) : ((vm as any).netOutBytes ?? 0),
+      diskReadBytes: m ? Number(m.diskread_bytes || 0) : ((vm as any).diskReadBytes ?? 0),
+      diskWriteBytes: m ? Number(m.diskwrite_bytes || 0) : ((vm as any).diskWriteBytes ?? 0),
+      live: m ? {
+        cpuPct: Math.round(Number(m.cpu_pct || 0)),
+        memUsedMb: Math.round(Number(m.ram_bytes || 0) / 1048576),
+        netInBytes: Number(m.net_in_bytes || 0),
+        netOutBytes: Number(m.net_out_bytes || 0),
+      } : (vm as any).live
+    };
+  });
+
+  res.json({ success: true, count: vms.length, data: vms, clusterStorage, providerAvailable });
 });
 
 // Read-only client billing profile view. Effective assigned prices are returned

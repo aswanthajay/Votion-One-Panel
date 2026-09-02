@@ -73,6 +73,16 @@ export interface ApiVM {
   cpuUsagePct?: number;
   ramUsageBytes?: number;
   diskUsageBytes?: number;
+  netInBytes?: number;
+  netOutBytes?: number;
+  diskReadBytes?: number;
+  diskWriteBytes?: number;
+  live?: {
+    cpuPct?: number;
+    memUsedMb?: number;
+    netInBytes?: number;
+    netOutBytes?: number;
+  };
   os?: string;
   expiryDate?: string;
   isSuspended?: boolean;
@@ -624,7 +634,7 @@ class ApiClient {
   /**
    * PROMPT 5: Client Portal Specific Methods
    */
-  async getClientVmInventory(connectionId?: string): Promise<{ vms: ApiVM[]; providerAvailable: boolean }> {
+  async getClientVmInventory(connectionId?: string): Promise<{ vms: ApiVM[]; clusterStorage?: { totalGb: number; usedGb: number; freeGb: number; usagePct: number } | null; providerAvailable: boolean }> {
     const query = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : '';
     const res = await this.swrFetch(`${API_BASE_URL}/client/vms${query}`, {
       headers: this.getHeaders(),
@@ -632,6 +642,7 @@ class ApiClient {
     const data = await this.readApiResponse(res, 'Unable to load client virtual machines.');
     return {
       vms: data.data || [],
+      clusterStorage: data.clusterStorage || null,
       providerAvailable: data.providerAvailable !== false,
     };
   }

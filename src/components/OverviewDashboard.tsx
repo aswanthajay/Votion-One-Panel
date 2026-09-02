@@ -248,6 +248,7 @@ export const OverviewDashboard: React.FC<{
   const [loadDone, setLoadDone] = useState(false);
   const [fleetFailed, setFleetFailed] = useState(false);
   const [providerAvailable, setProviderAvailable] = useState(true);
+  const [clusterStorageData, setClusterStorageData] = useState<{ totalGb: number; usedGb: number; freeGb: number; usagePct: number } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataAge, setDataAge] = useState(0);
   const mountedRef = useRef(true);
@@ -312,6 +313,9 @@ export const OverviewDashboard: React.FC<{
       try {
         const inventory = await apiClient.getClientVmInventory(workspaceConnectionId);
         vmsRes = inventory.vms;
+        if ((inventory as any).clusterStorage) {
+          setClusterStorageData((inventory as any).clusterStorage);
+        }
         providerIsAvailable = inventory.providerAvailable;
         fleetOk = true;
         break;
@@ -333,6 +337,33 @@ export const OverviewDashboard: React.FC<{
     setVms(vmsRes);
     setFleetLoading(false);
     setFleetFailed(false);
+
+    // Non-blocking background fetch of history metrics for running VMs
+    const runningList = vmsRes.filter(v => v.status === 'running');
+    if (runningList.length > 0) {
+      Promise.allSettled(
+        runningList.slice(0, 10).map(async (vm) => {
+          try {
+            const metrics = await apiClient.getVMMetrics(vm.vmid, vm.proxmoxConnectionId);
+            if (metrics?.data?.history) {
+              return { vmid: vm.vmid, history: metrics.data.history, aggregations: metrics.data.aggregations };
+            }
+          } catch (_e) {}
+          return null;
+        })
+      ).then(results => {
+        if (!mountedRef.current) return;
+        const newHist: Record<number, { history: HistPoint[]; aggregations?: any }> = {};
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value) {
+            newHist[r.value.vmid] = { history: r.value.history, aggregations: r.value.aggregations };
+          }
+        }
+        if (Object.keys(newHist).length > 0) {
+          setHistMetrics(prev => ({ ...prev, ...newHist }));
+        }
+      });
+    }
 
     if (!mountedRef.current) return;
     retryCountRef.current = 0;
@@ -433,26 +464,50 @@ export const OverviewDashboard: React.FC<{
   const runningVms = vms.filter(v => v.status === 'running').length;
 
   // Live aggregated telemetry
-  const liveTotalCpu = vms.reduce((s, v) => s + (liveTelemetry[v.vmid] ? (num(liveTelemetry[v.vmid].cpu) * v.cpus / 100) : 0), 0);
+  const liveTotalCpu = vms.reduce((s, v) => {
+    if (liveTelemetry[v.vmid]) return s + (num(liveTelemetry[v.vmid].cpu) * v.cpus / 100);
+    const pct = num(v.cpuUsagePct || (v.live as any)?.cpuPct || 0);
+    return s + (pct * v.cpus / 100);
+  }, 0);
   const liveCpuPct = acctCpus > 0 ? (liveTotalCpu / acctCpus) * 100 : 0;
   
   // Cap each VM's live RAM contribution at its effective capacity so a single
   // ballooned/over-committed VM cannot drive the fleet past 100%.
   const liveTotalRam = vms.reduce((s, v) => {
-    const used = liveTelemetry[v.vmid] ? num(liveTelemetry[v.vmid].mem) : num(v.ramUsageBytes);
+    let used = 0;
+    if (liveTelemetry[v.vmid]) {
+      used = num(liveTelemetry[v.vmid].mem);
+    } else if (num(v.ramUsageBytes) > 0) {
+      used = num(v.ramUsageBytes);
+    } else if ((v.live as any)?.memUsedMb) {
+      used = num((v.live as any).memUsedMb) * MB;
+    }
     const cap = Math.max(num(v.maxmem), num(v.memory));
-    return s + Math.min(used, cap);
+    return s + (cap > 0 ? Math.min(used, cap) : used);
   }, 0);
   const liveRamPct = acctMaxmem > 0 ? Math.min(100, (liveTotalRam / acctMaxmem) * 100) : 0;
   
-  // Disk: report ACTUAL usage, percentage clamped to 100. The label shows the
-  // real "used of effective capacity" figures (no silent clamping of GB values).
-  const liveTotalDiskUsed = vms.reduce((s, v) => s + (num(v.disk) || num(v.diskUsageBytes)), 0);
-  const liveDiskPct = acctMaxdisk > 0 ? Math.min(100, (liveTotalDiskUsed / acctMaxdisk) * 100) : 0;
+  // Disk: report ACTUAL cluster pool storage (LVM-thin / ZFS / node storage) if available,
+  // otherwise calculate from VM disk allocations.
+  const liveTotalDiskUsed = clusterStorageData 
+    ? clusterStorageData.usedGb * GB 
+    : vms.reduce((s, v) => s + (num(v.diskUsageBytes) || num(v.disk)), 0);
+  const effectiveMaxDisk = clusterStorageData
+    ? clusterStorageData.totalGb * GB
+    : acctMaxdisk;
+  const liveDiskPct = clusterStorageData
+    ? clusterStorageData.usagePct
+    : effectiveMaxDisk > 0 ? Math.min(100, (liveTotalDiskUsed / effectiveMaxDisk) * 100) : 0;
   
   // Network: cumulative bytes since boot — show as total GB transferred, not MB/s.
-  const liveTotalNetIn = vms.reduce((s, v) => s + (liveTelemetry[v.vmid] ? num(liveTelemetry[v.vmid].netin) : 0), 0);
-  const liveTotalNetOut = vms.reduce((s, v) => s + (liveTelemetry[v.vmid] ? num(liveTelemetry[v.vmid].netout) : 0), 0);
+  const liveTotalNetIn = vms.reduce((s, v) => {
+    if (liveTelemetry[v.vmid]) return s + num(liveTelemetry[v.vmid].netin);
+    return s + (num(v.netInBytes) || num((v.live as any)?.netInBytes) || 0);
+  }, 0);
+  const liveTotalNetOut = vms.reduce((s, v) => {
+    if (liveTelemetry[v.vmid]) return s + num(liveTelemetry[v.vmid].netout);
+    return s + (num(v.netOutBytes) || num((v.live as any)?.netOutBytes) || 0);
+  }, 0);
 
   const gb = (b: number) => (b / GB).toFixed(1);
 
@@ -633,7 +688,7 @@ export const OverviewDashboard: React.FC<{
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-[#1a1a1a] tabular-nums">
                               {liveDiskPct.toFixed(0)}% used
-                              <span className="text-[#a0a1a2] text-[11px] ml-1.5">{gb(liveTotalDiskUsed)} GB of {gb(acctMaxdisk)} GB</span>
+                              <span className="text-[#a0a1a2] text-[11px] ml-1.5">{gb(liveTotalDiskUsed)} GB of {gb(effectiveMaxDisk)} GB</span>
                             </span>
                             <div className="hidden sm:block w-[110px] shrink-0 h-[3px] bg-[#f1f1f1] mt-1">
                               <div className="h-full bg-[#1a1a1a]" style={{ width: `${liveDiskPct}%` }} />
