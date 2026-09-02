@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate",
     "typecheck:client": "tsc -p tsconfig.json --noEmit",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "test": "vitest run",
-    "build": "npm run typecheck:client && npm run typecheck:server && vite build",
+    "build": "prisma generate && npm run typecheck:client && npm run typecheck:server && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "server": "tsx server/entry.ts",

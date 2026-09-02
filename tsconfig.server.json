@@ -15,6 +15,6 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts"],
+  "include": ["server/**/*.ts", "src/generated/prisma/**/*.ts", "src/generated/prisma/**/*.d.ts"],
   "exclude": ["server/**/*.test.ts", "server/**/*.spec.ts"]
 }
