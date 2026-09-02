@@ -2482,6 +2482,46 @@ class ApiClient {
     return await res.json();
   }
 
+  async getAdminOvhAttacks(ip: string): Promise<{
+    ip: string;
+    isUnderAttack: boolean;
+    mitigationState: string;
+    mitigationMode: 'automatic' | 'permanent';
+    autoMitigationTimeout: number;
+    liveTraffic: {
+      inBps: number;
+      outBps: number;
+      droppedBps: number;
+      passedBps: number;
+      inPps: number;
+      droppedPps: number;
+    } | null;
+    liveStatsSeries: Array<{ timestamp: number; inBps: number; droppedBps: number; passedBps: number; pps: number }>;
+    events: Array<{
+      id: string | number;
+      startDate: string;
+      endDate?: string | null;
+      durationSeconds?: number;
+      attackType: string;
+      vectors: string[];
+      peakBps: number;
+      peakPps: number;
+      totalDroppedBytes: number;
+      totalPassedBytes: number;
+      status: 'mitigating' | 'resolved';
+    }>;
+  }> {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/attacks?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch attack telemetry.');
+    return data.data;
+  }
+
+  async getAdminOvhAttackEventStats(ip: string, eventId: string | number) {
+    const res = await this.swrFetch(`${API_BASE_URL}/admin/ovh/attacks/events/${encodeURIComponent(String(eventId))}/stats?ip=${encodeURIComponent(ip)}`, { headers: this.getHeaders() });
+    const data = await this.readApiResponse(res, 'Unable to fetch attack event stats.');
+    return data.data || [];
+  }
+
   async toggleAdminOvhFirewall(ip: string, enabled: boolean) {
     const res = await this.apiFetch(`${API_BASE_URL}/admin/ovh/firewall/toggle`, {
       method: 'POST',

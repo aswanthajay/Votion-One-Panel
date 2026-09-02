@@ -2623,6 +2623,29 @@ apiRouter.post('/admin/ovh/ddos', requireOvhEnabledAdmin, async (req, res) => {
   }
 });
 
+apiRouter.get('/admin/ovh/attacks', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const analytics = await ovhService.getAttackAnalytics(ip);
+    res.json({ success: true, data: analytics });
+  } catch (err: any) {
+    console.error('[OVH ATTACK ANALYTICS ERROR]', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+apiRouter.get('/admin/ovh/attacks/events/:eventId/stats', requireOvhEnabledAdmin, async (req, res) => {
+  try {
+    const ip = validateIpAdmin(String(req.query.ip || ''));
+    const { eventId } = req.params;
+    const stats = await ovhService.getMitigationEventStats(ip, eventId);
+    res.json({ success: true, data: stats });
+  } catch (err: any) {
+    console.error('[OVH EVENT STATS ERROR]', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 apiRouter.post('/admin/ovh/firewall/toggle', requireOvhEnabledAdmin, async (req, res) => {
   try {
     const ip = validateIpAdmin(req.body.ip);

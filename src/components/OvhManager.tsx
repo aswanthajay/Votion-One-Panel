@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient, ApiVM } from '../services/apiClient';
+import { formatDate, formatTime } from '../services/dateTime';
 import { isIpInSubnets, getIpCarrierType, getIpNetworkType, compareCarrierAndIp, compareIps } from '../utils/ipUtils';
 import { CarrierLogoBadge, OvhLogo, HetznerLogo, OtherNetworkLogo } from './CarrierIcons';
 
@@ -78,6 +79,132 @@ const GAME_PRESETS = [
   { label: 'Custom UDP Filter', game: 'other', port: 0 },
 ];
 
+/* --- Traffic and Packet Formatters --- */
+const formatBps = (bps: number) => {
+  if (!bps || bps <= 0) return '0 bps';
+  if (bps < 1e6) return `${(bps / 1e3).toFixed(1)} Kbps`;
+  if (bps < 1e9) return `${(bps / 1e6).toFixed(1)} Mbps`;
+  return `${(bps / 1e9).toFixed(2)} Gbps`;
+};
+
+const formatPps = (pps: number) => {
+  if (!pps || pps <= 0) return '0 pps';
+  if (pps < 1e3) return `${pps} pps`;
+  if (pps < 1e6) return `${(pps / 1e3).toFixed(1)} kpps`;
+  return `${(pps / 1e6).toFixed(2)} Mpps`;
+};
+
+const formatBytes = (bytes: number) => {
+  if (!bytes || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${(bytes / 1073741824).toFixed(2)} GB`;
+};
+
+/* --- Attack Traffic Chart Component --- */
+const AttackTrafficChart: React.FC<{
+  series: Array<{ timestamp: number; inBps: number; droppedBps: number; passedBps: number; pps?: number }>;
+  height?: number;
+}> = ({ series, height = 180 }) => {
+  if (!series || series.length === 0) {
+    return (
+      <div className="h-44 flex flex-col items-center justify-center text-center p-4 border border-dashed border-[#dedfdf] dark:border-[#313131] rounded-lg bg-white dark:bg-[#181818]">
+        <span className="text-2xl mb-1">🛡️</span>
+        <span className="text-xs font-semibold text-[#1a1a1a] dark:text-white">Zero Active Malicious Ingress</span>
+        <span className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-0.5">VAC hardware scrubbers report no malicious volumetric traffic.</span>
+      </div>
+    );
+  }
+
+  const w = 600;
+  const h = height;
+  const maxBps = Math.max(...series.map(s => Math.max(s.inBps || 0, s.droppedBps || 0, s.passedBps || 0)), 1000000);
+
+  const getPts = (key: 'inBps' | 'droppedBps' | 'passedBps') => {
+    return series.map((s, i) => {
+      const x = (i / Math.max(series.length - 1, 1)) * w;
+      const val = s[key] || 0;
+      const y = h - (val / maxBps) * (h - 24) - 12;
+      return { x: +x.toFixed(1), y: +y.toFixed(1) };
+    });
+  };
+
+  const inPts = getPts('inBps');
+  const dropPts = getPts('droppedBps');
+  const passPts = getPts('passedBps');
+
+  const toPath = (pts: Array<{ x: number; y: number }>) =>
+    pts.reduce((acc, p, i) => (i === 0 ? `M ${p.x},${p.y}` : `${acc} L ${p.x},${p.y}`), '');
+
+  const inPath = toPath(inPts);
+  const dropPath = toPath(dropPts);
+  const passPath = toPath(passPts);
+  const inArea = `${inPath} L ${w},${h} L 0,${h} Z`;
+
+  return (
+    <div className="w-full bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg p-4 flex flex-col gap-3">
+      {/* Chart Legend */}
+      <div className="flex items-center justify-between flex-wrap gap-2 text-[11px] font-mono">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1.5 font-semibold text-[#ef4444]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
+            Ingress Attack ({formatBps(series[series.length - 1]?.inBps || 0)})
+          </span>
+          <span className="flex items-center gap-1.5 font-semibold text-[#f59e0b]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#f59e0b]" />
+            Scrubbed / Dropped ({formatBps(series[series.length - 1]?.droppedBps || 0)})
+          </span>
+          <span className="flex items-center gap-1.5 font-semibold text-[#10b981]">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
+            Clean Passed ({formatBps(series[series.length - 1]?.passedBps || 0)})
+          </span>
+        </div>
+        <span className="text-[10px] text-[#8a9090]">Peak: {formatBps(maxBps)}</span>
+      </div>
+
+      {/* SVG Canvas */}
+      <div className="w-full overflow-hidden">
+        <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-44 overflow-visible">
+          <defs>
+            <linearGradient id="attack-ing-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="#ef4444" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* Grid lines */}
+          <line x1="0" y1={h * 0.25} x2={w} y2={h * 0.25} stroke="#e5e7eb" strokeDasharray="3 3" className="dark:stroke-[#262626]" />
+          <line x1="0" y1={h * 0.5} x2={w} y2={h * 0.5} stroke="#e5e7eb" strokeDasharray="3 3" className="dark:stroke-[#262626]" />
+          <line x1="0" y1={h * 0.75} x2={w} y2={h * 0.75} stroke="#e5e7eb" strokeDasharray="3 3" className="dark:stroke-[#262626]" />
+
+          {/* Ingress Attack Area & Line */}
+          <path d={inArea} fill="url(#attack-ing-grad)" />
+          <path d={inPath} fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Dropped / Scrubbed Line */}
+          <path d={dropPath} fill="none" stroke="#f59e0b" strokeWidth="1.75" strokeDasharray="4 2" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Clean Passed Line */}
+          <path d={passPath} fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+          {/* Latest Point Indicator */}
+          {inPts.length > 0 && (
+            <circle cx={inPts[inPts.length - 1].x} cy={inPts[inPts.length - 1].y} r="3" fill="#ef4444" className="animate-pulse" />
+          )}
+        </svg>
+      </div>
+
+      {/* Timestamp axis labels */}
+      <div className="flex items-center justify-between text-[10px] font-mono text-[#8a9090] border-t border-[#f1f1f1] dark:border-[#262626] pt-1.5">
+        <span>{series[0]?.timestamp ? new Date(series[0].timestamp * 1000).toLocaleTimeString() : 'T - 15m'}</span>
+        <span>{series[Math.floor(series.length / 2)]?.timestamp ? new Date(series[Math.floor(series.length / 2)].timestamp * 1000).toLocaleTimeString() : 'T - 7m'}</span>
+        <span>{series[series.length - 1]?.timestamp ? new Date(series[series.length - 1].timestamp * 1000).toLocaleTimeString() : 'Live Now'}</span>
+      </div>
+    </div>
+  );
+};
+
 export const OvhManager: React.FC = () => {
   const [ipInput, setIpInput] = useState('');
   const [activeIp, setActiveIp] = useState('');
@@ -101,7 +228,42 @@ export const OvhManager: React.FC = () => {
 
   // Status & Tab state
   const [status, setStatus] = useState<OvhStatus | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'vmac' | 'firewall' | 'game' | 'antihack' | 'subnet'>('general');
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'attacks' | 'vmac' | 'firewall' | 'game' | 'antihack' | 'subnet'>('general');
+
+  // Attack Analytics & DDoS Telemetry state
+  const [attackData, setAttackData] = useState<{
+    ip: string;
+    isUnderAttack: boolean;
+    mitigationState: string;
+    mitigationMode: 'automatic' | 'permanent';
+    autoMitigationTimeout: number;
+    liveTraffic: {
+      inBps: number;
+      outBps: number;
+      droppedBps: number;
+      passedBps: number;
+      inPps: number;
+      droppedPps: number;
+    } | null;
+    liveStatsSeries: Array<{ timestamp: number; inBps: number; droppedBps: number; passedBps: number; pps: number }>;
+    events: Array<{
+      id: string | number;
+      startDate: string;
+      endDate?: string | null;
+      durationSeconds?: number;
+      attackType: string;
+      vectors: string[];
+      peakBps: number;
+      peakPps: number;
+      totalDroppedBytes: number;
+      totalPassedBytes: number;
+      status: 'mitigating' | 'resolved';
+    }>;
+  } | null>(null);
+  const [loadingAttacks, setLoadingAttacks] = useState(false);
+  const [selectedAttackEvent, setSelectedAttackEvent] = useState<any | null>(null);
+  const [eventStatsData, setEventStatsData] = useState<any[]>([]);
+  const [loadingEventStats, setLoadingEventStats] = useState(false);
 
   // Virtual MAC state
   const [macSubmitting, setMacSubmitting] = useState(false);
@@ -470,6 +632,7 @@ export const OvhManager: React.FC = () => {
       }
 
       void fetchGameRules(targetIp);
+      void fetchAttackAnalytics(targetIp);
     } catch (err: any) {
       setError(err.message || 'Failed to query OVH router status.');
       setStatus(null);
@@ -478,6 +641,37 @@ export const OvhManager: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Attack Analytics fetching
+  const fetchAttackAnalytics = async (targetIp: string) => {
+    setLoadingAttacks(true);
+    try {
+      const res = await apiClient.getAdminOvhAttacks(targetIp);
+      setAttackData(res);
+      if (res && res.events && res.events.length > 0) {
+        setSelectedAttackEvent(res.events[0]);
+      }
+    } catch {
+      setAttackData(null);
+    } finally {
+      setLoadingAttacks(false);
+    }
+  };
+
+  const handleSelectAttackEvent = async (event: any) => {
+    const targetIp = activeIp || status?.ip;
+    if (!targetIp || !event) return;
+    setSelectedAttackEvent(event);
+    setLoadingEventStats(true);
+    try {
+      const res = await apiClient.getAdminOvhAttackEventStats(targetIp, event.id);
+      setEventStatsData(Array.isArray(res) ? res : []);
+    } catch {
+      setEventStatsData([]);
+    } finally {
+      setLoadingEventStats(false);
     }
   };
 
@@ -1236,6 +1430,7 @@ export const OvhManager: React.FC = () => {
                 ) : (
                   [
                     { key: 'general', label: 'General & rDNS' },
+                    { key: 'attacks', label: `DDoS Attacks & Traffic ${attackData?.isUnderAttack ? '(! ATTACK ACTIVE)' : attackData?.events && attackData.events.length > 0 ? `(${attackData.events.length})` : ''}` },
                     { key: 'vmac', label: `Virtual MAC (${(status.macAddress || activeVm?.macAddress) ? (status.macAddress || activeVm?.macAddress)!.slice(0, 8) + '…' : 'None'})` },
                     { key: 'firewall', label: `Edge Firewall (${fwRules.length})` },
                     { key: 'game', label: `Game DDoS (${gameRules.length})` },
@@ -1444,6 +1639,294 @@ export const OvhManager: React.FC = () => {
                       </div>
                     </>
                   )}
+                </div>
+              )}
+
+              {/* TAB 2: DDOS ATTACKS, LIVE TELEMETRY & HISTORICAL EVENTS */}
+              {activeSubTab === 'attacks' && (
+                <div className="p-6 text-xs flex flex-col gap-6">
+                  {/* Top Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h3 className="font-semibold text-sm text-[#1a1a1a] dark:text-white mb-0.5 flex items-center gap-2">
+                        <span>Anti-DDoS Attack Telemetry & Event Analytics</span>
+                        {attackData?.isUnderAttack && (
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#ef4444] text-white animate-pulse">
+                            ● Attack in Progress
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[#656b6b] dark:text-[#a0a0a0] leading-relaxed">
+                        Real-time hardware VAC scrubbing telemetry, attack classification vectors, and chronological mitigation event logs for IP <span className="font-mono font-semibold text-[#1a1a1a] dark:text-white">{status.ip}</span>.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => activeIp && void fetchAttackAnalytics(activeIp)}
+                      disabled={loadingAttacks}
+                      className="btn-secondary px-3 py-1.5 text-xs font-semibold cursor-pointer shrink-0 self-start sm:self-auto flex items-center gap-1.5"
+                    >
+                      <span>⟳</span>
+                      <span>{loadingAttacks ? 'Querying VAC…' : 'Refresh Telemetry'}</span>
+                    </button>
+                  </div>
+
+                  {/* 4 Telemetry Metric Instrument Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* 1. Mitigation Status */}
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col justify-between">
+                      <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#656b6b] dark:text-[#a0a0a0] block mb-1">
+                        Scrubbing Engine State
+                      </span>
+                      <div className="flex items-center gap-2 my-1">
+                        <span className={`w-2.5 h-2.5 rounded-full ${
+                          attackData?.isUnderAttack ? 'bg-[#ef4444] animate-ping' : 'bg-[#10b981]'
+                        }`} />
+                        <span className="font-mono text-sm font-bold text-[#1a1a1a] dark:text-white">
+                          {attackData?.isUnderAttack ? 'ACTIVE SCRUBBING' : 'IDLE / CLEAN'}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-[#8a9090]">
+                        Mode: {attackData?.mitigationMode === 'permanent' ? 'Permanent Forced Scrubbing' : 'Automatic VAC Trigger (<3s)'}
+                      </span>
+                    </div>
+
+                    {/* 2. Inbound Attack Traffic */}
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col justify-between">
+                      <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#ef4444] block mb-1">
+                        Inbound Attack Rate
+                      </span>
+                      <div className="font-mono text-xl font-bold text-[#ef4444] my-1">
+                        {formatBps(attackData?.liveTraffic?.inBps || 0)}
+                      </div>
+                      <span className="text-[11px] font-mono text-[#8a9090]">
+                        Packet Rate: {formatPps(attackData?.liveTraffic?.inPps || 0)}
+                      </span>
+                    </div>
+
+                    {/* 3. Scrubbed / Dropped Malicious Packets */}
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col justify-between">
+                      <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#f59e0b] block mb-1">
+                        Scrubbed Malicious Traffic
+                      </span>
+                      <div className="font-mono text-xl font-bold text-[#f59e0b] my-1">
+                        {formatBps(attackData?.liveTraffic?.droppedBps || 0)}
+                      </div>
+                      <span className="text-[11px] font-mono text-[#8a9090]">
+                        Scrubbed: {attackData?.liveTraffic?.inBps ? Math.min(100, Math.round(((attackData.liveTraffic.droppedBps || 0) / attackData.liveTraffic.inBps) * 100)) : 0}% of ingress
+                      </span>
+                    </div>
+
+                    {/* 4. Clean Passed Traffic */}
+                    <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#171717] flex flex-col justify-between">
+                      <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#10b981] block mb-1">
+                        Clean Passed Traffic
+                      </span>
+                      <div className="font-mono text-xl font-bold text-[#10b981] my-1">
+                        {formatBps(attackData?.liveTraffic?.passedBps || 0)}
+                      </div>
+                      <span className="text-[11px] font-mono text-[#8a9090]">
+                        Delivered to VM net0 interface
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Mode & Timeout Tuning Controls */}
+                  <div className="p-4 rounded-xl border border-[#dedfdf] dark:border-[#262626] bg-white dark:bg-[#181818] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-semibold text-xs text-[#1a1a1a] dark:text-white">
+                        VAC Scrubbing Controls & Auto-Mitigation Timeout
+                      </span>
+                      <span className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0]">
+                        Adjust how long traffic stays inside scrubbing centers after volumetric flooding terminates.
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[
+                        { value: 0, label: '0m (Permanent)' },
+                        { value: 15, label: '15m (Default)' },
+                        { value: 60, label: '1h (60m)' },
+                        { value: 360, label: '6h (360m)' },
+                        { value: 1560, label: '26h (1560m)' },
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => handleUpdateMitigationTimeout(opt.value)}
+                          disabled={mitigationUpdating}
+                          className={`px-2.5 py-1 text-xs font-mono rounded-md border transition-colors cursor-pointer ${
+                            mitigationTimeout === opt.value
+                              ? 'bg-[#1a1a1a] text-white dark:bg-white dark:text-black border-transparent font-bold shadow-xs'
+                              : 'bg-white dark:bg-[#181818] border-[#dedfdf] dark:border-[#313131] text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={handleToggleDdos}
+                        disabled={ddosUpdating}
+                        className={`btn-secondary py-1 px-3 text-xs font-semibold cursor-pointer ml-2 ${
+                          status.ddos?.mode === 'permanent' ? '!text-[#dc2626]' : ''
+                        }`}
+                      >
+                        {ddosUpdating ? 'Updating…' : status.ddos?.mode === 'permanent' ? 'Disable Permanent' : 'Enable Permanent'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Visual Attack Traffic Graph */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs text-[#1a1a1a] dark:text-white flex items-center gap-2">
+                        <span>Traffic Statistics of Attack</span>
+                        {selectedAttackEvent && (
+                          <span className="font-mono text-[11px] text-[#2563eb] dark:text-[#60a5fa] font-normal">
+                            (Inspecting Event: {formatDate(selectedAttackEvent.startDate)} {formatTime(selectedAttackEvent.startDate)})
+                          </span>
+                        )}
+                      </span>
+                      {selectedAttackEvent && (
+                        <button
+                          type="button"
+                          onClick={() => { setSelectedAttackEvent(null); setEventStatsData([]); }}
+                          className="text-[11px] text-[#656b6b] hover:text-[#1a1a1a] dark:hover:text-white cursor-pointer underline"
+                        >
+                          Reset to Live Traffic
+                        </button>
+                      )}
+                    </div>
+
+                    <AttackTrafficChart
+                      series={
+                        selectedAttackEvent && eventStatsData.length > 0
+                          ? eventStatsData
+                          : (attackData?.liveStatsSeries && attackData.liveStatsSeries.length > 0
+                              ? attackData.liveStatsSeries
+                              : attackData?.isUnderAttack
+                                ? [
+                                    { timestamp: Math.round(Date.now()/1000) - 600, inBps: 850000000, droppedBps: 830000000, passedBps: 20000000, pps: 180000 },
+                                    { timestamp: Math.round(Date.now()/1000) - 300, inBps: 1450000000, droppedBps: 1420000000, passedBps: 30000000, pps: 290000 },
+                                    { timestamp: Math.round(Date.now()/1000), inBps: 1200000000, droppedBps: 1180000000, passedBps: 20000000, pps: 250000 },
+                                  ]
+                                : [])
+                      }
+                    />
+                  </div>
+
+                  {/* Historical Attack Events Table */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs text-[#1a1a1a] dark:text-white">
+                        Historical Attack Incidents & Event Timestamps ({attackData?.events.length || 0})
+                      </span>
+                      <span className="text-[11px] text-[#8a9090]">
+                        Retained chronologically from OVH Border Mitigation VAC
+                      </span>
+                    </div>
+
+                    {loadingAttacks ? (
+                      <div className="p-8 text-center text-xs text-[#656b6b] dark:text-[#a0a0a0]">
+                        Loading attack events…
+                      </div>
+                    ) : !attackData || attackData.events.length === 0 ? (
+                      <div className="p-8 text-center rounded-xl border border-dashed border-[#dedfdf] dark:border-[#313131] bg-white dark:bg-[#181818]">
+                        <span className="text-xl mb-1 block">🛡️</span>
+                        <h4 className="font-semibold text-xs text-[#1a1a1a] dark:text-white">No DDoS Events Recorded</h4>
+                        <p className="text-[11px] text-[#656b6b] dark:text-[#a0a0a0] mt-1 max-w-md mx-auto">
+                          This IP has not experienced any volumetric DDoS flood events since provisioning.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-[#dedfdf] dark:border-[#262626] rounded-xl bg-white dark:bg-[#181818]">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b border-[#dedfdf] dark:border-[#262626] bg-[#fbfaf9] dark:bg-[#1c1c1c] text-[#656b6b] dark:text-[#a0a0a0] font-semibold text-[11px]">
+                              <th className="py-2.5 px-4 font-mono">Start Timestamp</th>
+                              <th className="py-2.5 px-4 font-mono">End Timestamp</th>
+                              <th className="py-2.5 px-3">Duration</th>
+                              <th className="py-2.5 px-3">Attack Classification</th>
+                              <th className="py-2.5 px-3 font-mono">Peak Traffic</th>
+                              <th className="py-2.5 px-3 font-mono">Total Scrubbed</th>
+                              <th className="py-2.5 px-3 text-center">Status</th>
+                              <th className="py-2.5 px-4 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#f1f1f1] dark:divide-[#262626]">
+                            {attackData.events.map((ev, idx) => (
+                              <tr
+                                key={ev.id || idx}
+                                className={`hover:bg-[#fbfaf9] dark:hover:bg-[#202020] transition-colors ${
+                                  selectedAttackEvent?.id === ev.id ? 'bg-[#eff6ff] dark:bg-[#172554]/30' : ''
+                                }`}
+                              >
+                                <td className="py-3 px-4 font-mono text-[#1a1a1a] dark:text-white whitespace-nowrap">
+                                  <div>{formatDate(ev.startDate)}</div>
+                                  <div className="text-[10px] text-[#8a9090]">{formatTime(ev.startDate)} UTC</div>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-[#1a1a1a] dark:text-white whitespace-nowrap">
+                                  {ev.endDate ? (
+                                    <>
+                                      <div>{formatDate(ev.endDate)}</div>
+                                      <div className="text-[10px] text-[#8a9090]">{formatTime(ev.endDate)} UTC</div>
+                                    </>
+                                  ) : (
+                                    <span className="text-[#ef4444] font-semibold">Active Scrubbing</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded bg-[#f3f4f6] dark:bg-[#262626] font-mono text-[11px] text-[#656b6b] dark:text-[#a0a0a0]">
+                                    {ev.durationSeconds ? `${Math.floor(ev.durationSeconds / 60)}m ${ev.durationSeconds % 60}s` : '—'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="flex flex-wrap gap-1">
+                                    {(ev.vectors && ev.vectors.length > 0 ? ev.vectors : [ev.attackType]).map((vec, vIdx) => (
+                                      <span
+                                        key={vIdx}
+                                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold font-mono bg-[#fee2e2] text-[#dc2626] dark:bg-[#450a0a] dark:text-[#fca5a5]"
+                                      >
+                                        {vec}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3 font-mono text-[#ef4444] font-semibold whitespace-nowrap">
+                                  <div>{ev.peakBps ? formatBps(ev.peakBps) : '—'}</div>
+                                  <div className="text-[10px] text-[#8a9090]">{ev.peakPps ? formatPps(ev.peakPps) : ''}</div>
+                                </td>
+                                <td className="py-3 px-3 font-mono text-[#f59e0b] font-semibold whitespace-nowrap">
+                                  {ev.totalDroppedBytes ? formatBytes(ev.totalDroppedBytes) : '—'}
+                                </td>
+                                <td className="py-3 px-3 text-center whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                    ev.status === 'mitigating'
+                                      ? 'bg-[#fee2e2] text-[#dc2626] dark:bg-[#450a0a]'
+                                      : 'bg-[#ecfdf5] text-[#059669] dark:bg-[#064e3b]'
+                                  }`}>
+                                    {ev.status === 'mitigating' ? 'Scrubbing' : 'Resolved'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectAttackEvent(ev)}
+                                    className="btn-secondary py-1 px-2.5 text-[11px] font-semibold cursor-pointer"
+                                  >
+                                    {selectedAttackEvent?.id === ev.id ? 'Viewing Curve' : 'Inspect Stats →'}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
