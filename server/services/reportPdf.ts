@@ -380,7 +380,7 @@ export async function generateMetricsReportPdf(opts: {
     const vmLabel = vmRecord.vm_name || vmRecord.name || `Unnamed VM ${vm.vmid}`;
     doc.fillColor(INK).fontSize(12).font('Helvetica-Bold').text(`VMID ${vm.vmid} — ${vmLabel}`);
     doc.fillColor(INK_SOFT).fontSize(8.5).font('Helvetica-Oblique').text(
-      `${(vm as any).status || 'unknown'} · owner ${(vm as any).ownerEmail || (vm as any).owner_email || '—'} · maxmem ${fmtBytes(Number((vm as any).maxmem) || 0)}` +
+      `${(vm as any).status || 'unknown'} · Node ${(vm as any).nodeDisplayName || (vm as any).node || '—'}${(vm as any).displayCpuModel ? ` · CPU: ${(vm as any).displayCpuModel}` : ''} · owner ${(vm as any).ownerEmail || (vm as any).owner_email || '—'} · maxmem ${fmtBytes(Number((vm as any).maxmem) || 0)}` +
       (rows.length === 0 ? '  ·  NO TELEMETRY IN WINDOW (VM may have been stopped)' : '')
     );
     doc.y += 12;

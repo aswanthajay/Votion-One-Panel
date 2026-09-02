@@ -444,6 +444,9 @@ clientRouter.get('/vms/:vmid/metadata', requireClientVmScope('readonly'), async 
 
     const resourceType = vm.type === 'lxc' ? 'lxc' : 'qemu';
     const metadata = mapProxmoxVmMetadata(config, resourceType, guestAgentInterfaces as any);
+    if (vm.displayCpuModel) {
+      metadata.hardware.cpuType = vm.displayCpuModel;
+    }
     vmMetadataCache.set(cacheKey, { data: metadata, expiresAt: Date.now() + 20000 });
     res.json({ success: true, data: metadata });
   } catch {

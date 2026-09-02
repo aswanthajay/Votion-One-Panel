@@ -24,6 +24,9 @@ interface FleetVM {
   name: string;
   type: 'qemu' | 'lxc' | string;
   node: string;
+  nodeDisplayName?: string;
+  displayNode?: string | null;
+  displayCpuModel?: string | null;
   ownerEmail: string;
   status: string;
   cpus: number;
@@ -718,9 +721,16 @@ export const AdminVMFleet: React.FC = () => {
                             <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-1">
-                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                  {v.displayCpuModel && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#1e293b] text-[#38bdf8] border border-[#334155]">
+                                      {v.displayCpuModel}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-[11px] font-medium text-[#a7aaaa]">
-                                  {v.proxmoxConnectionName} • {v.os !== '?' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
+                                  {v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
                                   {v.ipAddress ? ` • ${v.ipAddress}` : ''}
                                 </span>
                               </div>
@@ -803,9 +813,16 @@ export const AdminVMFleet: React.FC = () => {
                             <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-1">
-                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
+                                  {v.displayCpuModel && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#1e293b] text-[#38bdf8] border border-[#334155]">
+                                      {v.displayCpuModel}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-[11px] font-medium text-[#a7aaaa]">
-                                  {v.proxmoxConnectionName} • {v.os !== '?' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
+                                  {v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
                                 </span>
                               </div>
                             </td>
@@ -911,15 +928,13 @@ const EditVMModal: React.FC<{
   const [name, setName] = useState(vm.name);
   const [os, setOs] = useState(vm.os === '—' ? 'Ubuntu 24.04 LTS' : vm.os);
   const [ipAddress, setIpAddress] = useState(vm.ipAddress || '');
+  const [displayCpuModel, setDisplayCpuModel] = useState(vm.displayCpuModel || '');
+  const [displayNode, setDisplayNode] = useState(vm.displayNode || '');
   const [cpus, setCpus] = useState(String(vm.cpus || 2));
   const [memoryGb, setMemoryGb] = useState(String(Math.round((vm.maxmem || 8 * 1073741824) / 1073741824)));
   const [diskGb, setDiskGb] = useState(String(Math.round((vm.maxdisk || 64 * 1073741824) / 1073741824)));
   const [expiryDays, setExpiryDays] = useState('30');
   const [saving, setSaving] = useState(false);
-
-  const inputCls: React.CSSProperties = {
-    backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)',
-  };
 
   const save = async () => {
     if (!name.trim()) { flash('Server name is required', 'bad'); return; }
@@ -936,8 +951,15 @@ const EditVMModal: React.FC<{
         headers: apiHeaders(),
         body: JSON.stringify({
           proxmoxConnectionId: vm.proxmoxConnectionId,
-          name: name.trim(), os: os.trim(), ipAddress: ipAddress.trim(),
-          cpus: cpusN, memoryGb: memN, diskGb: diskN, expiryDays: Number(expiryDays) || undefined,
+          name: name.trim(),
+          os: os.trim(),
+          ipAddress: ipAddress.trim(),
+          displayCpuModel: displayCpuModel.trim() || null,
+          displayNode: displayNode.trim() || null,
+          cpus: cpusN,
+          memoryGb: memN,
+          diskGb: diskN,
+          expiryDays: Number(expiryDays) || undefined,
         }),
       });
       const j = await res.json();
@@ -961,6 +983,43 @@ const EditVMModal: React.FC<{
         <Field label="RAM (GB)"><input type="number" style={modalInputCls} value={memoryGb} onChange={e => setMemoryGb(e.target.value)} /></Field>
         <div className="sm:col-span-2">
           <Field label="Disk (GB)"><input type="number" style={modalInputCls} value={diskGb} onChange={e => setDiskGb(e.target.value)} /></Field>
+        </div>
+
+        <div className="sm:col-span-2 border-t border-[#313131] pt-3 mt-1">
+          <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+            <span className="block text-[11px] font-medium uppercase text-[#a7aaaa] tracking-[0.14em]">Display Processor / CPU Model</span>
+            <div className="flex gap-1.5 flex-wrap">
+              {['AMD Ryzen 5 7600X', 'AMD Ryzen 7 7700X', 'AMD Ryzen 9 7950X', 'AMD EPYC 9654'].map(preset => (
+                <button
+                  type="button"
+                  key={preset}
+                  onClick={() => setDisplayCpuModel(preset)}
+                  className="px-2 py-0.5 text-[10px] font-mono rounded border border-[#313131] bg-[#222] text-[#38bdf8] hover:bg-[#333] transition-colors cursor-pointer"
+                >
+                  {preset.replace('AMD ', '')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <input 
+            style={modalInputCls} 
+            value={displayCpuModel} 
+            onChange={e => setDisplayCpuModel(e.target.value)} 
+            placeholder="e.g. AMD Ryzen 5 7600X (Customer sees this instead of host hardware)" 
+          />
+          <p className="text-[10px] text-[#71717a] mt-1">Custom CPU model presented to the client across the panel, hardware metadata, and PDF reports.</p>
+        </div>
+
+        <div className="sm:col-span-2">
+          <Field label="Display Node / Cluster Name">
+            <input 
+              style={modalInputCls} 
+              value={displayNode} 
+              onChange={e => setDisplayNode(e.target.value)} 
+              placeholder="e.g. SG-Ryzen5-Compute (Overrides host node name for this specific VM)" 
+            />
+          </Field>
+          <p className="text-[10px] text-[#71717a] mt-1">Virtual node alias displayed to the client under Host Node.</p>
         </div>
       </div>
       <div className="mt-5 flex items-center justify-end gap-2">

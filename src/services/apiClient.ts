@@ -56,6 +56,8 @@ export interface ApiVM {
   type: 'qemu' | 'lxc';
   node: string;
   nodeDisplayName?: string | null;
+  displayNode?: string | null;
+  displayCpuModel?: string | null;
   proxmoxConnectionId?: string | null;
   proxmoxConnectionName?: string | null;
   ownerEmail: string;

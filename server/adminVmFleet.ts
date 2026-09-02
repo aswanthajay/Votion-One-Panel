@@ -261,7 +261,7 @@ adminVmFleetRouter.post('/vms/:vmid/action', requireAuth, requireAdmin, async (r
 adminVmFleetRouter.post('/vms/:vmid/update', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const userEmail = req.authUser!.email;
   const vmid = parseInt(String(req.params.vmid), 10);
-  const { proxmoxConnectionId, name, os, ipAddress, cpus, memoryGb, diskGb, expiryDays } = req.body || {};
+  const { proxmoxConnectionId, name, os, ipAddress, cpus, memoryGb, diskGb, expiryDays, displayCpuModel, displayNode } = req.body || {};
     try {
       const vm = await dbService.getVMByVMID(vmid, proxmoxConnectionId);
       if (!vm) return res.status(404).json({ success: false, error: `VMID ${vmid} not found` });
@@ -273,6 +273,8 @@ adminVmFleetRouter.post('/vms/:vmid/update', requireAuth, requireAdmin, async (r
     if (name !== undefined) { sets.push('vm_name = $' + (vals.length + 1)); vals.push(String(name).trim()); }
     if (os !== undefined) { sets.push('os_type = $' + (vals.length + 1)); vals.push(String(os).trim()); }
     if (ipAddress !== undefined) { sets.push('ip_address = $' + (vals.length + 1)); vals.push(String(ipAddress).trim()); }
+    if (displayCpuModel !== undefined) { sets.push('display_cpu_model = $' + (vals.length + 1)); vals.push(displayCpuModel ? String(displayCpuModel).trim() : null); }
+    if (displayNode !== undefined) { sets.push('display_node = $' + (vals.length + 1)); vals.push(displayNode ? String(displayNode).trim() : null); }
     if (cpus !== undefined && Number(cpus) > 0) { sets.push('cpu_cores = $' + (vals.length + 1)); vals.push(Number(cpus)); sets.push('cpus = $' + (vals.length + 1)); vals.push(Number(cpus)); }
     if (memoryGb !== undefined && Number(memoryGb) > 0) { sets.push('ram_mb = $' + (vals.length + 1)); vals.push(Number(memoryGb) * 1024); sets.push('memory = $' + (vals.length + 1)); vals.push(Number(memoryGb) * 1073741824); }
     if (diskGb !== undefined && Number(diskGb) > 0) { sets.push('disk_gb = $' + (vals.length + 1)); vals.push(Number(diskGb)); sets.push('disk = $' + (vals.length + 1)); vals.push(Number(diskGb) * 1073741824); }

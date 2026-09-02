@@ -253,6 +253,8 @@ export async function initializeDatabaseSchema() {
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS username VARCHAR(100) DEFAULT 'root@pam';
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS password VARCHAR(255);
       ALTER TABLE proxmox_connections ADD COLUMN IF NOT EXISTS node_display_name VARCHAR(100);
+      ALTER TABLE vms ADD COLUMN IF NOT EXISTS display_cpu_model VARCHAR(150);
+      ALTER TABLE vms ADD COLUMN IF NOT EXISTS display_node VARCHAR(100);
     `);
 
     // Legacy migration: tasks column existed in old static constants — ensure table exists (created above)
