@@ -12,7 +12,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '../services/apiClient';
-import { getIpCarrierType, isIpInSubnets } from '../utils/ipUtils';
+import { getIpCarrierType, isIpInSubnets, compareCarrierAndIp, compareIps, getCarrierPriority } from '../utils/ipUtils';
 
 // ---------------------------------------------------------------------------
 // Types (aligned with server/adminVmFleet.ts + db/database.ts)
@@ -255,6 +255,8 @@ export const AdminVMFleet: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [nodeFilter, setNodeFilter] = useState('all');
   const [locationFilter, setLocationFilter] = useState('all');
+  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner' | 'custom'>('all');
+  const [sortMode, setSortMode] = useState<'carrier' | 'vmid' | 'name' | 'ip' | 'status'>('carrier');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'bad' | 'info' } | null>(null);
   const [ovhIps, setOvhIps] = useState<string[]>([]);
@@ -390,19 +392,52 @@ export const AdminVMFleet: React.FC = () => {
     return () => window.clearInterval(t);
   }, []);
 
+  const sortVms = (list: FleetVM[]) => {
+    return list.slice().sort((a, b) => {
+      if (sortMode === 'carrier') {
+        const carrierA = getIpCarrierType(a.ipAddress, ovhIps, hetznerIps).carrier;
+        const carrierB = getIpCarrierType(b.ipAddress, ovhIps, hetznerIps).carrier;
+        const carrierDiff = getCarrierPriority(carrierA) - getCarrierPriority(carrierB);
+        if (carrierDiff !== 0) return carrierDiff;
+        if (a.ipAddress && b.ipAddress) {
+          const ipDiff = compareIps(a.ipAddress, b.ipAddress);
+          if (ipDiff !== 0) return ipDiff;
+        }
+        return a.vmid - b.vmid;
+      }
+      if (sortMode === 'ip') {
+        return compareIps(a.ipAddress, b.ipAddress);
+      }
+      if (sortMode === 'vmid') {
+        return a.vmid - b.vmid;
+      }
+      if (sortMode === 'name') {
+        return (a.name || '').localeCompare(b.name || '');
+      }
+      if (sortMode === 'status') {
+        return (a.status || '').localeCompare(b.status || '');
+      }
+      return 0;
+    });
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return vms.filter(v => {
       if (statusFilter !== 'all' && (v.isSuspended ? 'suspended' : v.status.toLowerCase()) !== statusFilter) return false;
       if (nodeFilter !== 'all' && v.node !== nodeFilter) return false;
       if (locationFilter !== 'all' && v.proxmoxConnectionId !== locationFilter) return false;
+      if (carrierFilter !== 'all') {
+        const vmCarrier = getIpCarrierType(v.ipAddress, ovhIps, hetznerIps).carrier;
+        if (carrierFilter !== vmCarrier) return false;
+      }
       if (q) {
         const hay = `${v.vmid} ${v.vmKey} ${v.proxmoxConnectionName} ${v.name} ${v.ownerEmail} ${v.os} ${v.ipAddress ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [vms, search, statusFilter, nodeFilter, locationFilter]);
+  }, [vms, search, statusFilter, nodeFilter, locationFilter, carrierFilter, ovhIps, hetznerIps]);
 
   const locationsList = useMemo(() => {
     const locations = new Map<string, string>();
@@ -412,8 +447,15 @@ export const AdminVMFleet: React.FC = () => {
 
   React.useEffect(() => { if (locationFilter === 'all' && locationsList.length > 0) setLocationFilter(locationsList[0][0]); }, [locationsList, locationFilter]);
 
-  const assignedRows = useMemo(() => filtered.filter(vm => !/^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
-  const unassignedRows = useMemo(() => filtered.filter(vm => /^unassigned@/i.test(vm.ownerEmail || '')), [filtered]);
+  const assignedRows = useMemo(() => {
+    const rows = filtered.filter(vm => !/^unassigned@/i.test(vm.ownerEmail || ''));
+    return sortVms(rows);
+  }, [filtered, sortMode, ovhIps, hetznerIps]);
+
+  const unassignedRows = useMemo(() => {
+    const rows = filtered.filter(vm => /^unassigned@/i.test(vm.ownerEmail || ''));
+    return sortVms(rows);
+  }, [filtered, sortMode, ovhIps, hetznerIps]);
 
   const nodesList = useMemo(() => {
     const ids = Array.from(new Set(vms.map(v => v.node).filter(n => n && n !== '—')));
@@ -658,6 +700,31 @@ export const AdminVMFleet: React.FC = () => {
             onChange={e => setNodeFilter(e.target.value)}>
             <option value="all">All nodes</option>
             {nodesList.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <select
+            className="rounded-md border px-3 py-2 text-sm outline-none"
+            style={{ backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)' }}
+            value={carrierFilter}
+            onChange={e => setCarrierFilter(e.target.value as any)}
+            title="Carrier Filter"
+          >
+            <option value="all">All Networks</option>
+            <option value="ovh">OVHcloud</option>
+            <option value="hetzner">Hetzner</option>
+            <option value="custom">Other (Non-OVH)</option>
+          </select>
+          <select
+            className="rounded-md border px-3 py-2 text-sm outline-none"
+            style={{ backgroundColor: '#151515', borderColor: '#313131', color: 'var(--theme-text)' }}
+            value={sortMode}
+            onChange={e => setSortMode(e.target.value as any)}
+            title="Sort By"
+          >
+            <option value="carrier">Sort: Carrier (OVH → Hetzner → Other)</option>
+            <option value="ip">Sort: IP Address</option>
+            <option value="vmid">Sort: VMID</option>
+            <option value="name">Sort: Name</option>
+            <option value="status">Sort: Status</option>
           </select>
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden text-xs text-[#71717a] sm:inline">{filtered.length}/{vms.length} servers</span>

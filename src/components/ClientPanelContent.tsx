@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { apiClient, ApiVM, ApiVmMetadata, ApiReimageRequest } from '../services/apiClient';
 import { VmMetadataPanel } from './VmMetadataPanel';
-import { getIpCarrierType } from '../utils/ipUtils';
+import { getIpCarrierType, compareCarrierAndIp, compareIps, getCarrierPriority } from '../utils/ipUtils';
 
 const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
 const VmMetricsChart = lazy(() => import('./charts/VmMetricsChart'));
@@ -42,6 +42,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   
   // Table Interactions State
   const [searchQuery, setSearchQuery] = useState('');
+  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner' | 'custom'>('all');
   const [sortConfig, setSortConfig] = useState<{key: keyof ApiVM; direction: 'asc'|'desc'} | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
   
@@ -355,6 +356,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
     ? clientVMs.filter(v => v.isSuspended)
     : clientVMs;
 
+  if (carrierFilter !== 'all') {
+    displayVMs = displayVMs.filter(v => {
+      const c = getIpCarrierType(v.ipAddress, [], []).carrier;
+      return c === carrierFilter;
+    });
+  }
+
   if (searchQuery.trim() !== '') {
     const q = searchQuery.toLowerCase();
     displayVMs = displayVMs.filter(v => 
@@ -365,6 +373,34 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       (v.node && v.node.toLowerCase().includes(q))
     );
   }
+
+  // Proper sorting: Carrier primary (OVH -> Hetzner -> Other), IP numeric secondary
+  displayVMs = displayVMs.slice().sort((a, b) => {
+    if (sortConfig) {
+      const valA = a[sortConfig.key];
+      const valB = b[sortConfig.key];
+      if (sortConfig.key === 'ipAddress') {
+        const ipDiff = compareIps(a.ipAddress, b.ipAddress);
+        return sortConfig.direction === 'asc' ? ipDiff : -ipDiff;
+      }
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
+      }
+      return sortConfig.direction === 'asc' 
+        ? String(valA || '').localeCompare(String(valB || '')) 
+        : String(valB || '').localeCompare(String(valA || ''));
+    }
+
+    const carrierA = getIpCarrierType(a.ipAddress, [], []).carrier;
+    const carrierB = getIpCarrierType(b.ipAddress, [], []).carrier;
+    const carrierDiff = getCarrierPriority(carrierA) - getCarrierPriority(carrierB);
+    if (carrierDiff !== 0) return carrierDiff;
+    if (a.ipAddress && b.ipAddress) {
+      const ipDiff = compareIps(a.ipAddress, b.ipAddress);
+      if (ipDiff !== 0) return ipDiff;
+    }
+    return a.vmid - b.vmid;
+  });
 
   // PROMPT 5.2: Client Power Controls with 403 Suspension Check & Loading Spinner
   const handlePowerAction = async (action: 'start' | 'stop' | 'reboot' | 'shutdown') => {
@@ -500,6 +536,30 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
           <div onClick={() => setLocalFilter('qemu')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='qemu' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Cloud Instances</div>
           
           <div onClick={() => setLocalFilter('suspended')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='suspended' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Suspended</div>
+        </div>
+
+        {/* Network Carrier Filter Bar */}
+        <div className="flex items-center gap-2 mt-4 text-[12px]">
+          <span className="font-semibold text-[#656b6b] dark:text-[#a0a0a0]">Network:</span>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'ovh', label: 'OVH' },
+            { key: 'hetzner', label: 'Hetzner' },
+            { key: 'custom', label: 'Other' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setCarrierFilter(tab.key as any)}
+              className={`px-2.5 py-1 rounded border text-[11px] font-semibold transition-colors cursor-pointer ${
+                carrierFilter === tab.key
+                  ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] dark:bg-white dark:text-black dark:border-white shadow-xs'
+                  : 'bg-white text-[#656b6b] border-[#dedfdf] hover:border-[#a0a0a0] dark:bg-[#181818] dark:text-[#a0a0a0] dark:border-[#313131]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex justify-between items-center mt-6 mb-4">

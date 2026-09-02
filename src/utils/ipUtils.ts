@@ -2,8 +2,11 @@
  * Utility functions for IP address evaluation and OVH subnet matching.
  */
 
-function ipToLong(ip: string): number {
-  return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)) >>> 0, 0);
+export function ipToLong(ip: string): number {
+  const clean = ip.split('/')[0].trim();
+  const parts = clean.split('.').map(p => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some(isNaN)) return 0;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
 }
 
 /**
@@ -84,6 +87,49 @@ export function getIpCarrierType(
   };
 }
 
+
+/**
+ * Numerically compares two IPv4 addresses (ascending).
+ */
+export function compareIps(a: string | null | undefined, b: string | null | undefined): number {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  const numA = ipToLong(a);
+  const numB = ipToLong(b);
+  if (numA === 0 && numB === 0) return a.localeCompare(b);
+  if (numA === 0) return 1;
+  if (numB === 0) return -1;
+  return numA - numB;
+}
+
+/**
+ * Returns carrier priority for sorting: OVH (0) -> Hetzner (1) -> Other/Custom (2).
+ */
+export function getCarrierPriority(carrier: CarrierType | string | null | undefined): number {
+  if (!carrier) return 2;
+  const lower = String(carrier).toLowerCase();
+  if (lower === 'ovh' || lower.includes('ovh')) return 0;
+  if (lower === 'hetzner') return 1;
+  return 2;
+}
+
+/**
+ * Compares two items first by Carrier (OVH -> Hetzner -> Other), then numerically by IP address.
+ */
+export function compareCarrierAndIp(
+  a: { ip?: string | null; carrier?: CarrierType | string },
+  b: { ip?: string | null; carrier?: CarrierType | string }
+): number {
+  const prioA = getCarrierPriority(a.carrier);
+  const prioB = getCarrierPriority(b.carrier);
+  if (prioA !== prioB) {
+    return prioA - prioB;
+  }
+  return compareIps(a.ip, b.ip);
+}
+
 export function getIpNetworkType(ip: string | null | undefined, subnets: string[]) {
   return getIpCarrierType(ip, subnets, []);
 }
+

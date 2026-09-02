@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient, ApiVM } from '../services/apiClient';
-import { isIpInSubnets, getIpCarrierType, getIpNetworkType } from '../utils/ipUtils';
+import { isIpInSubnets, getIpCarrierType, getIpNetworkType, compareCarrierAndIp, compareIps } from '../utils/ipUtils';
 
 interface OvhStatus {
   ip: string;
@@ -88,7 +88,8 @@ export const OvhManager: React.FC = () => {
   const [vms, setVms] = useState<ApiVM[]>([]);
   const [loadingIps, setLoadingIps] = useState(false);
   const [ipFilterMode, setIpFilterMode] = useState<'all' | 'assigned' | 'free'>('all');
-  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner'>('all');
+  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner' | 'custom'>('all');
+  const [ipSortMode, setIpSortMode] = useState<'carrier' | 'ipAsc' | 'ipDesc' | 'vmid'>('carrier');
   const [ipSearchQuery, setIpSearchQuery] = useState('');
 
   // Hetzner Account IPs & subnets
@@ -325,12 +326,13 @@ export const OvhManager: React.FC = () => {
     return list;
   }, [ovhIps, hetznerIps, vms, vmByIp]);
 
-  // Filtered IP List
+  // Filtered and Sorted IP List
   const filteredHostList = useMemo(() => {
-    return hostListWithMetadata.filter(item => {
-      // 0. Carrier Tab Filter
+    const list = hostListWithMetadata.filter(item => {
+      // 0. Carrier Tab Filter: All | OVH | Hetzner | Other (custom)
       if (carrierFilter === 'ovh' && item.carrier !== 'ovh') return false;
       if (carrierFilter === 'hetzner' && item.carrier !== 'hetzner') return false;
+      if (carrierFilter === 'custom' && item.carrier !== 'custom') return false;
 
       // 1. Assignment Filter
       if (ipFilterMode === 'assigned' && !item.boundVm) return false;
@@ -347,7 +349,27 @@ export const OvhManager: React.FC = () => {
       }
       return true;
     });
-  }, [hostListWithMetadata, carrierFilter, ipFilterMode, ipSearchQuery]);
+
+    // Apply sorting
+    return list.slice().sort((a, b) => {
+      if (ipSortMode === 'carrier') {
+        return compareCarrierAndIp(a, b);
+      }
+      if (ipSortMode === 'ipAsc') {
+        return compareIps(a.ip, b.ip);
+      }
+      if (ipSortMode === 'ipDesc') {
+        return compareIps(b.ip, a.ip);
+      }
+      if (ipSortMode === 'vmid') {
+        const idA = a.boundVm ? a.boundVm.vmid : 999999;
+        const idB = b.boundVm ? b.boundVm.vmid : 999999;
+        if (idA !== idB) return idA - idB;
+        return compareIps(a.ip, b.ip);
+      }
+      return compareCarrierAndIp(a, b);
+    });
+  }, [hostListWithMetadata, carrierFilter, ipFilterMode, ipSearchQuery, ipSortMode]);
 
   // Aggregate Metrics for At a Glance Top Strip
   const fleetMetrics = useMemo(() => {
@@ -980,12 +1002,13 @@ export const OvhManager: React.FC = () => {
               className="w-full px-3 py-1.5 text-xs bg-white dark:bg-[#181818] border border-[#dedfdf] dark:border-[#313131] rounded-lg outline-none focus:border-[#1a1a1a] dark:focus:border-white mb-3"
             />
 
-            {/* Carrier Filter Tabs */}
+            {/* Carrier Filter Tabs: All, OVH, Hetzner, Other */}
             <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-2">
               {[
-                { key: 'all', label: 'All Networks' },
-                { key: 'ovh', label: 'OVHcloud' },
-                { key: 'hetzner', label: 'Hetzner' }
+                { key: 'all', label: 'All' },
+                { key: 'ovh', label: 'OVH' },
+                { key: 'hetzner', label: 'Hetzner' },
+                { key: 'custom', label: 'Other' },
               ].map(tab => (
                 <button
                   key={tab.key}
@@ -1002,22 +1025,35 @@ export const OvhManager: React.FC = () => {
               ))}
             </div>
 
-            {/* Assignment Filter Tabs */}
-            <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-3">
-              {(['all', 'assigned', 'free'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setIpFilterMode(tab)}
-                  className={`flex-1 py-1 rounded-md text-center capitalize transition-colors cursor-pointer ${
-                    ipFilterMode === tab
-                      ? 'bg-white dark:bg-[#262626] text-[#1a1a1a] dark:text-white shadow-xs font-bold'
-                      : 'hover:text-[#1a1a1a] dark:hover:text-white'
-                  }`}
-                >
-                  {tab === 'all' ? 'All' : tab === 'assigned' ? 'Bound VMs' : 'Free Pool'}
-                </button>
-              ))}
+            {/* Assignment Filter Tabs & Sort Selector */}
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex-1 flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0]">
+                {(['all', 'assigned', 'free'] as const).map(tab => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setIpFilterMode(tab)}
+                    className={`flex-1 py-1 rounded-md text-center capitalize transition-colors cursor-pointer ${
+                      ipFilterMode === tab
+                        ? 'bg-white dark:bg-[#262626] text-[#1a1a1a] dark:text-white shadow-xs font-bold'
+                        : 'hover:text-[#1a1a1a] dark:hover:text-white'
+                    }`}
+                  >
+                    {tab === 'all' ? 'All' : tab === 'assigned' ? 'Bound' : 'Free'}
+                  </button>
+                ))}
+              </div>
+              <select
+                value={ipSortMode}
+                onChange={e => setIpSortMode(e.target.value as any)}
+                className="text-[11px] font-semibold py-1 px-2 rounded-lg border border-[#dedfdf] dark:border-[#313131] bg-[#fbfaf9] dark:bg-[#181818] text-[#1a1a1a] dark:text-white outline-none cursor-pointer"
+                title="Sort order"
+              >
+                <option value="carrier">Sort: Carrier (OVH → Hetzner → Other)</option>
+                <option value="ipAsc">Sort: IP (0-255)</option>
+                <option value="ipDesc">Sort: IP (255-0)</option>
+                <option value="vmid">Sort: VM ID</option>
+              </select>
             </div>
 
             {/* Scrollable IP List */}
