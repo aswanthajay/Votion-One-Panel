@@ -418,7 +418,8 @@ class OvhService {
     const rawEvents = await this.getMitigationEvents(ip).catch(() => []);
     const liveRawStats = await this.getLiveMitigationStats(ip).catch(() => []);
 
-    const isUnderAttack = ddosState.state === 'mitigated' || ddosState.state === 'cleaning' || ddosState.state === 'blocked';
+    const rawState = String(ddosState.state || 'ok').toLowerCase();
+    const isUnderAttack = rawState === 'mitigation' || rawState === 'forced' || rawState === 'creation' || rawState === 'cleaning' || rawState === 'mitigated';
 
     // Parse live stats series
     const liveStatsSeries = Array.isArray(liveRawStats) ? liveRawStats.map((pt: any) => ({
@@ -462,13 +463,6 @@ class OvhService {
         passedBps: latestPoint.passedBps,
         inPps: latestPoint.pps,
         droppedPps: Math.round(latestPoint.pps * 0.95),
-      } : isUnderAttack ? {
-        inBps: 1450000000,
-        outBps: 25000000,
-        droppedBps: 1425000000,
-        passedBps: 25000000,
-        inPps: 280000,
-        droppedPps: 275000,
       } : null,
       liveStatsSeries,
       events: normalizedEvents,
@@ -535,6 +529,20 @@ class OvhService {
               for (const ip of mitigatedIps) {
                 try {
                   const detail = await this.request('GET', `/ip/${encodeURIComponent(b)}/mitigation/${encodeURIComponent(ip)}`).catch(() => null);
+                  if (!detail) continue;
+
+                  const rawState = String(detail.state || 'ok').toLowerCase();
+                  // In OVH API, 'ok' or 'unmitigated' means the IP is NOT undergoing active mitigation/scrubbing
+                  const isActivelyUnderAttack =
+                    rawState === 'mitigation' ||
+                    rawState === 'forced' ||
+                    rawState === 'creation' ||
+                    rawState === 'cleaning';
+
+                  if (!isActivelyUnderAttack) {
+                    continue;
+                  }
+
                   const stats = await this.getLiveMitigationStats(ip).catch(() => []);
                   const latestStat = stats && stats.length > 0 ? stats[stats.length - 1] : null;
 
@@ -550,27 +558,17 @@ class OvhService {
                   attacks.push({
                     ip,
                     block: b,
-                    state: detail?.state || 'mitigated',
-                    mode: detail?.permanent ? 'permanent' : 'automatic',
+                    state: detail.state || 'mitigation',
+                    mode: detail.permanent ? 'permanent' : 'automatic',
                     inBps,
                     droppedBps,
                     passedBps,
                     inPps,
                     vectors: ['Volumetric Ingress Scrubbing'],
-                    startedAt: detail?.date || new Date().toISOString(),
+                    startedAt: detail.date || new Date().toISOString(),
                   });
                 } catch {
-                  attacks.push({
-                    ip,
-                    block: b,
-                    state: 'mitigated',
-                    mode: 'automatic',
-                    inBps: 0,
-                    droppedBps: 0,
-                    passedBps: 0,
-                    inPps: 0,
-                    startedAt: new Date().toISOString(),
-                  });
+                  // Non-fatal error for individual IP
                 }
               }
             }
