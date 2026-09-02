@@ -581,7 +581,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                     </td>
                   )}
                   {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'lxc' ? 'Container' : 'Cloud Compute'}</td>}
-                  {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01'}</td>}
+                  {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.nodeDisplayName || vm.proxmoxConnectionName || (vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01')}</td>}
                   {visibleColumns.ip && <td className="py-3 px-4 text-[13px] text-[#1a1a1a] text-right">{vm.ipAddress || 'Pending'}</td>}
                 </tr>
               ))}

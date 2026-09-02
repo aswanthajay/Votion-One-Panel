@@ -29,6 +29,7 @@ export type ProxmoxConnectionPublic = {
   last_tested: Date | null;
   created_at: Date | null;
   updated_at: Date | null;
+  node_display_name?: string | null;
 };
 
 type ProxmoxConnectionStored = ProxmoxConnectionPublic & {
@@ -36,7 +37,7 @@ type ProxmoxConnectionStored = ProxmoxConnectionPublic & {
   token_secret: string | null;
 };
 
-const PROXMOX_PUBLIC_COLUMNS = 'id, name, host_ip, port, username, token_id, ssl_fingerprint, status, last_tested, created_at, updated_at';
+const PROXMOX_PUBLIC_COLUMNS = 'id, name, host_ip, port, username, token_id, ssl_fingerprint, status, last_tested, created_at, updated_at, node_display_name';
 const PROXMOX_SECRET_COLUMNS = `${PROXMOX_PUBLIC_COLUMNS}, password, token_secret`;
 
 function toProxmoxPublic(row: ProxmoxConnectionStored): ProxmoxConnectionPublic {
@@ -52,6 +53,7 @@ function toProxmoxPublic(row: ProxmoxConnectionStored): ProxmoxConnectionPublic 
     last_tested: row.last_tested || null,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
+    node_display_name: row.node_display_name ? String(row.node_display_name) : null,
   };
 }
 
@@ -977,7 +979,7 @@ export class DatabaseService {
 
     // VMS & EXPIRY SUSPENSION ENGINE
   async getVMs(ownerEmail?: string, vmid?: number, proxmoxConnectionId?: string) {
-    let query = 'SELECT v.*, pc.name AS proxmox_connection_name FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id';
+    let query = 'SELECT v.*, pc.name AS proxmox_connection_name, pc.node_display_name AS proxmox_node_display_name FROM vms v LEFT JOIN proxmox_connections pc ON pc.id = v.proxmox_connection_id';
     const params: unknown[] = [];
     const conditions: string[] = [];
 
@@ -1002,7 +1004,25 @@ export class DatabaseService {
     const mapped = res.rows.map(v => ({
       vmid: v.vmid,
       vmKey: `${v.proxmox_connection_id || 'legacy-local'}:${v.node || 'unknown'}:${v.vmid}`,
-      name: v.vm_name, type: v.type, node: v.node, proxmoxConnectionId: v.proxmox_connection_id || null, proxmoxConnectionName: v.proxmox_connection_name || null, ownerEmail: v.owner_email, status: v.is_suspended ? 'stopped' : v.status, cpus: v.cpu_cores, memory: v.ram_mb * 1048576, maxmem: v.maxmem, disk: v.disk_gb * 1073741824, maxdisk: v.maxdisk, uptime: v.is_suspended ? 0 : v.uptime, ipAddress: v.ip_address, macAddress: v.mac_address || null, os: v.os_type, expiryDate: v.expiry_date, isSuspended: v.is_suspended,
+      name: v.vm_name,
+      type: v.type,
+      node: v.node,
+      nodeDisplayName: v.proxmox_node_display_name || v.proxmox_connection_name || v.node,
+      proxmoxConnectionId: v.proxmox_connection_id || null,
+      proxmoxConnectionName: v.proxmox_connection_name || null,
+      ownerEmail: v.owner_email,
+      status: v.is_suspended ? 'stopped' : v.status,
+      cpus: v.cpu_cores,
+      memory: v.ram_mb * 1048576,
+      maxmem: v.maxmem,
+      disk: v.disk_gb * 1073741824,
+      maxdisk: v.maxdisk,
+      uptime: v.is_suspended ? 0 : v.uptime,
+      ipAddress: v.ip_address,
+      macAddress: v.mac_address || null,
+      os: v.os_type,
+      expiryDate: v.expiry_date,
+      isSuspended: v.is_suspended,
     }));
     
         // Find all vmids that exist under an active Proxmox connection
@@ -2210,15 +2230,16 @@ export class DatabaseService {
     return { success: true, email: user.rows[0].email };
   }
 
-  async updateProxmoxConnection(id: string, payload: { name?: string; host_ip?: string; port?: number; username?: string; password?: string; token_id?: string; token_secret?: string; ssl_fingerprint?: string }) {
+  async updateProxmoxConnection(id: string, payload: { name?: string; host_ip?: string; port?: number; username?: string; password?: string; token_id?: string; token_secret?: string; ssl_fingerprint?: string; node_display_name?: string | null }) {
     const existing = await this.getProxmoxConnectionCredentials(id);
     if (!existing) return { success: false, error: 'Connection not found' };
     const password = payload.password !== undefined && payload.password !== '' ? payload.password : existing.password;
     const token_secret = payload.token_secret !== undefined && payload.token_secret !== '' ? payload.token_secret : existing.token_secret;
+    const node_display_name = payload.node_display_name !== undefined ? (payload.node_display_name || null) : (existing.node_display_name || null);
     const res = await pgPool.query<ProxmoxConnectionStored>(
-      `UPDATE proxmox_connections SET name = $1, host_ip = $2, port = $3, username = $4, password = $5, token_id = $6, token_secret = $7, ssl_fingerprint = $8, updated_at = NOW()
-       WHERE id = $9 RETURNING ${PROXMOX_SECRET_COLUMNS}`,
-      [payload.name ?? existing.name, payload.host_ip ?? existing.host_ip, payload.port ?? existing.port, payload.username ?? existing.username, encryptCredential(password), payload.token_id ?? existing.token_id, encryptCredential(token_secret), payload.ssl_fingerprint ?? existing.ssl_fingerprint, id],
+      `UPDATE proxmox_connections SET name = $1, host_ip = $2, port = $3, username = $4, password = $5, token_id = $6, token_secret = $7, ssl_fingerprint = $8, node_display_name = $9, updated_at = NOW()
+       WHERE id = $10 RETURNING ${PROXMOX_SECRET_COLUMNS}`,
+      [payload.name ?? existing.name, payload.host_ip ?? existing.host_ip, payload.port ?? existing.port, payload.username ?? existing.username, encryptCredential(password), payload.token_id ?? existing.token_id, encryptCredential(token_secret), payload.ssl_fingerprint ?? existing.ssl_fingerprint, node_display_name, id],
     );
     const updated = res.rows[0];
     return { success: true, connection: updated ? toProxmoxPublic(decryptProxmoxCredentials(updated)) : null };
@@ -2291,7 +2312,7 @@ export class DatabaseService {
   async getProxmoxConnectionOverview() {
     const res = await pgPool.query(
       `SELECT pc.id, pc.name, pc.host_ip, pc.port, pc.token_id, pc.ssl_fingerprint,
-              pc.status, pc.last_tested, pc.created_at,
+              pc.status, pc.last_tested, pc.created_at, pc.node_display_name,
               COUNT(DISTINCT v.vmid)::int AS vm_count,
               COUNT(DISTINCT v.vmid) FILTER (WHERE LOWER(COALESCE(v.status, '')) IN ('running', 'online', 'up'))::int AS running_vm_count,
               COUNT(DISTINCT NULLIF(v.node, ''))::int AS node_count,
@@ -2311,6 +2332,7 @@ export class DatabaseService {
       status: row.status || 'unknown',
       last_tested: row.last_tested || null,
       created_at: row.created_at || null,
+      node_display_name: row.node_display_name || null,
       vmCount: Number(row.vm_count || 0),
       runningVmCount: Number(row.running_vm_count || 0),
       nodeCount: Number(row.node_count || 0),
@@ -2367,12 +2389,12 @@ export class DatabaseService {
     }));
   }
 
-  async addProxmoxConnection(name: string, host_ip: string, port: number, username: string, password: string, token_id: string, token_secret: string, ssl_fingerprint: string) {
+  async addProxmoxConnection(name: string, host_ip: string, port: number, username: string, password: string, token_id: string, token_secret: string, ssl_fingerprint: string, node_display_name?: string | null) {
     const connId = `pve-conn-${Date.now()}`;
     const res = await pgPool.query<ProxmoxConnectionStored>(
-      `INSERT INTO proxmox_connections (id, name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${PROXMOX_SECRET_COLUMNS}`,
-      [connId, name, host_ip, port, username || 'root@pam', encryptCredential(password), token_id, encryptCredential(token_secret), ssl_fingerprint],
+      `INSERT INTO proxmox_connections (id, name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint, node_display_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${PROXMOX_SECRET_COLUMNS}`,
+      [connId, name, host_ip, port, username || 'root@pam', encryptCredential(password), token_id, encryptCredential(token_secret), ssl_fingerprint, node_display_name || null],
     );
     return res.rows[0] ? toProxmoxPublic(decryptProxmoxCredentials(res.rows[0])) : null;
   }

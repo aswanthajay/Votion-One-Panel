@@ -2266,8 +2266,8 @@ apiRouter.post('/admin/proxmox/:id/test', async (req, res) => {
 
 apiRouter.post('/admin/proxmox', async (req, res) => {
   try {
-    const { name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint } = req.body;
-    const newConn = await dbService.addProxmoxConnection(name, host_ip, port || 8006, username, password, token_id, token_secret, ssl_fingerprint || '');
+    const { name, host_ip, port, username, password, token_id, token_secret, ssl_fingerprint, node_display_name } = req.body;
+    const newConn = await dbService.addProxmoxConnection(name, host_ip, port || 8006, username, password, token_id, token_secret, ssl_fingerprint || '', node_display_name);
     await dbService.logAudit(req.authUser?.email || 'unknown', 'ADD_PROXMOX_CONNECTION', name, `Added Proxmox VE connection ${host_ip}:${port}`);
     res.json({ success: true, connection: newConn });
   } catch (err: any) {

@@ -30,6 +30,7 @@ export const ProxmoxConnections: React.FC = () => {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newNodeDisplayName, setNewNodeDisplayName] = useState('');
   const [newHostIp, setNewHostIp] = useState('');
   const [newPort, setNewPort] = useState(8006);
   const [newTokenId, setNewTokenId] = useState('');
@@ -42,6 +43,7 @@ export const ProxmoxConnections: React.FC = () => {
   // Edit Connection State
   const [editTarget, setEditTarget] = useState<ApiProxmoxConnection | null>(null);
   const [editName, setEditName] = useState('');
+  const [editNodeDisplayName, setEditNodeDisplayName] = useState('');
   const [editHostIp, setEditHostIp] = useState('');
   const [editPort, setEditPort] = useState(8006);
   const [editTokenId, setEditTokenId] = useState('');
@@ -94,6 +96,7 @@ export const ProxmoxConnections: React.FC = () => {
   const openEditModal = (conn: ApiProxmoxConnection) => {
     setEditTarget(conn);
     setEditName(conn.name);
+    setEditNodeDisplayName(conn.node_display_name || '');
     setEditHostIp(conn.host_ip);
     setEditPort(conn.port);
     setEditTokenId(conn.token_id || '');
@@ -109,6 +112,7 @@ export const ProxmoxConnections: React.FC = () => {
     try {
       const res = await apiClient.updateProxmoxConnection(editTarget.id, {
         name: editName,
+        node_display_name: editNodeDisplayName.trim() || null,
         host_ip: editHostIp,
         port: editPort,
         token_id: editTokenId,
@@ -203,6 +207,7 @@ export const ProxmoxConnections: React.FC = () => {
       showToast(testResult?.message || 'Cluster engine reachable.');
       const payload = {
         name: newName,
+        node_display_name: newNodeDisplayName.trim() || null,
         host_ip: newHostIp,
         port: newPort,
         token_id: newTokenId,
@@ -214,6 +219,7 @@ export const ProxmoxConnections: React.FC = () => {
         showToast('Connection Verified & Saved Successfully!');
         setShowAddModal(false);
         setNewName('');
+        setNewNodeDisplayName('');
         setNewHostIp('');
         setNewPort(8006);
         setNewTokenId('');
@@ -297,6 +303,11 @@ export const ProxmoxConnections: React.FC = () => {
                 <div className="min-w-0">
                   <h3>{conn.name}</h3>
                   <p>{conn.host_ip}:{conn.port}</p>
+                  {conn.node_display_name && (
+                    <span className="inline-block mt-1 text-[11px] font-medium bg-[#1e293b] text-[#38bdf8] px-2 py-0.5 rounded border border-[#334155]">
+                      Host Node: {conn.node_display_name}
+                    </span>
+                  )}
                 </div>
               </div>
               <span className={`connection-status ${connectionStatusTone(conn.status)}`}><span aria-hidden="true"></span>{connectionStatusLabel(conn.status)}</span>
@@ -371,10 +382,23 @@ export const ProxmoxConnections: React.FC = () => {
                   autoComplete="off"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Primary US-East Cluster"
+                  placeholder="e.g. Singapore SG1"
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Host Node Display Name / Alias (Optional)</label>
+                <input 
+                  type="text" 
+                  autoComplete="off"
+                  value={newNodeDisplayName}
+                  onChange={(e) => setNewNodeDisplayName(e.target.value)}
+                  placeholder="e.g. Singapore SG1 or SG-Node-01 (overrides Proxmox-VE in tables)"
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
+                />
+                <p className="mt-1 text-[11px] text-[#656b6b]">Custom name displayed under "Host Node" in the client and instance tables instead of the raw physical hostname.</p>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -500,6 +524,19 @@ export const ProxmoxConnections: React.FC = () => {
                   className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#1a1a1a] mb-1">Host Node Display Name / Alias (Optional)</label>
+                <input 
+                  type="text" 
+                  autoComplete="off"
+                  value={editNodeDisplayName}
+                  onChange={(e) => setEditNodeDisplayName(e.target.value)}
+                  placeholder="e.g. Singapore SG1 or SG-Node-01 (overrides Proxmox-VE in tables)"
+                  className="w-full bg-white border border-[#dedfdf] rounded p-2 text-xs text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
+                />
+                <p className="mt-1 text-[11px] text-[#656b6b]">Custom name displayed under "Host Node" in the client and instance tables instead of the raw physical hostname.</p>
               </div>
 
               <div className="grid grid-cols-3 gap-4">

@@ -55,6 +55,7 @@ export interface ApiVM {
   name: string;
   type: 'qemu' | 'lxc';
   node: string;
+  nodeDisplayName?: string | null;
   proxmoxConnectionId?: string | null;
   proxmoxConnectionName?: string | null;
   ownerEmail: string;
@@ -180,6 +181,7 @@ export interface ApiProxmoxConnection {
   ssl_fingerprint: string;
   status: string;
   last_tested: string | null;
+  node_display_name?: string | null;
 }
 
 export interface ApiProxmoxConnectionOverview extends ApiProxmoxConnection {
