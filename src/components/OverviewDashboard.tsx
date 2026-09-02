@@ -563,6 +563,68 @@ export const OverviewDashboard: React.FC<{
   const acctDiskGb = acctMaxdisk / GB;
 
   /* ---------------- render ---------------- */
+  if (fleetLoading && !loadDone) {
+    return (
+      <div className="overview-dashboard overview-client-page flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] dark:bg-[#121212] overflow-hidden font-sans w-full">
+        {/* TOP BAR */}
+        <header className="overview-header app-header !px-5 sm:!px-7 min-w-0 overflow-hidden" style={{ height: '56px' }}>
+          <div className="flex-1 min-w-0 flex items-baseline gap-5 overflow-hidden">
+            <h1 className="page-heading !text-[24px] font-serif font-medium !mb-0 !leading-none truncate">Overview</h1>
+            <p className="hidden sm:block ink-description-text !mt-0 !text-[12px] truncate">
+              Synchronizing with cloud infrastructure…
+            </p>
+          </div>
+        </header>
+
+        {/* CENTERED TITLED PRELOADER */}
+        <div className="flex-1 flex flex-col items-center justify-center p-8 select-none text-center">
+          {/* Animated pulsing spinner */}
+          <div className="relative mb-6 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-full border-[2.5px] border-[#e5e7eb] dark:border-[#262626]" />
+            <div className="w-14 h-14 rounded-full border-[2.5px] border-transparent border-t-[#1a1a1a] dark:border-t-white animate-spin absolute" />
+            <div className="w-2.5 h-2.5 rounded-full bg-[#1a1a1a] dark:bg-white animate-ping absolute" />
+          </div>
+
+          {/* TITLED BADGE */}
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-[#1c1c1c] border border-[#dedfdf] dark:border-[#313131] shadow-xs mb-3">
+            <span className="w-2 h-2 rounded-full bg-[#10b981] animate-pulse" />
+            <span className="text-[11px] font-mono uppercase tracking-widest font-semibold text-[#656b6b] dark:text-[#a0a0a0]">
+              Fleet Telemetry Engine
+            </span>
+          </div>
+
+          {/* MAIN TITLE */}
+          <h2 className="text-xl sm:text-2xl font-serif font-medium text-[#1a1a1a] dark:text-white tracking-tight mb-2">
+            Loading Overview Dashboard
+          </h2>
+
+          {/* SUBTITLE */}
+          <p className="text-xs sm:text-sm text-[#656b6b] dark:text-[#a0a0a0] max-w-md leading-relaxed mb-6">
+            Establishing secure connection with Proxmox clusters, calculating node storage pools, and gathering live resource telemetry…
+          </p>
+
+          {/* PROGRESS INDICATOR PILLS */}
+          <div className="flex items-center gap-3 text-[11px] font-mono text-[#8a9090] flex-wrap justify-center">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />
+              Proxmox Cluster
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6] animate-pulse" />
+              LVM-Thin Storage
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#a855f7] animate-pulse" />
+              Live Telemetry
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="overview-dashboard overview-client-page flex flex-col flex-1 min-w-0 min-h-0 bg-[#fbfaf9] overflow-hidden font-sans w-full">
       {/* ================= TOP BAR (house app-header style) ================= */}
