@@ -209,13 +209,33 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
             if (stRes.ok) {
               const stJson = await readPveJson<PveStorage[]>(stRes);
               let rawStores = stJson.data || [];
-              // Deduplicate by capacity profile (used/total/free) — Proxmox can list
+              const getStoreUsedBytes = (s: any): number => {
+                const total = Number(s.total || 0);
+                if (s.used !== undefined && Number(s.used) >= 0) {
+                  return Number(s.used);
+                }
+                if (s.used_fraction !== undefined && total > 0) {
+                  return Math.round(total * Number(s.used_fraction));
+                }
+                if (s.avail !== undefined && total > 0) {
+                  return Math.max(0, total - Number(s.avail));
+                }
+                if (s.free !== undefined && total > 0) {
+                  return Math.max(0, total - Number(s.free));
+                }
+                return 0;
+              };
+
+              // Deduplicate by capacity profile (used/total) — Proxmox can list
               // multiple storage definitions that share the same physical disk
               // (e.g. 'local' and 'local-nvme1' pointing at identical partitions).
-              // Counting them twice would inflate reported capacity.
               const seen = new Set<string>();
               rawStores = rawStores.filter((s: any) => {
-                const key = `${Number(s.used || 0)}|${Number(s.total || 0)}|${Number(s.free || 0)}`;
+                if (s.enabled === 0 || s.active === 0) return false;
+                const used = getStoreUsedBytes(s);
+                const total = Number(s.total || 0);
+                if (total <= 0) return false;
+                const key = `${used}|${total}`;
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
@@ -224,11 +244,11 @@ const stRes = await proxmoxFetch(`https://${cleanHost}:${conn.port}/api2/json/no
               storageStores = rawStores.map((s: any) => ({
                 name: String(s.storage || ''),
                 type: String(s.type || 'unknown'),
-                usedGb: Math.round(((Number(s.total || 0)) - (Number(s.free || 0))) / 1073741824),
+                usedGb: Math.round(getStoreUsedBytes(s) / 1073741824),
                 totalGb: Math.round(Number(s.total || 0) / 1073741824),
               }));
               storageTotalGb = Math.round(rawStores.reduce((a: number, s: any) => a + (Number(s.total) || 0), 0) / 1073741824);
-              storageUsageGb = Math.round(rawStores.reduce((a: number, s: any) => a + (Number(s.total || 0) - Number(s.free || 0)), 0) / 1073741824);
+              storageUsageGb = Math.round(rawStores.reduce((a: number, s: any) => a + getStoreUsedBytes(s), 0) / 1073741824);
             }
           } catch (e) {}
 

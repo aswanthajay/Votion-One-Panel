@@ -353,7 +353,15 @@ export const AdminVMFleet: React.FC = () => {
         if (!isBackground) flash('Failed to load fleet (auth expired?)', 'bad');
       }
       if (sumRes.ok) { const j = await sumRes.json(); const d = j.data || {}; setSummary(d); setCapacity(d.nodeCapacity || []); }
-      if (nodesRes.ok) { const j = await nodesRes.json(); setNodes(j.data || []); }
+      if (nodesRes.ok) {
+        const j = await nodesRes.json();
+        const mapped = (j.data || []).map((n: any) => ({
+          ...n,
+          diskUsedGb: n.storageUsageGb !== undefined ? n.storageUsageGb : (n.diskUsedGb || 0),
+          diskTotalGb: n.storageTotalGb !== undefined ? n.storageTotalGb : (n.diskTotalGb || 0),
+        }));
+        setNodes(mapped);
+      }
     } catch (e: any) {
       if (!isBackground) flash('Network error loading fleet', 'bad');
     } finally {

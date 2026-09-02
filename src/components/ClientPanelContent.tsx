@@ -496,7 +496,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
 
         <div className="flex border-b border-[#dedfdf] mt-6">
           <div onClick={() => setLocalFilter('')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${!localFilter || localFilter==='' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>All instances</div>
-          <div onClick={() => setLocalFilter('qemu')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='qemu' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>KVM (QEMU)</div>
+          <div onClick={() => setLocalFilter('qemu')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='qemu' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Cloud Instances</div>
           
           <div onClick={() => setLocalFilter('suspended')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='suspended' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Suspended</div>
         </div>
