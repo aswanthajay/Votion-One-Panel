@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { apiClient, ApiVM, ApiVmMetadata, ApiReimageRequest } from '../services/apiClient';
 import { VmMetadataPanel } from './VmMetadataPanel';
-import { getIpCarrierType, compareCarrierAndIp, compareIps, getCarrierPriority } from '../utils/ipUtils';
+import { compareIps } from '../utils/ipUtils';
 
 const VncTerminal = lazy(() => import('./VncTerminal').then(module => ({ default: module.VncTerminal })));
 const VmMetricsChart = lazy(() => import('./charts/VmMetricsChart'));
@@ -42,7 +42,6 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   
   // Table Interactions State
   const [searchQuery, setSearchQuery] = useState('');
-  const [carrierFilter, setCarrierFilter] = useState<'all' | 'ovh' | 'hetzner' | 'custom'>('all');
   const [sortConfig, setSortConfig] = useState<{key: keyof ApiVM; direction: 'asc'|'desc'} | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
   
@@ -356,13 +355,6 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
     ? clientVMs.filter(v => v.isSuspended)
     : clientVMs;
 
-  if (carrierFilter !== 'all') {
-    displayVMs = displayVMs.filter(v => {
-      const c = getIpCarrierType(v.ipAddress, [], []).carrier;
-      return c === carrierFilter;
-    });
-  }
-
   if (searchQuery.trim() !== '') {
     const q = searchQuery.toLowerCase();
     displayVMs = displayVMs.filter(v => 
@@ -374,7 +366,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
     );
   }
 
-  // Proper sorting: Carrier primary (OVH -> Hetzner -> Other), IP numeric secondary
+  // Sorting
   displayVMs = displayVMs.slice().sort((a, b) => {
     if (sortConfig) {
       const valA = a[sortConfig.key];
@@ -391,10 +383,6 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
         : String(valB || '').localeCompare(String(valA || ''));
     }
 
-    const carrierA = getIpCarrierType(a.ipAddress, [], []).carrier;
-    const carrierB = getIpCarrierType(b.ipAddress, [], []).carrier;
-    const carrierDiff = getCarrierPriority(carrierA) - getCarrierPriority(carrierB);
-    if (carrierDiff !== 0) return carrierDiff;
     if (a.ipAddress && b.ipAddress) {
       const ipDiff = compareIps(a.ipAddress, b.ipAddress);
       if (ipDiff !== 0) return ipDiff;
@@ -538,30 +526,6 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
           <div onClick={() => setLocalFilter('suspended')} className={`pb-3 border-b-2 font-semibold text-[13px] px-1 cursor-pointer mr-6 ${localFilter==='suspended' ? 'border-black text-black' : 'border-transparent text-[#656b6b] hover:text-black'}`}>Suspended</div>
         </div>
 
-        {/* Network Carrier Filter Bar */}
-        <div className="flex items-center gap-2 mt-4 text-[12px]">
-          <span className="font-semibold text-[#656b6b] dark:text-[#a0a0a0]">Network:</span>
-          {[
-            { key: 'all', label: 'All' },
-            { key: 'ovh', label: 'OVH' },
-            { key: 'hetzner', label: 'Hetzner' },
-            { key: 'custom', label: 'Other' },
-          ].map(tab => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setCarrierFilter(tab.key as any)}
-              className={`px-2.5 py-1 rounded border text-[11px] font-semibold transition-colors cursor-pointer ${
-                carrierFilter === tab.key
-                  ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] dark:bg-white dark:text-black dark:border-white shadow-xs'
-                  : 'bg-white text-[#656b6b] border-[#dedfdf] hover:border-[#a0a0a0] dark:bg-[#181818] dark:text-[#a0a0a0] dark:border-[#313131]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
         <div className="flex justify-between items-center mt-6 mb-4">
           <div className="flex gap-2 relative">
             <button type="button" disabled title="Bulk power actions are unavailable in client view" aria-disabled="true" className="border border-[#dedfdf] rounded px-3 py-1.5 text-[13px] font-semibold text-[#8a9090] flex items-center gap-1 cursor-not-allowed opacity-70">Actions</button>
@@ -644,15 +608,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                   {visibleColumns.type && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.type === 'lxc' ? 'Container' : 'Cloud Compute'}</td>}
                   {visibleColumns.node && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.nodeDisplayName || vm.displayNode || vm.proxmoxConnectionName || (vm.node && !/^(info|cluster)$/i.test(vm.node) ? vm.node : 'stellar-node-01')}</td>}
                   {visibleColumns.ip && (
-                    <td className="py-3 px-4 text-[13px] text-[#1a1a1a] dark:text-white text-right">
-                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        <span className="font-mono">{vm.ipAddress || 'Pending'}</span>
-                        {vm.ipAddress && vm.ipAddress !== 'Pending' && (
-                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${getIpCarrierType(vm.ipAddress, [], []).badgeClass}`}>
-                            {getIpCarrierType(vm.ipAddress, [], []).shortLabel}
-                          </span>
-                        )}
-                      </div>
+                    <td className="py-3 px-4 text-[13px] text-[#1a1a1a] dark:text-white text-right font-mono">
+                      {vm.ipAddress || 'Pending'}
                     </td>
                   )}
                 </tr>
@@ -769,13 +726,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                     )}
                     <div>
                       <dt>Address</dt>
-                      <dd className="vm-identity-value-mono flex items-center gap-1.5 flex-wrap">
-                        <span>{vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}</span>
-                        {(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress) && (
-                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${getIpCarrierType(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress, [], []).badgeClass}`}>
-                            {getIpCarrierType(vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress, [], []).label}
-                          </span>
-                        )}
+                      <dd className="vm-identity-value-mono">
+                        {vmMetadata?.network.primaryIp || vmMetadata?.network.configuredIp || selectedVm.ipAddress || 'Pending'}
                       </dd>
                     </div>
                     <div>
