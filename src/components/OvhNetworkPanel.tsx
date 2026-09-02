@@ -296,7 +296,7 @@ export const OvhNetworkPanel: React.FC<{ vmid: number; ipAddress?: string }> = (
   if (loading) {
     return (
       <div className="p-8 text-center text-xs text-[var(--theme-text-muted)] font-medium bg-[var(--theme-bg)] border border-[var(--theme-border)] rounded-xl shadow-sm">
-        Querying OVH Router network settings...
+        Querying Router network settings...
       </div>
     );
   }

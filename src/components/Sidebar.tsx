@@ -128,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )
     },
     { 
-      title: 'OVH Router Manager', 
+      title: 'Router Manager', 
       key: 'ovh-manager',
       icon: (
         <svg aria-hidden="true" height="16" viewBox="0 0 22 22" width="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

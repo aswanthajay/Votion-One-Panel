@@ -634,7 +634,7 @@ export const OvhManager: React.FC = () => {
       void fetchGameRules(targetIp);
       void fetchAttackAnalytics(targetIp);
     } catch (err: any) {
-      setError(err.message || 'Failed to query OVH router status.');
+      setError(err.message || 'Failed to query router status.');
       setStatus(null);
       if (err.message?.includes('not been granted') || err.message?.includes('granted')) {
         setPermissionError(true);
@@ -1038,10 +1038,10 @@ export const OvhManager: React.FC = () => {
       <header className="mb-6 flex flex-col gap-4 border-b border-[#dedfdf] dark:border-[#262626] pb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="page-heading font-serif font-medium text-2xl sm:text-3xl text-[#1a1a1a] dark:text-white tracking-tight !mb-0 !leading-none">
-            OVH Cloud Router Manager
+            Router Manager
           </h1>
           <p className="mt-1.5 text-xs text-[#656b6b] dark:text-[#a0a0a0] max-w-2xl leading-relaxed">
-            Hardware border firewalls, VAC Anti-DDoS mitigation policies, and Anti-Hack quarantine controls for all OVH subnets.
+            Hardware border firewalls, Anti-DDoS mitigation policies, Virtual MACs, and failover network routing across OVH and Hetzner infrastructure.
           </p>
         </div>
 
