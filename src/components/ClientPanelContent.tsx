@@ -44,16 +44,23 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   const [sortConfig, setSortConfig] = useState<{key: keyof ApiVM; direction: 'asc'|'desc'} | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
   
-  // Track URL selectedVmid prop changes to switch between table and details seamlessly
-  const lastSelectedVmidRef = useRef(selectedVmid);
+  // Refs to avoid stale closures in background polling intervals
+  const selectedVmidRef = useRef(selectedVmid);
+  selectedVmidRef.current = selectedVmid;
+
+  const selectedConnRef = useRef(selectedConnectionId);
+  selectedConnRef.current = selectedConnectionId;
+
+  const selectedVmRef = useRef(selectedVm);
+  selectedVmRef.current = selectedVm;
 
   useEffect(() => {
-    lastSelectedVmidRef.current = selectedVmid;
     if (selectedVmid) {
       setViewMode('details');
-    } else if (!filter || !['vnc', 'metrics', 'firewall', 'backups'].includes(filter)) {
-      setViewMode('table');
-      setSelectedVm(null);
+    } else if (!filter || !['vnc', 'metrics', 'firewall', 'backups', 'ticket', 'reinstall'].includes(filter)) {
+      if (!selectedVmRef.current) {
+        setViewMode('table');
+      }
     }
   }, [selectedVmid, filter]);
 
@@ -162,19 +169,17 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       setLoadError(null);
       
       setSelectedVm(previous => {
-        // If we are currently viewing the table and have no selectedVmid in URL, do not force-select an instance
-        if (!selectedVmid) {
-          return null;
-        }
+        const targetVmid = selectedVmidRef.current || Number(new URLSearchParams(window.location.search).get('vmid')) || undefined;
+        const targetConn = selectedConnRef.current || new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
 
-        // Priority 1: Keep previously selected VM if it still exists in the fleet (match by vmKey or vmid+proxmoxConnectionId)
+        // Priority 1: Keep previously selected VM if it exists (preserve across polls!)
         if (previous) {
           const stillExists = vms.find(vm => 
             (vm.vmKey && previous.vmKey && vm.vmKey === previous.vmKey) ||
-            (String(vm.vmid) === String(previous.vmid) && vm.proxmoxConnectionId === previous.proxmoxConnectionId)
+            (String(vm.vmid) === String(previous.vmid) && (!previous.proxmoxConnectionId || vm.proxmoxConnectionId === previous.proxmoxConnectionId)) ||
+            (String(vm.vmid) === String(previous.vmid))
           );
           if (stillExists) {
-            // Only update reference if meaningful properties changed
             const isUnchanged =
               previous.status === stillExists.status &&
               previous.name === stillExists.name &&
@@ -184,18 +189,21 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
               previous.node === stillExists.node;
             return isUnchanged ? previous : stillExists;
           }
+          // If fleet slice currently doesn't include it (e.g. location filter), keep existing selection
+          return previous;
         }
 
         // Priority 2: URL Selection (matching BOTH vmid and connectionId if available)
-        const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
-        const urlVm = vms.find(vm => 
-          String(vm.vmid) === String(selectedVmid) &&
-          (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
-        ) || vms.find(vm => String(vm.vmid) === String(selectedVmid));
-        if (urlVm) return urlVm;
-        
-        // Priority 3: Fallback
-        return previous || vms[0] || null;
+        if (targetVmid) {
+          const urlVm = vms.find(vm => 
+            String(vm.vmid) === String(targetVmid) &&
+            (!targetConn || vm.proxmoxConnectionId === targetConn)
+          ) || vms.find(vm => String(vm.vmid) === String(targetVmid));
+          if (urlVm) return urlVm;
+        }
+
+        // Priority 3: If no active selection and no target VM, stay null
+        return null;
       });
       // Console traffic always routes through the panel's own WebSocket
       // relay (VncTerminal) — the underlying cluster host is never exposed.
@@ -211,12 +219,13 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
 
   // Immediate synchronous VM selection from local in-memory fleet on URL change
   useEffect(() => {
-    if (selectedVmid && clientVMs.length > 0) {
-      const urlConnectionId = new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
+    const targetVmid = selectedVmid || Number(new URLSearchParams(window.location.search).get('vmid')) || undefined;
+    if (targetVmid && clientVMs.length > 0) {
+      const urlConnectionId = selectedConnectionId || new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
       const match = clientVMs.find(vm => 
-        String(vm.vmid) === String(selectedVmid) &&
+        String(vm.vmid) === String(targetVmid) &&
         (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
-      ) || clientVMs.find(vm => String(vm.vmid) === String(selectedVmid));
+      ) || clientVMs.find(vm => String(vm.vmid) === String(targetVmid));
 
       if (match) {
         setSelectedVm(prev => {
@@ -541,6 +550,8 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                 <tr key={vm.vmKey} className="border-b border-[#dedfdf] hover:bg-[#fbfaf9] cursor-pointer transition-colors" onClick={() => {
                   setSelectedVm(vm);
                   setViewMode('details');
+                  selectedVmidRef.current = vm.vmid;
+                  if (vm.proxmoxConnectionId) selectedConnRef.current = vm.proxmoxConnectionId;
                   if (onSelectVm) {
                     onSelectVm(vm.vmid, vm.proxmoxConnectionId);
                   } else {
@@ -1050,6 +1061,12 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
               </div>
             )}
 
+            </div>
+          ) : isLoading ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-[#656b6b] p-12 h-full">
+              <div className="w-8 h-8 border-2 border-[#1a1a1a] border-t-transparent rounded-full animate-spin mb-4" />
+              <div className="text-sm font-semibold text-[#1a1a1a]">Connecting to instance…</div>
+              <div className="text-xs mt-1 text-center text-[#656b6b]">Fetching live configuration and telemetry from cluster…</div>
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-[#656b6b] p-12 h-full">

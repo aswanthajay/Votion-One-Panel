@@ -362,7 +362,7 @@ clientRouter.get('/vms', async (req, res) => {
   const providerAvailable = isProviderCredentialKeyConfigured();
   
   let accessibleVms = [];
-  if (user.role === 'admin') {
+  if (adminRoles.has(user?.role)) {
     accessibleVms = await dbService.getVMs();
   } else {
     accessibleVms = await dbService.getAccessibleClientVMs(userEmail);
