@@ -91,7 +91,7 @@ class OvhService {
     return this.config !== null && this.config.enabled;
   }
 
-  private async request(method: string, path: string, body?: any): Promise<any> {
+  private async request(method: string, path: string, body?: any, timeoutMs = 15000): Promise<any> {
     if (!this.config) {
       throw new Error('OVH service is not configured or disabled');
     }
@@ -121,25 +121,33 @@ class OvhService {
       'X-Ovh-Consumer': this.config.consumerKey,
     };
 
-    const response = await fetch(url, {
-      method: method.toUpperCase(),
-      headers,
-      body: body ? bodyStr : undefined,
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorJson;
-      try {
-        errorJson = JSON.parse(errorText);
-      } catch {
-        errorJson = null;
+    try {
+      const response = await fetch(url, {
+        method: method.toUpperCase(),
+        headers,
+        body: body ? bodyStr : undefined,
+        signal: ctrl.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorJson: any;
+        try {
+          errorJson = JSON.parse(errorText);
+        } catch {
+          errorJson = null;
+        }
+        throw new Error(errorJson?.message || errorText || `HTTP ${response.status} ${response.statusText}`);
       }
-      throw new Error(errorJson?.message || errorText || `HTTP ${response.status} ${response.statusText}`);
-    }
 
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async generateConsumerKey(customEndpoint?: string, customAppKey?: string): Promise<{ consumerKey: string; validationUrl: string; state: string }> {

@@ -22,9 +22,20 @@ const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 type RateLimitOptions = { windowMs: number; max: number; keyPrefix: string };
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
 
+// Periodic garbage collection for expired rate limit buckets (prevents unbounded memory leak)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (bucket.resetAt <= now) {
+      rateLimitBuckets.delete(key);
+    }
+  }
+}, 60000).unref();
+
 export function rateLimit(options: RateLimitOptions) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const identity = `${options.keyPrefix}:${req.ip || req.socket.remoteAddress || 'unknown'}`;
+    const rawIp = req.ip || req.socket.remoteAddress || 'unknown';
+    const identity = `${options.keyPrefix}:${rawIp}`;
     const now = Date.now();
     const current = rateLimitBuckets.get(identity);
     if (!current || current.resetAt <= now) {
@@ -49,15 +60,25 @@ export function createTemp2FaToken(accountId: number): string {
 }
 
 export function verifyTemp2FaToken(token: string): number | null {
-  if (!token || !token.includes('.')) return null;
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [payload, sig] = token.split('.');
-  if (!payload.startsWith('2fa_')) return null;
+  if (!payload.startsWith('2fa_') || !sig) return null;
+
   const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-  if (expected !== sig) return null;
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  const suppliedBuffer = Buffer.from(sig, 'utf8');
+
+  if (expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+    return null;
+  }
+
   const parts = payload.split('_');
+  if (parts.length < 3) return null;
   const issuedAt = Number(parts[2]);
-  if (Date.now() - issuedAt > 5 * 60 * 1000) return null; // 5 mins expiry
-  return parseInt(parts[1], 10);
+  if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 5 * 60 * 1000) return null; // 5-minute strict TTL
+
+  const accountId = parseInt(parts[1], 10);
+  return Number.isInteger(accountId) && accountId > 0 ? accountId : null;
 }
 
 export function createSessionToken(accountId: number): string {
@@ -136,12 +157,16 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
  * Middleware that requires the authenticated user to hold an administrative role.
  * Client-scoped accounts are rejected with 403.
  */
-export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   const user = (req as AuthenticatedRequest).authUser;
-  if (!user) return next(); // requireAuth always runs first
-  const adminRoles = ['administrator', 'admin', 'moderator'];
-  if (!adminRoles.includes(user.role)) {
-    return res.status(403).json({ success: false, error: 'Administrator access required' });
+  if (!user) {
+    res.status(401).json({ success: false, error: 'Authentication required prior to privilege evaluation' });
+    return;
+  }
+  const adminRoles = new Set(['administrator', 'admin', 'moderator']);
+  if (!adminRoles.has(user.role)) {
+    res.status(403).json({ success: false, error: 'Administrator access required' });
+    return;
   }
   next();
 }

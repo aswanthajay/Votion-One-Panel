@@ -1062,42 +1062,6 @@ apiRouter.get('/vms/:vmid/assignment-history', async (req, res) => {
   }
 });
 
-
-// POST /api/v1/vms/:vmid/unassign — unassign a VM from its current owner (admin only)
-apiRouter.post('/vms/:vmid/unassign', async (req, res) => {
-  const userEmail = req.authUser?.email;
-  if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });
-  const targetVmid = parseInt(req.params.vmid, 10);
-  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
-  const { reason, proxmoxConnectionId } = req.body;
-  if (!reason || !String(reason).trim()) {
-    return res.status(400).json({ success: false, error: 'A reason is required for unassignment' });
-  }
-  try {
-    const vm = await dbService.unassignVM(targetVmid, proxmoxConnectionId || 'legacy-local', String(reason).trim(), userEmail);
-    if (vm) {
-      res.json({ success: true, message: `VM ${targetVmid} has been unassigned.`, data: vm });
-    } else {
-      res.status(404).json({ success: false, error: `VMID ${targetVmid} not found` });
-    }
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/v1/vms/:vmid/assignment-history — get assignment history for a VM (admin only)
-apiRouter.get('/vms/:vmid/assignment-history', async (req, res) => {
-  const targetVmid = parseInt(req.params.vmid, 10);
-  if (isNaN(targetVmid)) return res.status(400).json({ success: false, error: 'Invalid VMID' });
-  const { proxmoxConnectionId } = req.query;
-  try {
-    const history = await dbService.getVmAssignmentHistory(targetVmid, String(proxmoxConnectionId || 'legacy-local'));
-    res.json({ success: true, data: history });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 apiRouter.post('/vms/:vmid/suspend', async (req, res) => {
   const userEmail = req.authUser?.email;
   if (!userEmail) return res.status(401).json({ success: false, error: 'Authentication required' });

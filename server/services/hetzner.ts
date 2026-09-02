@@ -54,7 +54,7 @@ export class HetznerService {
     return this.config !== null && Boolean(this.config.enabled);
   }
 
-  private async request(method: string, path: string, body?: Record<string, string>): Promise<any> {
+  private async request(method: string, path: string, body?: Record<string, string>, timeoutMs = 15000): Promise<any> {
     if (!this.config || !this.config.user || !this.config.password) {
       throw new Error('Hetzner Robot service is not configured or disabled');
     }
@@ -72,26 +72,34 @@ export class HetznerService {
       bodyStr = new URLSearchParams(body).toString();
     }
 
-    const response = await fetch(url, {
-      method: method.toUpperCase(),
-      headers,
-      body: bodyStr,
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      let errJson;
-      try {
-        errJson = JSON.parse(errText);
-      } catch {
-        errJson = null;
+    try {
+      const response = await fetch(url, {
+        method: method.toUpperCase(),
+        headers,
+        body: bodyStr,
+        signal: ctrl.signal,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        let errJson: any;
+        try {
+          errJson = JSON.parse(errText);
+        } catch {
+          errJson = null;
+        }
+        const errMsg = errJson?.error?.message || errJson?.message || errText || `HTTP ${response.status} ${response.statusText}`;
+        throw new Error(errMsg);
       }
-      const errMsg = errJson?.error?.message || errJson?.message || errText || `HTTP ${response.status} ${response.statusText}`;
-      throw new Error(errMsg);
-    }
 
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // --- IP & Subnet Operations ---
