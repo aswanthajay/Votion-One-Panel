@@ -570,18 +570,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                 }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
                   {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">{getVmPrefix(vm.proxmoxConnectionName)}-{vm.vmid}</span></td>}
-                  {visibleColumns.name && (
-                    <td className="py-3 px-6 text-[13px] text-[#1a1a1a] dark:text-white">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{vm.name}</span>
-                        {vm.displayCpuModel && (
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#f1f5f9] dark:bg-[#1e293b] text-[#0284c7] dark:text-[#38bdf8] border border-[#e2e8f0] dark:border-[#334155]">
-                            {vm.displayCpuModel}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  )}
+                  {visibleColumns.name && <td className="py-3 px-6 text-[13px] text-[#1a1a1a] dark:text-white font-semibold">{vm.name}</td>}
                   {visibleColumns.owner && <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">{vm.ownerEmail}</td>}
                   {visibleColumns.status && (
                     <td className="py-3 px-4 text-[13px] text-[#1a1a1a]">

@@ -729,14 +729,7 @@ export const AdminVMFleet: React.FC = () => {
                             <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
-                                  {v.displayCpuModel && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#1e293b] text-[#38bdf8] border border-[#334155]">
-                                      {v.displayCpuModel}
-                                    </span>
-                                  )}
-                                </div>
+                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
                                 <span className="text-[11px] font-medium text-[#a7aaaa]">
                                   {v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
                                   {v.ipAddress ? ` • ${v.ipAddress}` : ''}
@@ -821,14 +814,7 @@ export const AdminVMFleet: React.FC = () => {
                             <td className="px-4 py-4 font-mono text-[12px] font-semibold text-[#a7aaaa]">{v.vmid}</td>
                             <td className="px-4 py-4">
                               <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
-                                  {v.displayCpuModel && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#1e293b] text-[#38bdf8] border border-[#334155]">
-                                      {v.displayCpuModel}
-                                    </span>
-                                  )}
-                                </div>
+                                <span className="font-semibold text-[var(--theme-text)]">{v.name}</span>
                                 <span className="text-[11px] font-medium text-[#a7aaaa]">
                                   {v.displayNode || v.nodeDisplayName || v.proxmoxConnectionName} • {v.os !== '—' ? v.os : (v.type === 'lxc' ? 'Container' : 'Virtual Machine')}
                                 </span>
