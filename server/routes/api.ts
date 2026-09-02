@@ -88,8 +88,8 @@ apiRouter.use('/accounts', requireAuth, requireAdmin);
 apiRouter.use('/user', requireAuth);
 apiRouter.use('/support', requireAuth);
 apiRouter.use('/files', requireAuth);
-apiRouter.use(['/nodes', '/vms', '/storage', '/ha', '/telemetry'], requireAuth, requireAdmin);
-apiRouter.use(['/alert-rules', '/notifications', '/inbox', '/billing', '/audit-logs', '/tasks'], requireAuth);
+apiRouter.use(['/nodes', '/vms', '/storage', '/ha'], requireAuth, requireAdmin);
+apiRouter.use(['/alert-rules', '/notifications', '/inbox', '/billing', '/audit-logs', '/tasks', '/telemetry'], requireAuth);
 
 const requireLiveProviderAccess = (_req: any, res: any, next: any) => {
   if (!isProviderCredentialKeyConfigured()) {
@@ -1320,12 +1320,38 @@ apiRouter.get('/telemetry/export', async (req, res) => {
 });
 
 apiRouter.get('/telemetry/report', async (req, res) => {
-  // GET /api/v1/telemetry/report?hours=24   (1–720h, i.e. up to 1 month; defaults to 24h)
+  // GET /api/v1/telemetry/report?hours=24&vmid=100   (1–720h, i.e. up to 1 month; defaults to 24h)
   try {
+    const user = (req as any).authUser;
     const hours = Math.max(1, Math.min(parseInt(req.query.hours as string, 10) || 24, 720));
-    const doc = await generateMetricsReportPdf({ rangeHours: hours });
+    const vmidParam = req.query.vmid ? parseInt(req.query.vmid as string, 10) : undefined;
+    const adminRoles = new Set(['administrator', 'admin', 'moderator']);
+    const isAdmin = Boolean(user && adminRoles.has(user.role));
+
+    if (vmidParam) {
+      if (!isAdmin) {
+        const userEmail = String(user?.email || '').toLowerCase();
+        const connectionIdParam = req.query.connectionId as string | undefined;
+        let vm = await dbService.getVMByVMID(vmidParam, connectionIdParam, userEmail);
+        let hasAccess = Boolean(vm && String(vm.ownerEmail).toLowerCase() === userEmail);
+        if (!hasAccess && userEmail) {
+          const delegated = await dbService.getSubUserAccess(vmidParam, userEmail);
+          if (delegated) {
+            hasAccess = true;
+            if (!vm) vm = await dbService.getVMByVMID(vmidParam, connectionIdParam);
+          }
+        }
+        if (!vm || !hasAccess) {
+          return res.status(403).json({ success: false, error: 'You do not have permission to generate reports for this VM' });
+        }
+      }
+    } else if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Administrator access required for cluster-wide infrastructure reports. Please specify an instance.' });
+    }
+
+    const doc = await generateMetricsReportPdf({ rangeHours: hours, vmid: vmidParam });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="stellar-performance-report-${hours}h-${Date.now()}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="votion-performance-report-${vmidParam ? `vm${vmidParam}-` : ''}${hours}h-${Date.now()}.pdf"`);
     doc.pipe(res);
     doc.end();
   } catch (err: any) {

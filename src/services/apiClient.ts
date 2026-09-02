@@ -2205,14 +2205,16 @@ class ApiClient {
     return await res.json();
   }
 
-  async downloadTelemetryReport(hours: number) {
-    const res = await this.swrFetch(`${API_BASE_URL}/telemetry/report?hours=${hours}`, { headers: this.getHeaders() });
+  async downloadTelemetryReport(hours: number, vmid?: number) {
+    const query = new URLSearchParams({ hours: String(hours) });
+    if (vmid) query.set('vmid', String(vmid));
+    const res = await this.swrFetch(`${API_BASE_URL}/telemetry/report?${query.toString()}`, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Telemetry report request failed (${res.status})`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stellar-performance-report-${hours}h-${Date.now()}.pdf`;
+    a.download = `votion-performance-report-${vmid ? `vm${vmid}-` : ''}${hours}h-${Date.now()}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -2234,7 +2236,8 @@ class ApiClient {
   }
 
   async downloadVmTelemetryExport(vmid: number, format: 'csv' | 'json' = 'csv', range: '1h' | '24h' | '7d' = '24h') {
-    const url = `${API_BASE_URL}/client/vms/${vmid}/export?format=${format}&range=${range}`;
+    const token = this.getToken();
+    const url = `${API_BASE_URL}/client/vms/${vmid}/export?format=${format}&range=${range}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
     if (format === 'csv') {
       window.open(url, '_blank');
       return;

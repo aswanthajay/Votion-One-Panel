@@ -122,6 +122,9 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
     const cookieMatch = cookieHeader.match(/(?:^|;\s*)votion_auth_token=([^;]+)/);
     token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : '';
   }
+  if (!token && typeof req.query?.token === 'string') {
+    token = req.query.token.trim();
+  }
   resolveSessionUser(token || '').then(user => {
     if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
     req.authUser = user;

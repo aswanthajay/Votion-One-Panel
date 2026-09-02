@@ -350,8 +350,10 @@ export default function VmMetricsChart({ vmid, proxmoxConnectionId }: VmMetricsC
             >JSON</button>
             <button
               onClick={() => {
-                // PDF report covers just this VM now since we supply the vmid.
-                window.open(new URL(`${API_ORIGIN}/api/v1/telemetry/report?hours=24&vmid=${vmid}`, window.location.origin).toString(), '_blank');
+                const token = localStorage.getItem('votion_jwt_token');
+                const query = new URLSearchParams({ hours: '24', vmid: String(vmid) });
+                if (token) query.set('token', token);
+                window.open(`${API_ORIGIN}/api/v1/telemetry/report?${query.toString()}`, '_blank');
               }}
               className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest border border-[#10b981] bg-[#10b981] text-white rounded hover:bg-[#059669] transition-colors cursor-pointer whitespace-nowrap"
               title="Generate a detailed PDF report — this VM is featured in its own section"
