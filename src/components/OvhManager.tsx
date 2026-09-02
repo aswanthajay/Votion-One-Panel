@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient, ApiVM } from '../services/apiClient';
 import { isIpInSubnets, getIpCarrierType, getIpNetworkType, compareCarrierAndIp, compareIps } from '../utils/ipUtils';
+import { CarrierLogoBadge, OvhLogo, HetznerLogo, OtherNetworkLogo } from './CarrierIcons';
 
 interface OvhStatus {
   ip: string;
@@ -1005,22 +1006,23 @@ export const OvhManager: React.FC = () => {
             {/* Carrier Filter Tabs: All, OVH, Hetzner, Other */}
             <div className="flex rounded-lg border border-[#dedfdf] dark:border-[#313131] p-0.5 bg-[#fbfaf9] dark:bg-[#181818] text-[11px] font-semibold text-[#656b6b] dark:text-[#a0a0a0] mb-2">
               {[
-                { key: 'all', label: 'All' },
-                { key: 'ovh', label: 'OVH' },
-                { key: 'hetzner', label: 'Hetzner' },
-                { key: 'custom', label: 'Other' },
+                { key: 'all', label: 'All', icon: null },
+                { key: 'ovh', label: 'OVH', icon: <OvhLogo size={13} /> },
+                { key: 'hetzner', label: 'Hetzner', icon: <HetznerLogo size={13} /> },
+                { key: 'custom', label: 'Other', icon: <OtherNetworkLogo size={13} /> },
               ].map(tab => (
                 <button
                   key={tab.key}
                   type="button"
                   onClick={() => setCarrierFilter(tab.key as any)}
-                  className={`flex-1 py-1 rounded-md text-center transition-colors cursor-pointer ${
+                  className={`flex-1 py-1 rounded-md text-center transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
                     carrierFilter === tab.key
                       ? 'bg-white dark:bg-[#262626] text-[#1a1a1a] dark:text-white shadow-xs font-bold'
                       : 'hover:text-[#1a1a1a] dark:hover:text-white'
                   }`}
                 >
-                  {tab.label}
+                  {tab.icon}
+                  <span>{tab.label}</span>
                 </button>
               ))}
             </div>
@@ -1081,9 +1083,7 @@ export const OvhManager: React.FC = () => {
                         <div className="font-mono text-[12px] text-[#1a1a1a] dark:text-white flex items-center gap-1.5 flex-wrap">
                           <span>{item.ip}</span>
                           {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-[#2563eb]" />}
-                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${ipType.badgeClass}`}>
-                            {ipType.shortLabel}
-                          </span>
+                          <CarrierLogoBadge carrier={ipType.carrier} size={14} />
                         </div>
                         {item.boundVm ? (
                           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
@@ -1164,8 +1164,8 @@ export const OvhManager: React.FC = () => {
                       const ipType = getIpCarrierType(status.ip, ovhIps, hetznerIps);
                       return (
                         <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1.5 ${ipType.badgeClass}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${ipType.isOvh ? 'bg-[#16a34a]' : ipType.isHetzner ? 'bg-[#2563eb]' : 'bg-[#9ca3af]'}`} />
-                          {ipType.label}
+                          <CarrierLogoBadge carrier={ipType.carrier} size={14} showTooltip={false} />
+                          <span>{ipType.label}</span>
                         </span>
                       );
                     })()}

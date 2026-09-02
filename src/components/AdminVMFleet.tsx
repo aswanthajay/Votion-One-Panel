@@ -13,6 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '../services/apiClient';
 import { getIpCarrierType, isIpInSubnets, compareCarrierAndIp, compareIps, getCarrierPriority } from '../utils/ipUtils';
+import { CarrierLogoBadge } from './CarrierIcons';
 
 // ---------------------------------------------------------------------------
 // Types (aligned with server/adminVmFleet.ts + db/database.ts)
@@ -816,9 +817,7 @@ export const AdminVMFleet: React.FC = () => {
                                       {(() => {
                                         const ipType = getIpCarrierType(v.ipAddress, ovhIps, hetznerIps);
                                         return (
-                                          <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${ipType.badgeClass}`}>
-                                            {ipType.shortLabel}
-                                          </span>
+                                          <CarrierLogoBadge carrier={ipType.carrier} size={15} />
                                         );
                                       })()}
                                     </>
