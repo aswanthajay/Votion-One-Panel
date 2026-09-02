@@ -83,7 +83,7 @@ export const SystemSettings: React.FC = () => {
   // Notifications
   const [notifs, setNotifs] = useState<MailNotifs>({});
   const [notifsSaving, setNotifsSaving] = useState(false);
-  const [platform, setPlatform] = useState<PlatformSettings>({ faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' });
+  const [platform, setPlatform] = useState<PlatformSettings>({ faviconUrl: '/votion-logo-metallic.png', timezone: 'Asia/Kolkata' });
   const [platformSaving, setPlatformSaving] = useState(false);
 
   const show = (type: 'success' | 'error', text: string) => {
@@ -341,10 +341,10 @@ export const SystemSettings: React.FC = () => {
                 value={platform.faviconUrl}
                 onChange={(e) => setPlatform({ ...platform, faviconUrl: e.target.value })}
                 className="w-full border border-[#dedfdf] rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1a1a1a] font-mono"
-                placeholder="/favicon.svg or https://cdn.example.com/favicon.png"
+                placeholder="/votion-logo-metallic.png or https://cdn.example.com/favicon.png"
                 spellCheck={false}
               />
-              <p className="mt-1.5 text-xs text-[#656b6b]">Use a same-origin path such as <code>/favicon.svg</code> or an HTTPS image URL. Unsafe URL schemes are rejected.</p>
+              <p className="mt-1.5 text-xs text-[#656b6b]">Use a same-origin path such as <code>/votion-logo-metallic.png</code> or an HTTPS image URL. Unsafe URL schemes are rejected.</p>
             </div>
             <div>
               <label className="block text-xs font-bold text-[#1a1a1a] mb-1.5 uppercase tracking-wide">Display timezone</label>

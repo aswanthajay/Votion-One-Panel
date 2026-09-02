@@ -2071,7 +2071,7 @@ class ApiClient {
       const res = await this.swrFetch(`${API_BASE_URL}/settings/public`);
       return await res.json();
     } catch {
-      return { success: false, error: 'Network error.', data: { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' } };
+      return { success: false, error: 'Network error.', data: { faviconUrl: '/votion-logo-metallic.png', timezone: 'Asia/Kolkata' } };
     }
   }
   async getPlatformSettings() {

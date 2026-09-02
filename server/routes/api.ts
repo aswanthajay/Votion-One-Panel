@@ -30,7 +30,7 @@ import {
 
 export const apiRouter = Router();
 
-const DEFAULT_PLATFORM_SETTINGS = { faviconUrl: '/favicon.svg', timezone: 'Asia/Kolkata' };
+const DEFAULT_PLATFORM_SETTINGS = { faviconUrl: '/votion-logo-metallic.png', timezone: 'Asia/Kolkata' };
 const isValidTimezone = (value: string): boolean => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
