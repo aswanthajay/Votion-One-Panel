@@ -132,6 +132,7 @@ export interface ApiNavigationUsage {
   vmid: number | null;
   name: string | null;
   status: string | null;
+  node?: string | null;
   proxmoxConnectionId?: string | null;
   proxmoxConnectionName?: string | null;
   usageCount: number;
@@ -848,9 +849,16 @@ class ApiClient {
     return data as { success: true; execution: ApiReimageExecution; message: string };
   }
 
-  async getVMMetadata(vmid: number, proxmoxConnectionId?: string | null): Promise<ApiVmMetadata> {
-    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
-    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+  async getVMMetadata(vmid: number, proxmoxConnectionId?: string | null, node?: string | null): Promise<ApiVmMetadata> {
+    const params = new URLSearchParams();
+    if (proxmoxConnectionId) params.set('connectionId', proxmoxConnectionId);
+    if (node) params.set('node', node);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const headers = {
+      ...this.getHeaders(),
+      ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}),
+      ...(node ? { 'x-proxmox-node': node } : {}),
+    };
     const res = await this.swrFetch(`${API_BASE_URL}/client/vms/${vmid}/metadata${qs}`, {
       headers,
     });
@@ -861,9 +869,16 @@ class ApiClient {
     return data.data as ApiVmMetadata;
   }
 
-  async getVMMetrics(vmid: number, proxmoxConnectionId?: string | null) {
-    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
-    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+  async getVMMetrics(vmid: number, proxmoxConnectionId?: string | null, node?: string | null) {
+    const params = new URLSearchParams();
+    if (proxmoxConnectionId) params.set('connectionId', proxmoxConnectionId);
+    if (node) params.set('node', node);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const headers = {
+      ...this.getHeaders(),
+      ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}),
+      ...(node ? { 'x-proxmox-node': node } : {}),
+    };
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/metrics${qs}`, {
       headers,
     });
@@ -874,9 +889,16 @@ class ApiClient {
     return data;
   }
 
-  async getVMTelemetry(vmid: number, proxmoxConnectionId?: string | null) {
-    const qs = proxmoxConnectionId ? `?connectionId=${encodeURIComponent(proxmoxConnectionId)}` : '';
-    const headers = { ...this.getHeaders(), ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}) };
+  async getVMTelemetry(vmid: number, proxmoxConnectionId?: string | null, node?: string | null) {
+    const params = new URLSearchParams();
+    if (proxmoxConnectionId) params.set('connectionId', proxmoxConnectionId);
+    if (node) params.set('node', node);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const headers = {
+      ...this.getHeaders(),
+      ...(proxmoxConnectionId ? { 'x-proxmox-connection-id': proxmoxConnectionId } : {}),
+      ...(node ? { 'x-proxmox-node': node } : {}),
+    };
     const res = await this.apiFetch(`${API_BASE_URL}/client/vms/${vmid}/telemetry${qs}`, {
       headers,
     });

@@ -250,8 +250,13 @@ clientRouter.use('/vms/:vmid', async (req, res, next) => {
     req.body?.connectionId ||
     req.body?.proxmoxConnectionId
   ) as string | undefined;
+  const node = (
+    req.query.node ||
+    req.headers['x-proxmox-node'] ||
+    req.body?.node
+  ) as string | undefined;
 
-  const vm = await dbService.getVMByVMID(vmid, connectionId, isAdmin ? undefined : userEmail);
+  const vm = await dbService.getVMByVMID(vmid, connectionId, isAdmin ? undefined : userEmail, node);
   if (!vm) return res.status(404).json({ success: false, error: 'Server not found' });
 
   const isOwner = String(vm.ownerEmail || '').toLowerCase() === userEmail;

@@ -885,6 +885,7 @@ export class DatabaseService {
       `SELECT usage.item_key, usage.item_type, usage.vmid, usage.usage_count, usage.last_used_at,
               CASE WHEN usage.item_type = 'vm' THEN vm.vm_name ELSE NULL END AS vm_name,
               CASE WHEN usage.item_type = 'vm' THEN vm.status ELSE NULL END AS vm_status,
+              CASE WHEN usage.item_type = 'vm' THEN vm.node ELSE NULL END AS node,
               CASE WHEN usage.item_type = 'vm' THEN vm.proxmox_connection_id ELSE NULL END AS proxmox_connection_id,
               CASE WHEN usage.item_type = 'vm' THEN pc.name ELSE NULL END AS proxmox_connection_name
          FROM user_navigation_usage AS usage
@@ -905,6 +906,7 @@ export class DatabaseService {
       vmid: row.vmid === null ? null : Number(row.vmid),
       name: row.vm_name ? String(row.vm_name) : null,
       status: row.vm_status ? String(row.vm_status) : null,
+      node: row.node ? String(row.node) : null,
       proxmoxConnectionId: row.proxmox_connection_id ? String(row.proxmox_connection_id) : null,
       proxmoxConnectionName: row.proxmox_connection_name ? String(row.proxmox_connection_name) : null,
       usageCount: Number(row.usage_count),
@@ -1049,16 +1051,32 @@ export class DatabaseService {
     return Array.from(finalMap.values());
   }
 
-  async getVMByVMID(vmid: number, proxmoxConnectionId?: string, ownerEmail?: string) {
+  async getVMByVMID(vmid: number, proxmoxConnectionId?: string, ownerEmail?: string, node?: string) {
     if (ownerEmail) {
       const ownedVms = await this.getVMs(ownerEmail, vmid, proxmoxConnectionId);
       if (ownedVms.length > 0) {
+        if (node) {
+          const match = ownedVms.find(v => v.node === node);
+          if (match) return match;
+        }
+        if (proxmoxConnectionId) {
+          const match = ownedVms.find(v => v.proxmoxConnectionId === proxmoxConnectionId);
+          if (match) return match;
+        }
         const active = ownedVms.find(v => v.proxmoxConnectionId !== 'legacy-local');
         return active || ownedVms[0];
       }
     }
     const vms = await this.getVMs(undefined, vmid, proxmoxConnectionId);
     if (vms.length === 0) return null;
+    if (node) {
+      const match = vms.find(v => v.node === node);
+      if (match) return match;
+    }
+    if (proxmoxConnectionId) {
+      const match = vms.find(v => v.proxmoxConnectionId === proxmoxConnectionId);
+      if (match) return match;
+    }
     if (vms.length === 1) return vms[0];
     const active = vms.find(v => v.proxmoxConnectionId !== 'legacy-local');
     return active || vms[0];

@@ -192,24 +192,31 @@ const ClientPanelRoute: React.FC<{
   const searchParams = new URLSearchParams(location.search);
   const requestedVmid = Number(searchParams.get('vmid'));
   const requestedConnectionId = searchParams.get('connectionId') || workspaceConnectionId;
+  const requestedNode = searchParams.get('node') || undefined;
 
   const handleBackToTable = () => {
     const sp = new URLSearchParams(location.search);
     sp.delete('vmid');
     sp.delete('connectionId');
+    sp.delete('node');
     const qs = sp.toString();
     startTransition(() => {
       navigate(`${location.pathname}${qs ? `?${qs}` : ''}`);
     });
   };
 
-  const handleSelectVm = (vmid: number, connectionId?: string | null) => {
+  const handleSelectVm = (vmid: number, connectionId?: string | null, node?: string | null) => {
     const sp = new URLSearchParams(location.search);
     sp.set('vmid', String(vmid));
     if (connectionId) {
       sp.set('connectionId', connectionId);
     } else {
       sp.delete('connectionId');
+    }
+    if (node) {
+      sp.set('node', node);
+    } else {
+      sp.delete('node');
     }
     startTransition(() => {
       navigate(`${location.pathname}?${sp.toString()}`);
@@ -222,6 +229,7 @@ const ClientPanelRoute: React.FC<{
     workspaceConnectionId={workspaceConnectionId}
     selectedVmid={Number.isInteger(requestedVmid) && requestedVmid > 0 ? requestedVmid : undefined}
     selectedConnectionId={requestedConnectionId || undefined}
+    selectedNode={requestedNode || undefined}
     onBackToTable={handleBackToTable}
     onSelectVm={handleSelectVm}
   />;
@@ -339,15 +347,19 @@ const AppShell: React.FC = () => {
     const requestedView = typeof view === 'string' ? view : '';
     let requestedVmid: number | null = null;
     let requestedConnectionId: string | null = null;
+    let requestedNode: string | null = null;
 
     if (requestedView.startsWith('vm:')) {
-      const remainder = requestedView.slice(3);
-      const colonIdx = remainder.indexOf(':');
-      if (colonIdx !== -1) {
-        requestedConnectionId = remainder.slice(0, colonIdx);
-        requestedVmid = Number(remainder.slice(colonIdx + 1));
+      const parts = requestedView.slice(3).split(':');
+      if (parts.length === 3) {
+        requestedConnectionId = parts[0] || null;
+        requestedNode = parts[1] || null;
+        requestedVmid = Number(parts[2]);
+      } else if (parts.length === 2) {
+        requestedConnectionId = parts[0] || null;
+        requestedVmid = Number(parts[1]);
       } else {
-        requestedVmid = Number(remainder);
+        requestedVmid = Number(parts[0]);
       }
     }
 
@@ -359,7 +371,7 @@ const AppShell: React.FC = () => {
 
     if (activeRole === 'client') {
       if (requestedVmid && Number.isInteger(requestedVmid) && requestedVmid > 0) {
-        const itemKey = requestedConnectionId ? `vm:${requestedConnectionId}:${requestedVmid}` : `vm:${requestedVmid}`;
+        const itemKey = requestedConnectionId ? (requestedNode ? `vm:${requestedConnectionId}:${requestedNode}:${requestedVmid}` : `vm:${requestedConnectionId}:${requestedVmid}`) : `vm:${requestedVmid}`;
         void apiClient.recordNavigationUsage({ itemKey, itemType: 'vm', vmid: requestedVmid }).catch(() => undefined);
       } else if (['overview', 'instances', 'instances-qemu', 'instances-lxc', 'client-instances-vnc', 'client-instances-metrics', 'client-instances-firewall', 'client-instances-backups', 'support', 'user-settings', 'team-access'].includes(requestedView)) {
         void apiClient.recordNavigationUsage({ itemKey: requestedView, itemType: 'destination' }).catch(() => undefined);
@@ -375,14 +387,22 @@ const AppShell: React.FC = () => {
         if (effectiveConn) {
           query.set('connectionId', effectiveConn);
         }
+        const effectiveNode = requestedNode || new URLSearchParams(window.location.search).get('node');
+        if (effectiveNode) {
+          query.set('node', effectiveNode);
+        }
       } else if (requestedView.startsWith('client-instances')) {
         const currentVmid = new URLSearchParams(window.location.search).get('vmid');
         const currentConn = new URLSearchParams(window.location.search).get('connectionId');
+        const currentNode = new URLSearchParams(window.location.search).get('node');
         if (currentVmid) {
           query.set('vmid', currentVmid);
         }
         if (currentConn) {
           query.set('connectionId', currentConn);
+        }
+        if (currentNode) {
+          query.set('node', currentNode);
         }
       }
       navigate(`${path}?${query.toString()}`);

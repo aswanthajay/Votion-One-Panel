@@ -310,7 +310,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     .map(item => item.type === 'vm'
       ? {
           title: item.name ? `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid} · ${item.name}` : `${getVmPrefix(item.proxmoxConnectionName)}-${item.vmid}`,
-          key: item.proxmoxConnectionId ? `vm:${item.proxmoxConnectionId}:${item.vmid}` : `vm:${item.vmid}`,
+          key: item.proxmoxConnectionId
+            ? (item.node ? `vm:${item.proxmoxConnectionId}:${item.node}:${item.vmid}` : `vm:${item.proxmoxConnectionId}:${item.vmid}`)
+            : `vm:${item.vmid}`,
         }
       : { title: destinationTitles[item.key], key: item.key })
     .filter((item, index, items) => items.findIndex(candidate => candidate.key === item.key) === index);

@@ -165,12 +165,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   // Live VM commands from PostgreSQL
   const vmCommands: CommandItem[] = liveVMs.slice(0, 8).map((vm) => ({
-    id: `vm-${vm.vmid}`,
+    id: `vm-${vm.proxmoxConnectionId || 'local'}-${vm.node || 'node'}-${vm.vmid}`,
     category: 'Virtual Machines' as const,
     title: `VMID ${vm.vmid} — ${vm.name}`,
     description: `${vm.type?.toUpperCase() || 'QEMU'} on ${vm.node} · ${vm.status} · Owner: ${vm.ownerEmail}`,
     action: () => {
-      onNavigate('client-instances');
+      const vmKey = vm.proxmoxConnectionId
+        ? `vm:${vm.proxmoxConnectionId}:${vm.node || ''}:${vm.vmid}`
+        : `vm:${vm.vmid}`;
+      onNavigate(vmKey);
       onClose();
     },
   }));

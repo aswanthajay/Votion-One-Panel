@@ -14,8 +14,9 @@ interface ClientPanelContentProps {
   workspaceConnectionId?: string;
   selectedVmid?: number;
   selectedConnectionId?: string;
+  selectedNode?: string;
   onBackToTable?: () => void;
-  onSelectVm?: (vmid: number, connectionId?: string | null) => void;
+  onSelectVm?: (vmid: number, connectionId?: string | null, node?: string | null) => void;
 }
 
 export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({ 
@@ -24,6 +25,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   workspaceConnectionId, 
   selectedVmid, 
   selectedConnectionId,
+  selectedNode,
   onBackToTable,
   onSelectVm,
 }) => {
@@ -52,6 +54,9 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   const selectedConnRef = useRef(selectedConnectionId);
   selectedConnRef.current = selectedConnectionId;
 
+  const selectedNodeRef = useRef(selectedNode);
+  selectedNodeRef.current = selectedNode;
+
   const selectedVmRef = useRef(selectedVm);
   selectedVmRef.current = selectedVm;
 
@@ -68,6 +73,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
   const handleBackToTable = () => {
     selectedVmidRef.current = undefined;
     selectedConnRef.current = undefined;
+    selectedNodeRef.current = undefined;
     selectedVmRef.current = null;
     setViewMode('table');
     setSelectedVm(null);
@@ -77,6 +83,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       const params = new URLSearchParams(window.location.search);
       params.delete('vmid');
       params.delete('connectionId');
+      params.delete('node');
       const nextSearch = params.toString();
       window.history.pushState(null, '', `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`);
       window.dispatchEvent(new PopStateEvent('popstate'));
@@ -175,14 +182,21 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       setSelectedVm(previous => {
         const targetVmid = selectedVmidRef.current || Number(new URLSearchParams(window.location.search).get('vmid')) || undefined;
         const targetConn = selectedConnRef.current || new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
+        const targetNode = selectedNodeRef.current || new URLSearchParams(window.location.search).get('node') || undefined;
 
         // Priority 1: Keep previously selected VM if it exists (preserve across polls!)
         if (previous) {
-          const stillExists = vms.find(vm => 
-            (vm.vmKey && previous.vmKey && vm.vmKey === previous.vmKey) ||
-            (String(vm.vmid) === String(previous.vmid) && (!previous.proxmoxConnectionId || vm.proxmoxConnectionId === previous.proxmoxConnectionId)) ||
-            (String(vm.vmid) === String(previous.vmid))
-          );
+          const stillExists = vms.find(vm => {
+            if (vm.vmKey && previous.vmKey && vm.vmKey === previous.vmKey) return true;
+            if (String(vm.vmid) !== String(previous.vmid)) return false;
+            if (previous.proxmoxConnectionId && vm.proxmoxConnectionId && previous.proxmoxConnectionId !== vm.proxmoxConnectionId) {
+              return false;
+            }
+            if (previous.node && vm.node && previous.node !== vm.node) {
+              return false;
+            }
+            return true;
+          });
           if (stillExists) {
             const isUnchanged =
               previous.status === stillExists.status &&
@@ -190,19 +204,22 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
               previous.ipAddress === stillExists.ipAddress &&
               previous.cpuUsagePct === stillExists.cpuUsagePct &&
               previous.ramUsageBytes === stillExists.ramUsageBytes &&
-              previous.node === stillExists.node;
+              previous.node === stillExists.node &&
+              previous.proxmoxConnectionId === stillExists.proxmoxConnectionId;
             return isUnchanged ? previous : stillExists;
           }
           // If fleet slice currently doesn't include it (e.g. location filter), keep existing selection
           return previous;
         }
 
-        // Priority 2: URL Selection (matching BOTH vmid and connectionId if available)
+        // Priority 2: URL Selection (matching BOTH vmid and connectionId/node if available)
         if (targetVmid) {
-          const urlVm = vms.find(vm => 
-            String(vm.vmid) === String(targetVmid) &&
-            (!targetConn || vm.proxmoxConnectionId === targetConn)
-          ) || vms.find(vm => String(vm.vmid) === String(targetVmid));
+          const urlVm = vms.find(vm => {
+            if (String(vm.vmid) !== String(targetVmid)) return false;
+            if (targetConn && vm.proxmoxConnectionId && vm.proxmoxConnectionId !== targetConn) return false;
+            if (targetNode && vm.node && vm.node !== targetNode) return false;
+            return true;
+          }) || (targetConn ? null : vms.find(vm => String(vm.vmid) === String(targetVmid)));
           if (urlVm) return urlVm;
         }
 
@@ -226,22 +243,33 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
     const targetVmid = selectedVmid || Number(new URLSearchParams(window.location.search).get('vmid')) || undefined;
     if (targetVmid && clientVMs.length > 0) {
       const urlConnectionId = selectedConnectionId || new URLSearchParams(window.location.search).get('connectionId') || effectiveConnectionId;
-      const match = clientVMs.find(vm => 
-        String(vm.vmid) === String(targetVmid) &&
-        (!urlConnectionId || vm.proxmoxConnectionId === urlConnectionId)
-      ) || clientVMs.find(vm => String(vm.vmid) === String(targetVmid));
+      const urlNode = selectedNode || new URLSearchParams(window.location.search).get('node') || undefined;
 
-      if (match) {
-        setSelectedVm(prev => {
-          if (prev && (prev.vmKey === match.vmKey || (String(prev.vmid) === String(match.vmid) && prev.proxmoxConnectionId === match.proxmoxConnectionId))) {
+      setSelectedVm(prev => {
+        // If current VM already matches targetVmid AND target connection/node, preserve it unconditionally across renders
+        if (prev && String(prev.vmid) === String(targetVmid)) {
+          const connMatches = !urlConnectionId || prev.proxmoxConnectionId === urlConnectionId;
+          const nodeMatches = !urlNode || prev.node === urlNode;
+          if (connMatches && nodeMatches) {
             return prev;
           }
+        }
+
+        const match = clientVMs.find(vm => {
+          if (String(vm.vmid) !== String(targetVmid)) return false;
+          if (urlConnectionId && vm.proxmoxConnectionId && vm.proxmoxConnectionId !== urlConnectionId) return false;
+          if (urlNode && vm.node && vm.node !== urlNode) return false;
+          return true;
+        }) || (urlConnectionId ? null : clientVMs.find(vm => String(vm.vmid) === String(targetVmid)));
+
+        if (match) {
+          setViewMode('details');
           return match;
-        });
-        setViewMode('details');
-      }
+        }
+        return prev;
+      });
     }
-  }, [selectedVmid, selectedConnectionId, effectiveConnectionId, clientVMs]);
+  }, [selectedVmid, selectedConnectionId, selectedNode, effectiveConnectionId, clientVMs]);
 
   useEffect(() => {
     if (clientVMs.length === 0) {
@@ -276,7 +304,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       }
       setMetadataError(null);
       try {
-        const metadata = await apiClient.getVMMetadata(selectedVm.vmid, selectedVm.proxmoxConnectionId);
+        const metadata = await apiClient.getVMMetadata(selectedVm.vmid, selectedVm.proxmoxConnectionId, selectedVm.node);
         if (!cancelled) setVmMetadata(metadata);
       } catch (err) {
         if (!cancelled && !isBackground) {
@@ -297,7 +325,7 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [selectedVm?.vmid, selectedVm?.proxmoxConnectionId]);
+  }, [selectedVm?.vmid, selectedVm?.proxmoxConnectionId, selectedVm?.node]);
 
   useEffect(() => {
     let cancelled = false;
@@ -580,18 +608,22 @@ export const ClientPanelContent: React.FC<ClientPanelContentProps> = ({
                   setViewMode('details');
                   selectedVmidRef.current = vm.vmid;
                   if (vm.proxmoxConnectionId) selectedConnRef.current = vm.proxmoxConnectionId;
+                  if (vm.node) selectedNodeRef.current = vm.node;
                   if (onSelectVm) {
-                    onSelectVm(vm.vmid, vm.proxmoxConnectionId);
+                    onSelectVm(vm.vmid, vm.proxmoxConnectionId, vm.node);
                   } else {
                     const params = new URLSearchParams(window.location.search);
                     params.set('vmid', String(vm.vmid));
                     if (vm.proxmoxConnectionId) {
                       params.set('connectionId', vm.proxmoxConnectionId);
                     }
+                    if (vm.node) {
+                      params.set('node', vm.node);
+                    }
                     window.history.pushState(null, '', `${window.location.pathname}?${params.toString()}`);
                     window.dispatchEvent(new PopStateEvent('popstate'));
                   }
-                  void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.proxmoxConnectionId || ''}:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined);
+                  void apiClient.recordNavigationUsage({ itemKey: `vm:${vm.proxmoxConnectionId || ''}:${vm.node || ''}:${vm.vmid}`, itemType: 'vm', vmid: vm.vmid }).catch(() => undefined);
                 }}>
                   <td className="py-3 px-4" onClick={e => e.stopPropagation()}><input type="checkbox" className="w-[18px] h-[18px] rounded border-[#dedfdf] cursor-pointer" /></td>
                   {visibleColumns.id && <td className="py-3 px-4 text-[13px] text-[#1d4ed8] border-r border-[#dedfdf] font-normal"><span className="underline decoration-1 underline-offset-[3px] hover:text-[#1e3a8a] cursor-pointer">{getVmPrefix(vm.proxmoxConnectionName)}-{vm.vmid}</span></td>}
